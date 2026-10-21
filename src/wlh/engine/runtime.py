@@ -446,6 +446,8 @@ class Runtime:
         )
         if self.truncated and self.truncated != "document_budget_exceeded":
             record_error(self.run_id, self.epoch, self.truncated)
+        if "zero_targets_discovered" in report["coverage"]["known_gaps"]:
+            record_error(self.run_id, self.epoch, "zero_targets_discovered")
         with connect() as c:
             c.execute(
                 """UPDATE wlh.run SET status='finishing',report=report || %s

@@ -39,7 +39,6 @@ QUALITY_ROUTES = (
 )
 ADAPTERS = (
     "web",
-    "vietnam_law",
     "federal_register",
     "structured_xml",
     "worldwidelaw_bridge",

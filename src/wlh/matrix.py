@@ -9,7 +9,6 @@ import hashlib
 import os
 import re
 import select
-import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -34,7 +33,6 @@ KNOWN_ADAPTERS = (
     "federal_register",
     "structured_xml",
     "oldp_bridge",
-    "vietnam_law",
     "web",
 )
 

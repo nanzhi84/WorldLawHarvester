@@ -36,14 +36,14 @@ class Adapter(WebAdapter):
 
     def __init__(self, config):
         super().__init__(config)
-        self.details = self.details or ["auto"]
+        self.details = self.details or [
+            re.compile(r"/detail/|/van-ban/[^/?#]+\.htm$|[?&](?:docid|ItemID)=")
+        ]
         self.detail_url = None
         self.json_adapter = JsonAdapter(config)
 
     def is_detail(self, url):
-        return url == self.detail_url or bool(
-            re.search(r"/detail/|/van-ban/[^/?#]+\.htm$|[?&](?:docid|ItemID)=", url)
-        )
+        return url == self.detail_url or super().is_detail(url)
 
     def parse(self, ctx, task, acquisition):
         data = ctx.read(acquisition)
