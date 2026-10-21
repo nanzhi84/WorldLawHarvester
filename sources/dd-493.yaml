@@ -1,0 +1,29 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-493
+id: dd-493
+adapter: vietnam_law
+entry_urls:
+- https://congbao.chinhphu.vn/
+allowed_hosts:
+- congbao.chinhphu.vn
+- datafiles.chinhphu.vn
+allowed_path_prefixes:
+- /
+archive_approved: true
+scope: 越南政府公报公开文书及附件的有界采集；不代表全历史覆盖。
+robots: false
+budget:
+  requests: 40
+  documents: 5
+  seconds: 600
+  response_bytes: 134217728
+metadata:
+  source_name: Công báo Chính phủ
+  document_type: 法律法规
+  language: vi
+  jurisdiction: VN
+fetch:
+  mode: http
+  max_depth: 2
+ocr:
+  engine: br-ocr-v1
+  languages: vie

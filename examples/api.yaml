@@ -1,0 +1,14 @@
+# Example configuration for `wlh serve --config examples/api.yaml`
+# The sample bearer token below is `local-dev-token-change-me`
+# (SHA-256: 7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069).
+public_base_url: "http://127.0.0.1:8080"
+cursor_secret: "local-dev-cursor-secret-must-be-at-least-32-chars"
+callers:
+  - id: "local-reader"
+    token_sha256: "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069"
+    sources:
+      - "dd-017"
+      - "dd-492"
+      - "dd-493"
+      - "dd-494"
+      - "dd-499"

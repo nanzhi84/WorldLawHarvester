@@ -1,0 +1,57 @@
+services:
+  minio:
+    image: seal-minio:RELEASE.2025-10-15T17-29-55Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-wlh}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-wlhsecret}
+    ports:
+      - "127.0.0.1:${WLH_MINIO_PORT:-19000}:9000"
+      - "127.0.0.1:${WLH_MINIO_CONSOLE_PORT:-19001}:9001"
+    volumes:
+      - objects:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${WLH_POSTGRES_USER:-wlh}
+      POSTGRES_DB: ${WLH_POSTGRES_DB:-wlh}
+      POSTGRES_PASSWORD: ${WLH_POSTGRES_PASSWORD:-wlh}
+    ports:
+      - "127.0.0.1:${WLH_POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  minio-init:
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-wlh}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-wlhsecret}
+      WLH_S3_ACCESS_KEY: ${WLH_S3_ACCESS_KEY:-wlh}
+      WLH_S3_SECRET_KEY: ${WLH_S3_SECRET_KEY:-wlhsecret}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null
+        mc mb --ignore-existing local/wlh-archive
+        mc anonymous set none local/wlh-archive
+        if [ "$$WLH_S3_ACCESS_KEY" != "$$MINIO_ROOT_USER" ]; then
+          mc admin user add local "$$WLH_S3_ACCESS_KEY" "$$WLH_S3_SECRET_KEY"
+          echo '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket"],"Resource":["arn:aws:s3:::wlh-archive"]},{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject"],"Resource":["arn:aws:s3:::wlh-archive/*"]}]}' >/tmp/archive-policy.json
+          mc admin policy create local wlh-archive /tmp/archive-policy.json
+          mc admin policy attach local wlh-archive --user "$$WLH_S3_ACCESS_KEY"
+        fi
+volumes:
+  objects:
+  database:

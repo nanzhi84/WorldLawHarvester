@@ -12,9 +12,11 @@
 
 ## 2. 决策方案 (Decision)
 
-1. **受控外部获取（`Acquisition`）与 S3 CAS 强校验**：
-   - 所有外部输入（`http` 实体字节与经 CDP `Fetch.requestPaused` 逐跳拦截的 `rendered_dom`）必须先写入私有 S3 CAS，并立即执行 `Objects.get()` 读回校验 SHA-256，确认一致后在短事务内记录 `state = 'archived'` 的 `Acquisition`。
-   - 严禁在持有数据库连接事务期间执行外部网络 I/O、浏览器渲染或重型文档提取；所有状态更新均受 PostgreSQL advisory lock 与 `attempt_epoch` 围栏保护。
+1. **受控外部获取（`Acquisition`）、核心存储基线与 S3 CAS 强校验**：
+   - **PostgreSQL 唯一关系型账本**：使用单一干净基线 `src/wlh/sql/schema.sql`（Schema 为 `wlh`），通过 advisory lock 与 `attempt_epoch` 保证并发围栏，异步任务队列采用 `procrastinate`。
+   - **S3 兼容内容寻址存储（CAS，本地使用 MinIO）**：保存所有外部原始响应字节（HTML、渲染 DOM、PDF、DOC/DOCX/RTF、XLS/XLSX、JSON、XML、ZIP）、输入清单（`wlh.inputs.v1`）、核心文档对象（`wlh.document.v1`）及归一化 Markdown（`.md`）。所有外部输入必须先写入私有 S3 CAS，并立即执行 `Objects.get()` 读回校验 SHA-256，确认一致后在短事务内记录 `state = 'archived'` 的 `Acquisition`。
+   - **对象存储访问红线**：根目录 `minio/`（若本地挂载）仅供容器服务管理，严禁代码或脚本直接读写本地文件系统下的 `minio/` 目录；所有对象存取必须统一走 S3 CAS API。
+   - **外部 I/O 与数据库事务隔离**：严禁在持有数据库连接事务期间执行外部网络 I/O、浏览器渲染、LibreOffice 转换或调用内网 `br-ocr-v1` 轮询；所有状态更新均在短事务内受 PostgreSQL advisory lock 与 `attempt_epoch` 围栏保护。
 2. **四重指纹隔离外围噪音**：
    - 区分完整原件归档哈希（`archive_ref`，用于审计与重放）与文档局部语义切片哈希（`slice_hash` + `semantic_locator`，用于版本比较）。
    - 每个 `Version` 同时记录 `input_fingerprint`、`parser_fingerprint`、`version_fingerprint` 与 `content_hash`，仅当实质输入切片或解析产物发生变化时才推进版本序列。

@@ -1,0 +1,43 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-492
+id: dd-492
+adapter: vietnam_law
+adapter_options:
+  max_pages: 1
+entry_urls:
+- https://vanban.chinhphu.vn/
+allowed_hosts:
+- vanban.chinhphu.vn
+- datafiles.chinhphu.vn
+host_path_scopes:
+  vanban.chinhphu.vn:
+  - /
+  datafiles.chinhphu.vn:
+  - /cpp/files/vbpq/
+archive_approved: true
+scope: 越南政府文献门户公开历史列表、文书详情及 vbpq 路径原件（PDF/DOC/DOCX/RTF/ZIP）与正文；保留官方来源署名。列表经 ASP.NET
+  分页发现，有界页数与文档数不代表全量；扫描页使用越南语 OCR，损坏、缺件或未过质量门禁明确报错。
+robots: false
+recheck_seconds: 86400
+concurrency: 2
+delay: 0.5
+budget:
+  requests: 100
+  seconds: 600
+  response_bytes: 134217728
+  documents: 5
+fetch:
+  mode: http
+  max_depth: 1
+  page_timeout_ms: 60000
+metadata:
+  source_name: 越南政府文献门户（vanban.chinhphu.vn）
+  document_type: 法律法规
+  language: vi
+  jurisdiction: VN
+documents:
+  detail_body: never
+  attachment_title: file_name
+ocr:
+  languages: vie
+  dpi: 96
+  engine: br-ocr-v1

@@ -1,3 +1,12 @@
 # Universal Harness runtime & verification sandboxes
 work/
 artifacts/
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+.env

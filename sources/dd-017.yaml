@@ -1,0 +1,50 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-017
+id: dd-017
+entry_urls:
+- https://www.court.gov.cn/shenpan/gengduo/77.html
+allowed_hosts:
+- www.court.gov.cn
+allowed_path_prefixes:
+- /shenpan/gengduo/77.html
+- /shenpan/xiangqing/
+archive_approved: true
+scope: 指导案例栏目及可发现详情的有界采集；不承诺全站覆盖。
+robots: true
+recheck_seconds: 86400
+concurrency: 2
+delay: 0.5
+budget:
+  requests: 100
+  seconds: 600
+  response_bytes: 52428800
+  documents: 5
+fetch:
+  mode: http
+  max_depth: 20
+  page_timeout_ms: 60000
+ocr:
+  languages: chi_sim
+  dpi: 96
+  engine: br-ocr-v1
+adapter: web
+metadata:
+  source_name: 最高人民法院指导案例
+  document_type: 案例
+  language: zh
+  jurisdiction: CN
+documents:
+  detail_url_patterns:
+  - ^https://www\.court\.gov\.cn/shenpan/xiangqing/\d+\.html$
+  detail_body: always
+  content_xpath: //div[@class="txt_txt" or contains(@class,"txt-zi1")]
+  fields:
+    title:
+      xpath: (//div[@class="detail"]//div[@class="title"])[1]
+    document_number:
+      xpath: (//div[@class="detail"]//div[@class="title"])[1]
+      regex: 指导性案例\d+号
+    issuer:
+      value: 最高人民法院
+    published_at:
+      xpath: //li[contains(.,"发布时间")]
+      regex: \d{4}-\d{2}-\d{2}

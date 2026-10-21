@@ -1,0 +1,28 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-494
+id: dd-494
+adapter: vietnam_law
+entry_urls:
+- https://vbpl.vn/TW/Pages/vbpq-toanvan.aspx?ItemID=142881
+allowed_hosts:
+- vbpl.vn
+allowed_path_prefixes:
+- /
+archive_approved: true
+scope: 越南国家法律数据库公开法律详情、原生正文与文件附件的有界采集。
+robots: true
+budget:
+  requests: 40
+  documents: 5
+  seconds: 600
+  response_bytes: 134217728
+metadata:
+  source_name: Cơ sở dữ liệu quốc gia về văn bản pháp luật
+  document_type: 法律法规
+  language: vi
+  jurisdiction: VN
+fetch:
+  mode: http
+  max_depth: 2
+ocr:
+  engine: br-ocr-v1
+  languages: vie

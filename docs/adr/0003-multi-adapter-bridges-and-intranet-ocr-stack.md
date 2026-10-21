@@ -12,7 +12,8 @@
 
 ## 2. 决策方案 (Decision)
 
-1. **彻底移除 `crawl4ai` 依赖**：
+1. **运行环境基线与彻底移除 `crawl4ai` 依赖**：
+   - 运行环境统一要求 Python >= 3.12（使用 `uv` 管理虚拟环境与锁文件 `uv.lock`）。
    - 受控获取层采用轻量级 `httpx` / `aiohttp` + `protego`（HTTP 传输）与 `playwright`（纯 CDP `Fetch.requestPaused` 拦截渲染 DOM）。
    - HTML/XML 解析与 Markdown 转换采用 `lxml` + `selectolax` + 自研确定性法律 DOM-to-Markdown 转换器，消除隐式缓存副作用并保证 100% 确定性输出。
 
@@ -27,10 +28,10 @@
 
 3. **原生直提优先、OCR 仅作扫描件兜底（无内网默认本地 `tesseract` 代管 + 内网 `br-ocr-v1` 可切/自动降级）**：
    - 直接复用并重构 [production_document_parse.py](../reference/production_document_parse.py) 与 [office_text_extract.py](../reference/office_text_extract.py) 进入核心提取层，确立“直提为主、OCR 仅作兜底”原则：
-     - **第一级（Office 直提与 `.doc -> txt:Text -> TCVN3` 编码保护）**：对 `.docx`/`.rtf`/`.xls`/`.xlsx` 优先执行魔数探测与结构化直提；对二进制 `.doc` 优先通过隔离 Headless LibreOffice 执行 `txt:Text` 导出并运行 `normalize_detected_tcvn3` 逐行恢复越南语 TCVN3 历史字体，仅在无有效文本时才转 PDF。
+     - **第一级（容器真实类型探测、Office 直提与 `.doc -> txt:Text -> TCVN3` 编码保护）**：按魔数与容器结构识别真实格式（识别伪装为 `.doc` 的 `.xls`/`.xlsx`/`.rtf`/`.html` 或嵌套 `.zip`，默认 `office_text_policy = "prefer"`），对 `.docx`/`.rtf`/`.xls`/`.xlsx` 优先执行结构化直提；对二进制 `.doc` 优先通过隔离 Headless LibreOffice 执行 `txt:Text` 导出并运行 `normalize_detected_tcvn3` 逐行恢复越南语 TCVN3 历史字体（避免容器缺 `.VnTime` 字体导致直接转 PDF 乱码），仅在无有效文本时才转 PDF 进入 PDF/OCR 管道。
      - **第二级（`PyMuPDF` 原生文本直提与逐页扫描判定 `analyze_pdf`）**：统一采用 **`PyMuPDF` (`fitz`)** 逐页计算 `native_text_chars`、`embedded_images` 与 `0.5x` 灰度 `ink_ratio`（`< 210` 像素占比）。有原生文字层的页面直接提取文本，不走 OCR；仅将 `native_text_chars < 30` 且 `ink_ratio > 0.003` 的页面标记为 `suspected_scan` 送入 OCR 兜底。
-     - **第三级（OCR 引擎主备自动兜底：先尝试内网 `br-ocr-v1`，不可达自动切本机 `tesseract`）**：当需要调用 OCR 时，不做静态二选一路由，而是先尝试请求内网 `br-ocr-v1`（`http://192.168.160.67:7555/api/v1`，设 3 秒快速连接超时，成功则缓存结果至 S3 CAS）；若当前处于无内网环境连接失败或服务不可用，自动无缝 fallback 切到本机受控 `tesseract` 代管识别。
-     - **多语种参数化客观质量门禁（`quality_check`）**：将扫描页漏字、空白页伪影与替换字符作为跨法域通用门禁；将 TCVN3 乱码检测与非越语字符过滤（`non_vietnamese_garbage`）限定为 `language == "vi"` 专属门禁。
+     - **第三级（OCR 引擎主备自动兜底：先尝试内网 `br-ocr-v1`，不可达自动切本机 `tesseract`）**：当需要调用 OCR 时，不做静态二选一路由，而是先尝试请求内网 `br-ocr-v1`（`http://192.168.160.67:7555/api/v1`，设 3 秒快速连接超时，成功则缓存派生 OCR JSON 至 S3 CAS）；若当前处于无内网环境连接失败或服务不可用，自动无缝 fallback 切到本机受控 `tesseract` 代管识别。
+     - **多语种参数化客观质量门禁（`quality_check`）**：对解析/OCR 产物执行页级与篇级客观核验（跨法域通用的页码映射、扫描页漏字、原生页丢字、空白页伪影、表格结构 `table_body` 校验、`bbox` 阅读顺序反转，以及 `language == "vi"` 专属的 TCVN3 乱码检测、非越语字符过滤 `non_vietnamese_garbage` 与越南公文落款签章检测），产出确定性路由（`accept_ocr`、`accept_with_warning`、`vision_reparse_pages`、`legacy_font_encoding_recovery`）。未通过必选质量门禁的文档严禁生成成功 `Version`。
 
 ## 3. 影响与后果 (Consequences)
 
