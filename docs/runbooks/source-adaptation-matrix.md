@@ -565,16 +565,16 @@
 | :--- | :---: | :--- | :---: | :--- | :---: | :--- |
 | <a id="dd-492"></a>dd-492 | 法律法规 | [越南政府文献门户（vanban.chinhphu.vn）](https://vanban.chinhphu.vn/) | P0 | `web`（[`dd-492.yaml`](../../sources/dd-492.yaml)） | [x] | **实网已跑通**：已验证 ASP.NET DoPostBack 列表、越语详情题录（`Số ký hiệu` 85/2026/NĐ-CP 等）与附件下载、PDF 扫描判定及 OCR 主备切换 + 离线 `reparse`。 |
 | <a id="dd-493"></a>dd-493 | 法律法规 | [Công báo Chính phủ（越南电子公报）](https://congbao.chinhphu.vn/) | P0 | `web` / `worldwidelaw_bridge`（[`dd-493.yaml`](../../sources/dd-493.yaml)） | [x] | **实网已跑通**：已验证公报详情页（如 `48/2026/QĐ-TTg`）题录提取、`g7.cdnchinhphu.vn` 附件流（补齐 GlobalSign RSA OV SSL CA 2018 中间证书链）DOCX/PDF 原件下载归档、扫描页 OCR 主备切换 + 离线 `reparse`（`external_requests=0`）。 |
-| <a id="dd-494"></a>dd-494 | 法律法规 | [Cơ sở dữ liệu quốc gia về văn bản pháp luật (VBPL)](https://vbpl.vn/) | P2 | `web`（[`dd-494.yaml`](../../sources/dd-494.yaml)） | [ ] | **实测受阻（源站改版 + WAF 403）**：站点已由旧版 ASP.NET 改版为 Next.js 并接入前置 PWS CDN/WAF（注入 `/_fec_sbu/fec_wrapper.js` 动态挑战，对纯 HTTP 请求全站含 `/robots.txt` 返回 403，且网关偶发返回自签名拦截证书链）；越南中央法规与公报由已实网跑通的 `dd-492` 与 `dd-493` 覆盖。 |
-| <a id="dd-495"></a>dd-495 | 法律法规 | [LuatVietnam 法规库](https://luatvietnam.vn/) | P2 | `web`（受控检索） | [ ] | 商业法规库，部分元数据公开，下载与高级功能需登录，仅作辅助交叉核验。 |
-| <a id="dd-496"></a>dd-496 | 案例 | [LuatVietnam 判决库](https://luatvietnam.vn/ban-an/) | P2 | `web`（受控检索） | [ ] | 商业判决库，需核对服务条款与访问频控。 |
-| <a id="dd-497"></a>dd-497 | 法律法规 | [Thư Viện Pháp Luật 法规库](https://thuvienphapluat.vn/page/tim-van-ban.aspx) | P2 | `web`（受控检索） | [ ] | 含 Cloudflare 防护与登录限制，不建议高频深抓。 |
-| <a id="dd-498"></a>dd-498 | 案例 | [Thư Viện Pháp Luật 判决库](https://thuvienphapluat.vn/banan/) | P2 | `web`（受控检索） | [ ] | 含 Cloudflare 防护与会员限制，仅作公开题录辅助核对。 |
-| <a id="dd-512"></a>dd-512 | 法律法规 | [越南国会法律文书系统（Văn bản quy phạm pháp luật Quốc hội）](https://quochoi.vn/tintuc/Pages/van-ban-phap-luat.aspx) | P1 | `web` | [ ] | 越南国会立法与决议官方入口，可与 `dd-492` / `dd-494` 交叉核验。 |
-| <a id="dd-513"></a>dd-513 | 法律法规 | [越南政府门户政策与法规建设专栏（Xây dựng chính sách, pháp luật）](https://xaydungchinhsach.chinhphu.vn/) | P1 | `web` | [ ] | 越南政府官方立法草案、新规解读与规范性文件动态发布门户。 |
+| <a id="dd-494"></a>dd-494 | 法律法规 | [Cơ sở dữ liệu quốc gia về văn bản pháp luật (VBPL)](https://vbpl.vn/) | P0 | `web`（[`dd-494.yaml`](../../sources/dd-494.yaml)） | [ ] | **实测受阻（源站改版 + WAF 403）**：站点已由旧版 ASP.NET 改版为 Next.js 并接入前置 PWS CDN/WAF（注入 `/_fec_sbu/fec_wrapper.js` 动态挑战，对纯 HTTP 请求全站含 `/robots.txt` 返回 403，且网关偶发返回自签名拦截证书链）；越南中央法规与公报由已实网跑通的 `dd-492` 与 `dd-493` 覆盖。 |
+| <a id="dd-495"></a>dd-495 | 法律法规 | [LuatVietnam 法规库](https://luatvietnam.vn/) | P0 | `web`（受控检索） | [ ] | 商业法规库，部分元数据公开，下载与高级功能需登录，仅作辅助交叉核验。 |
+| <a id="dd-496"></a>dd-496 | 案例 | [LuatVietnam 判决库](https://luatvietnam.vn/ban-an/) | P0 | `web`（受控检索） | [ ] | 商业判决库，需核对服务条款与访问频控。 |
+| <a id="dd-497"></a>dd-497 | 法律法规 | [Thư Viện Pháp Luật 法规库](https://thuvienphapluat.vn/page/tim-van-ban.aspx) | P0 | `web`（受控检索） | [ ] | 含 Cloudflare 防护与登录限制，不建议高频深抓。 |
+| <a id="dd-498"></a>dd-498 | 案例 | [Thư Viện Pháp Luật 判决库](https://thuvienphapluat.vn/banan/) | P0 | `web`（受控检索） | [ ] | 含 Cloudflare 防护与会员限制，仅作公开题录辅助核对。 |
+| <a id="dd-512"></a>dd-512 | 法律法规 | [越南国会法律文书系统（Văn bản quy phạm pháp luật Quốc hội）](https://quochoi.vn/tintuc/Pages/van-ban-phap-luat.aspx) | P0 | `web` | [ ] | 越南国会立法与决议官方入口，可与 `dd-492` / `dd-494` 交叉核验。 |
+| <a id="dd-513"></a>dd-513 | 法律法规 | [越南政府门户政策与法规建设专栏（Xây dựng chính sách, pháp luật）](https://xaydungchinhsach.chinhphu.vn/) | P0 | `web` | [ ] | 越南政府官方立法草案、新规解读与规范性文件动态发布门户。 |
 | <a id="dd-514"></a>dd-514 | 案例 | [越南最高人民法院判例门户（Án lệ TANDTC）](https://anle.toaan.gov.vn/) | P0 | `web` | [ ] | 越南最高人民法院正式公布的指导性判例（Án lệ）集合，体量可控、结构清晰。 |
-| <a id="dd-515"></a>dd-515 | 案例 | [越南最高人民法院电子门户公开判决库（Công bố bản án, quyết định）](https://congbobanan.toaan.gov.vn/) | P1 | `web`（浏览器渲染/验证码识别） | [ ] | 越南全国各级法院公开裁判文书官方库，存在检索校验码与会话频控，需低速受控采集。 |
-| <a id="dd-516"></a>dd-516 | 税务资料 | [越南财政部 / 税务总局法规与公文库（Bộ Tài chính / Tổng cục Thuế）](https://gdt.gov.vn/) | P1 | `web` | [ ] | 包含越南税收法规、部委通告（Thông tư）与税务指导公文（Công văn，配合 [越南财政部](https://mof.gov.vn/)）。 |
+| <a id="dd-515"></a>dd-515 | 案例 | [越南最高人民法院电子门户公开判决库（Công bố bản án, quyết định）](https://congbobanan.toaan.gov.vn/) | P0 | `web`（浏览器渲染/验证码识别） | [ ] | 越南全国各级法院公开裁判文书官方库，存在检索校验码与会话频控，需低速受控采集。 |
+| <a id="dd-516"></a>dd-516 | 税务资料 | [越南财政部 / 税务总局法规与公文库（Bộ Tài chính / Tổng cục Thuế）](https://gdt.gov.vn/) | P0 | `web` | [ ] | 包含越南税收法规、部委通告（Thông tư）与税务指导公文（Công văn，配合 [越南财政部](https://mof.gov.vn/)）。 |
 
 ### 1.5 日本 (Japan)
 
