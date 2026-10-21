@@ -6,6 +6,7 @@ entry_urls:
 allowed_hosts:
 - congbao.chinhphu.vn
 - datafiles.chinhphu.vn
+- g7.cdnchinhphu.vn
 allowed_path_prefixes:
 - /
 archive_approved: true
@@ -13,7 +14,7 @@ scope: 越南政府公报公开文书及附件的有界采集；不代表全历�
 robots: false
 budget:
   requests: 40
-  documents: 5
+  documents: 1
   seconds: 600
   response_bytes: 134217728
 metadata:
@@ -23,7 +24,7 @@ metadata:
   jurisdiction: VN
 fetch:
   mode: http
-  max_depth: 2
+  max_depth: 1
 ocr:
   engine: br-ocr-v1
   languages: vie

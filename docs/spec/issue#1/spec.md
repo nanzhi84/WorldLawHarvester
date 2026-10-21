@@ -236,22 +236,22 @@ parser:
 
 ### Phase 1：存储底座、极简 16 列 Schema 与无 `crawl4ai` 依赖配置
 - **实施任务 Checklist**：
-  - [ ] 编写精简的 `pyproject.toml`（移除 `crawl4ai`；核心依赖仅保留 `psycopg[binary,pool]`、`boto3`、`httpx`、`aiohttp`、`protego`、`playwright`、`lxml`、`selectolax`、`pymupdf`、`python-docx`、`openpyxl`、`xlrd`、`procrastinate`、`pydantic`、`pyyaml`、`starlette`/`fastapi`、`uvicorn`、`rich`；开源桥接依赖放入 `[project.optional-dependencies]`）并生成 `uv.lock`。
-  - [ ] 编写本地 `compose.yaml`（PostgreSQL 16 + MinIO S3 CAS）。
-  - [ ] 实现 `src/wlh/core.py`（`WlhError`、确定性 JSON 序列化、SHA-256 摘要、`source_record_hash` 算法）、`src/wlh/config.py`（Source YAML 闭合校验）与 `src/wlh/db.py`（连接池与短事务辅助）。
-  - [ ] 实现 `src/wlh/engine/objects.py`（S3 CAS 写入后立即 `get()` 读回校验 SHA-256；严禁直接读写本地 `minio/` 目录）。
-  - [ ] 编写单一纯净基线 `src/wlh/sql/schema.sql`（建立 `wlh` Schema 下的 `source`、`frontier`、`run`、`acquisition`、`task`、`task_input`、`resource`、`observation`、`observation_evidence`、`delivery_conflict`、`version`、直接对标 16 列的 `document_row`、`snapshot*`、`publication` 表及封存不可变触发器）与 `wlh init` 命令。
+  - [x] 编写精简的 `pyproject.toml`（移除 `crawl4ai`；核心依赖仅保留 `psycopg[binary,pool]`、`boto3`、`httpx`、`aiohttp`、`protego`、`playwright`、`lxml`、`selectolax`、`pymupdf`、`python-docx`、`openpyxl`、`xlrd`、`procrastinate`、`pydantic`、`pyyaml`、`starlette`/`fastapi`、`uvicorn`、`rich`；开源桥接依赖放入 `[project.optional-dependencies]`）并生成 `uv.lock`。
+  - [x] 编写本地 `compose.yaml`（PostgreSQL 16 + MinIO S3 CAS）。
+  - [x] 实现 `src/wlh/core.py`（`WlhError`、确定性 JSON 序列化、SHA-256 摘要、`source_record_hash` 算法）、`src/wlh/config.py`（Source YAML 闭合校验）与 `src/wlh/db.py`（连接池与短事务辅助）。
+  - [x] 实现 `src/wlh/engine/objects.py`（S3 CAS 写入后立即 `get()` 读回校验 SHA-256；严禁直接读写本地 `minio/` 目录）。
+  - [x] 编写单一纯净基线 `src/wlh/sql/schema.sql`（建立 `wlh` Schema 下的 `source`、`frontier`、`run`、`acquisition`、`task`、`task_input`、`resource`、`observation`、`observation_evidence`、`delivery_conflict`、`version`、直接对标 16 列的 `document_row`、`snapshot*`、`publication` 表及封存不可变触发器）与 `wlh init` 命令。
 - **Phase 1 验收标准**：
   - `uv run wlh init` 在全新 PostgreSQL 库上一次性建表成功且幂等；
   - S3 CAS 写入字节流后自动读回校验 SHA-256 通过，篡改字节时立即抛出校验异常。
 
 ### Phase 2：受控获取（HTTP / CDP Browser）、`CasSessionProxy` 与任务 DAG 运行时
 - **实施任务 Checklist**：
-  - [ ] 实现 `src/wlh/engine/scope.py` 与 `robots.py`（域名/路径边界守卫与受控 `robots.txt` 归档判定）。
-  - [ ] 实现 `src/wlh/engine/transport.py`（受控 HTTP 获取、重定向逐跳记录 `parent_acquisition_id`、请求预算控制、写入 S3 CAS 并提交 `state = 'archived'` 的 `Acquisition`）。
-  - [ ] 实现 `src/wlh/engine/browser.py` 与 `browser_runtime.py`（基于 `playwright` CDP `Fetch.requestPaused` 逐跳拦截归档与 `rendered_dom` 获取）。
-  - [ ] 实现 `src/wlh/adapters/__init__.py` 中的统一候选结构 `RawRecord` / `RawUnitSource` 与 `CasSessionProxy`（`collect` 模式同步走受控 `Transport` 归档，`reparse` 模式锁死 `external_requests = 0` 纯 CAS 回放）。
-  - [ ] 实现 `runs.py`、`runtime.py`、`runtime_registration.py`、`runtime_process.py`、`runtime_report.py`、`recheck.py`、`reparse.py`、`queue.py`（PostgreSQL advisory lock、`attempt_epoch` 围栏、任务 DAG 状态机流转）。
+  - [x] 实现 `src/wlh/engine/scope.py` 与 `robots.py`（域名/路径边界守卫与受控 `robots.txt` 归档判定）。
+  - [x] 实现 `src/wlh/engine/transport.py`（受控 HTTP 获取、重定向逐跳记录 `parent_acquisition_id`、请求预算控制、写入 S3 CAS 并提交 `state = 'archived'` 的 `Acquisition`）。
+  - [x] 实现 `src/wlh/engine/browser.py` 与 `browser_runtime.py`（基于 `playwright` CDP `Fetch.requestPaused` 逐跳拦截归档与 `rendered_dom` 获取）。
+  - [x] 实现 `src/wlh/adapters/__init__.py` 中的统一候选结构 `RawRecord` / `RawUnitSource` 与 `CasSessionProxy`（`collect` 模式同步走受控 `Transport` 归档，`reparse` 模式锁死 `external_requests = 0` 纯 CAS 回放）。
+  - [x] 实现 `runs.py`、`runtime.py`、`runtime_registration.py`、`runtime_process.py`、`runtime_report.py`、`recheck.py`、`reparse.py`、`queue.py`（PostgreSQL advisory lock、`attempt_epoch` 围栏、任务 DAG 状态机流转）。
 - **Phase 2 验收标准**：
   - 模拟外部请求（含 302 重定向跳）全部落盘 S3 CAS 并在 `wlh.acquisition` 表生成完整证据链；
   - 在 `mode = 'reparse'` 下调用 `Transport` 或 `CasSessionProxy` 发起未归档外部请求时被硬性阻断（`external_requests == 0`）；
@@ -259,9 +259,9 @@ parser:
 
 ### Phase 3：原生直提与 OCR 主备自动兜底（内网 `br-ocr-v1` -> 本机 `tesseract`）
 - **实施任务 Checklist**：
-  - [ ] 实现 `src/wlh/extraction/markdown.py`（基于 `lxml` 的确定性 HTML-to-Markdown 转换与表格还原，彻底替代 `crawl4ai`）。
-  - [ ] 重构合入 [office_text_extract.py](../../reference/office_text_extract.py) 至 `src/wlh/extraction/office.py` 与 `vi_tcvn3.py`：实现容器魔数探测（识别伪装为 `.doc` 的 `.xls`/`.xlsx`/`.rtf`/`.zip`）、`.docx`/`.rtf`/`.xls` 直提、二进制 `.doc` 优先经 Headless LibreOffice `txt:Text` 提取 + 越南语 TCVN3 逐行恢复，无有效文本时转 PDF 回退。
-  - [ ] 重构合入 [production_document_parse.py](../../reference/production_document_parse.py) 至 `pdf_scan.py`、`ocr_br.py`、`ocr_tesseract.py` 与 `quality.py`：
+  - [x] 实现 `src/wlh/extraction/markdown.py`（基于 `lxml` 的确定性 HTML-to-Markdown 转换与表格还原，彻底替代 `crawl4ai`）。
+  - [x] 重构合入 [office_text_extract.py](../../reference/office_text_extract.py) 至 `src/wlh/extraction/office.py` 与 `vi_tcvn3.py`：实现容器魔数探测（识别伪装为 `.doc` 的 `.xls`/`.xlsx`/`.rtf`/`.zip`）、`.docx`/`.rtf`/`.xls` 直提、二进制 `.doc` 优先经 Headless LibreOffice `txt:Text` 提取 + 越南语 TCVN3 逐行恢复，无有效文本时转 PDF 回退。
+  - [x] 重构合入 [production_document_parse.py](../../reference/production_document_parse.py) 至 `pdf_scan.py`、`ocr_br.py`、`ocr_tesseract.py` 与 `quality.py`：
     - `pdf_scan.py`：基于 `PyMuPDF` (`fitz`) 逐页计算 `native_text_chars` 与 `0.5x` 灰度 `ink_ratio`；原生文字页直接抽文本，仅将 `suspected_scan` 页送入 OCR；
     - `ocr_br.py` & `ocr_tesseract.py`：**先尝试内网 `br-ocr-v1`**（设 `connect_timeout = 3.0s`，成功则缓存 JSON 至 S3 CAS），**当无内网环境连接不可达或超时失败时，自动无缝 fallback 切到本机 `tesseract` 代管识别**；
     - `quality.py`：按 `language` 参数化执行通用门禁与越语专属门禁（防止中文/英文文档被 `non_vietnamese_garbage` 误杀）。
@@ -272,8 +272,8 @@ parser:
 
 ### Phase 4：16 列核心记录落库（`wlh.document.v1`）与第一梯队原生 Adapter
 - **实施任务 Checklist**：
-  - [ ] 实现 `src/wlh/domain/document.py` 与 `resources.py`：将 `RawRecord` 与提取产物封装为 `wlh.inputs.v1` 和 `wlh.document.v1` 存入 S3 CAS，计算四重确定性指纹（`input_fingerprint`、`parser_fingerprint`、`version_fingerprint`、`content_hash`），在短事务内提交 `Observation`、`ObservationEvidence`、`Version` 与 16 列 `document_row`。
-  - [ ] 实现第一梯队 3 个原生 Adapter 及对应 `sources/dd-xxx.yaml`：
+  - [x] 实现 `src/wlh/domain/document.py` 与 `resources.py`：将 `RawRecord` 与提取产物封装为 `wlh.inputs.v1` 和 `wlh.document.v1` 存入 S3 CAS，计算四重确定性指纹（`input_fingerprint`、`parser_fingerprint`、`version_fingerprint`、`content_hash`），在短事务内提交 `Observation`、`ObservationEvidence`、`Version` 与 16 列 `document_row`。
+  - [x] 实现第一梯队 3 个原生 Adapter 及对应 `sources/dd-xxx.yaml`：
     1. `src/wlh/adapters/federal_register.py`（[dd-499](../../reference/尽职调查核验入口地图.md#dd-499) 美国联邦公报 API + PDF）；
     2. `src/wlh/adapters/web.py`（[dd-017](../../reference/尽职调查核验入口地图.md#dd-017) 最高人民法院指导案例 HTML）；
     3. `src/wlh/adapters/vietnam_law.py`（[dd-492](../../reference/尽职调查核验入口地图.md#dd-492) 越南政府文献门户 & [dd-493](../../reference/尽职调查核验入口地图.md#dd-493) 越南电子公报）。
@@ -284,22 +284,22 @@ parser:
 
 ### Phase 5：全局快照、可插拔投影器（`template_16col` & `canonical`）与只读 API 闭环
 - **实施任务 Checklist**：
-  - [ ] 实现 `src/wlh/domain/snapshots.py`（`wlh snapshot create / list / inspect / publish`，封存前全量读回核验 S3 CAS 引用闭包 SHA-256）。
-  - [ ] 实现 `src/wlh/projections/`：`template_16col.py`（将 `document_row` 英文标准列确定性映射为 [法规案例元数据上传模板](../../reference/法规案例元数据上传模板.xlsx) 的 16 个中文列名）与 `canonical.py`（英文列名直出）。
-  - [ ] 实现 `src/wlh/api/`（`GET /healthz`、`GET /results?projection=template_16col`、`GET /files/{sha256}`，含 Bearer 鉴权与游标分页）。
+  - [x] 实现 `src/wlh/domain/snapshots.py`（`wlh snapshot create / list / inspect / publish`，封存前全量读回核验 S3 CAS 引用闭包 SHA-256）。
+  - [x] 实现 `src/wlh/projections/`：`template_16col.py`（将 `document_row` 英文标准列确定性映射为 [法规案例元数据上传模板](../../reference/法规案例元数据上传模板.xlsx) 的 16 个中文列名）与 `canonical.py`（英文列名直出）。
+  - [x] 实现 `src/wlh/api/`（`GET /healthz`、`GET /results?projection=template_16col`、`GET /files/{sha256}`，含 Bearer 鉴权与游标分页）。
 - **Phase 5 验收标准（v1 交钥匙里程碑）**：
   - 针对第一梯队三个真实来源走完 `collect -> reparse -> snapshot create -> snapshot publish -> serve` 全流程；
   - 请求 `GET /results` 返回的 JSON 行严格包含 16 列模板要求的全部中文键名（`资料名称`、`解析后文件`、`资料类型`、`采集时间`、`原始文件`、`文件顺序`、`文号/案号`、`发布机构`、`发布日期`、`生效日期`、`失效日期`、`状态`、`来源名称`、`来源详情页`、`来源记录号` 及下载哈希），且通过 `GET /files/{sha256}` 下载的原件与 `.md` 哈希 100% 匹配。
 
 ### Phase 6：官方立法 XML 适配器与五大开源生态 Bridge 扩展
 - **实施任务 Checklist**：
-  - [ ] 实现 `src/wlh/adapters/structured_xml.py`（支持 AKN 3.0 / USLM / 台湾法规 XML / 日本 e-Gov XML 转为 `RawRecord`）。
-  - [ ] 在 `src/wlh/adapters/bridges/` 下实现五大开源项目轻量桥接器（统一通过 `CasSessionProxy` 归档并输出 `RawRecord`）：
-    - [ ] `worldwidelaw_bridge.py`（以 `VN/CongBao` 对接 `dd-493` 验证）；
-    - [ ] `juriscraper_bridge.py`（以美国联邦上诉法院 `ca1` 样本验证）；
-    - [ ] `oldp_bridge.py`（德国/欧盟判例与法规样本验证）；
-    - [ ] `opencaselaw_bridge.py`（瑞士联邦/州法院 `Decision` 样本验证）；
-    - [ ] `openstates_bridge.py`（美国州议会 `Bill` 多版本/附件样本验证）。
+  - [x] 实现 `src/wlh/adapters/structured_xml.py`（支持 AKN 3.0 / USLM / 台湾法规 XML / 日本 e-Gov XML 转为 `RawRecord`）。
+  - [x] 在 `src/wlh/adapters/bridges/` 下实现五大开源项目轻量桥接器（统一通过 `CasSessionProxy` 归档并输出 `RawRecord`）：
+    - [x] `worldwidelaw_bridge.py`（以 `VN/CongBao` 对接 `dd-493` 验证）；
+    - [x] `juriscraper_bridge.py`（以美国联邦上诉法院 `ca1` 样本验证）；
+    - [x] `oldp_bridge.py`（德国/欧盟判例与法规样本验证）；
+    - [x] `opencaselaw_bridge.py`（瑞士联邦/州法院 `Decision` 样本验证）；
+    - [x] `openstates_bridge.py`（美国州议会 `Bill` 多版本/附件样本验证）。
 - **Phase 6 验收标准**：
   - 第二梯队样本通过各自 Bridge 采集后，无需修改任何下游提取、入库或投影代码，直接通过 `GET /results?projection=template_16col` 输出合规的 16 列结果。
 

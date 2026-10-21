@@ -227,7 +227,7 @@ metadata:
             )
 
             from wlh.engine.runs import execute_run, prepare_run
-            from wlh.projections.template_16col import project_template_16col
+            from wlh.projections.canonical import project_canonical
 
             c_run = prepare_run(source_yaml, "collect")
             c_res = execute_run(c_run)
@@ -250,11 +250,11 @@ metadata:
                         (source_id,),
                     ).fetchall()
                     assert len(rows) >= 1, f"Expected document_row for {adapter_name}"
-                    projected = project_template_16col(rows[0])
-                    assert projected["资料类型"] == expected_doc_type
+                    projected = project_canonical(rows[0])
+                    assert projected["doc_type"] == expected_doc_type
                     assert (
-                        expected_substr in (projected["文号/案号"] or "")
-                        or expected_substr in (projected["资料名称"] or "")
+                        expected_substr in (projected["doc_number"] or "")
+                        or expected_substr in (projected["title"] or "")
                     ), f"Expected {expected_substr} in {projected}"
 
             server.shutdown()

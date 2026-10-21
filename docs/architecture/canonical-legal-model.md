@@ -8,7 +8,7 @@
 1. **采集层只负责把数据抓下来，第一版只收集 16 列所需字段**：不做复杂的法学本体论设计（不搞跨国法律位阶、不搞法条语法树 AST、不搞上位法/立改废引用抽取、不搞复杂的判例合议庭/当事人拆解）。
 2. **核心层用干净的英文标准字段存储，投影层负责格式转换**：
    - **核心存储层（`wlh.document.v1` & `wlh.document_row` 表）**：用直观的英文列名存储与 16 列一一对应的基础字段。
-   - **可插拔投影层（`src/wlh/projections/`）**：保留 `Projector` 插件机制。默认通过 `template_16col.py` 将核心表字段投影为 [法规案例元数据上传模板](../reference/法规案例元数据上传模板.xlsx) 的 16 列中文表格格式；未来若需对接其他系统格式，只需新增一个轻量投影器函数，无需改动爬虫或数据库表。
+   - **可插拔投影层（`src/wlh/projections/`）**：保留 `Projector` 插件机制。`GET /results` 统一通过 `canonical.py`（`projection=canonical`）输出英文规范键值对；与 [法规案例元数据上传模板](../reference/法规案例元数据上传模板.xlsx) 的中英字段对照表维护于 [`examples/field_mapping.yaml`](../../examples/field_mapping.yaml)。
 
 ---
 
@@ -152,11 +152,11 @@ erDiagram
 
 ---
 
-## 3. 极简核心字段与 16 列投影严格对齐表
+## 3. 极简核心英文字段与下游 16 列中文语义对照表
 
-所有原生 Adapter 与五大开源 Bridge 产出的 `RawRecord`，落库到 `DOCUMENT_ROW`（及 S3 CAS 中的 `wlh.document.v1`）后，与 `template_16col` 投影器的对应关系如下（**零多余字段**）：
+所有原生 Adapter 与五大开源 Bridge 产出的 `RawRecord`，落库到 `DOCUMENT_ROW`（及 S3 CAS 中的 `wlh.document.v1`）后，经 `canonical` 投影输出的英文规范键名与下游 16 列中文语义对照关系如下（配置文件见 [`examples/field_mapping.yaml`](../../examples/field_mapping.yaml)）：
 
-| 序号 | 16 列模板中文字段名 (`template_16col`) | 核心表英文字段名 (`DOCUMENT_ROW` / `RawRecord`) | 类型与规则说明 |
+| 序号 | 下游中文语义标签 (`examples/field_mapping.yaml`) | `canonical` 英文规范键名 (`DOCUMENT_ROW` / `GET /results`) | 类型与规则说明 |
 | :---: | :--- | :--- | :--- |
 | 1 | `资料名称` | `title` | 非空字符串（NFC 归一化标题） |
 | 2 | `解析后文件` | `markdown_file` | `{safe_title}_{markdown_hash[:8]}[_{volume_order:02d}].md` |
@@ -196,5 +196,4 @@ erDiagram
 Projector.project(row: DocumentRow) -> dict[str, Any]
 ```
 
-- **`template_16col`（默认投影器，`GET /results`）**：将 `DocumentRow` 的英文标准字段直接映射为上述 16 列中文键名返回。
-- **`canonical`（英文直出投影器，`GET /results?projection=canonical`）**：直接按 `DocumentRow` 的英文标准键名返回 JSON。
+- **`canonical`（唯一标准英文投影器，`GET /results` / `GET /results?projection=canonical`）**：直接按 `DocumentRow` 的英文规范键名返回 JSON，中英字段映射关系见 [`examples/field_mapping.yaml`](../../examples/field_mapping.yaml)。

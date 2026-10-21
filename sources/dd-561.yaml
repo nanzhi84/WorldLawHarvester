@@ -1,0 +1,26 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-561
+id: dd-561
+adapter: juriscraper_bridge
+entry_urls:
+- https://www.courtlistener.com/api/rest/v4/search/?type=o&court=ca1
+allowed_hosts:
+- www.courtlistener.com
+- storage.courtlistener.com
+allowed_path_prefixes:
+- /
+archive_approved: true
+scope: 美国联邦第一巡回上诉法院（ca1）公开判例检索与判决书 PDF 原件有界采集。
+robots: false
+budget:
+  requests: 20
+  documents: 1
+  seconds: 300
+  response_bytes: 52428800
+metadata:
+  source_name: CourtListener / Juriscraper (US Court of Appeals for the First Circuit)
+  document_type: 案例
+  language: en
+  jurisdiction: US
+fetch:
+  mode: http
+  max_depth: 1

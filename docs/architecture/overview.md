@@ -27,7 +27,7 @@ flowchart TB
 - **多范式来源适配器与开源桥接层（`src/wlh/adapters/` & `src/wlh/adapters/bridges/`）**：除原生适配器（`web`、`vietnam_law`、`federal_register`、`structured_xml`）外，原生提供五大开源法律采集桥接器（`JuriscraperBridge`、`OldpProviderBridge`、`OpenStatesBridge`、`OpenCaseLawBridge`、`WorldWideLawBridge`），通过受控会话代理（`CasSessionProxy`）将所有脚本请求统一拦截归档至 S3 CAS，并将上游抽取结果统一收敛为仅包含 **16 列所需字段**的极简候选结构 `RawRecord`（含 `1..N` 个 `RawUnitSource`）。
 - **文档提取、内网 `br-ocr-v1` 与质量门禁（`src/wlh/extraction/`）**：重构并内化 [office_text_extract.py](../reference/office_text_extract.py) 与 [production_document_parse.py](../reference/production_document_parse.py)，在受控子进程组中完成容器魔数识别、Office 结构化直提、`.doc -> txt:Text -> TCVN3` 历史字体逐行恢复、基于 `PyMuPDF` (`fitz`) 的 PDF 逐页墨迹比（`ink_ratio`）扫描判定、内网 `br-ocr-v1` 版面 OCR 服务调用（`/file_parse` -> `/status/{uuid}` -> `/result/{uuid}`，支持 S3 CAS 派生 OCR JSON 缓存与本地 `tesseract` 备选）与按语种参数化的客观质量门禁（`quality_check`）。
 - **16 列核心领域与版本提交（`src/wlh/domain/`）**：构建并校验 `wlh.inputs.v1` 与 `wlh.document.v1` CAS 对象，计算四重确定性指纹（`input_fingerprint`、`parser_fingerprint`、`version_fingerprint`、`content_hash`），并在短事务内原子提交 `Observation`、`Version` 与 `document_row`；同时支持全局 `Snapshot` 一致性封存与发布切换。
-- **可插拔下游投影与只读 API（`src/wlh/projections/`、`src/wlh/api/`）**：基于已发布 `Snapshot` 对外提供按指定投影器（默认 `template_16col` 对齐 16 列中文模板，可选 `canonical` 英文直出）转换的结果查询（`GET /results`）以及基于 SHA-256 闭包鉴权的原件/Markdown 下载（`GET /files/{sha256}`）。
+- **可插拔下游投影与只读 API（`src/wlh/projections/`、`src/wlh/api/`）**：基于已发布 `Snapshot` 对外提供统一 `canonical` 英文标准键值对（`GET /results?projection=canonical`，中英映射表维护于 [`examples/field_mapping.yaml`](../../examples/field_mapping.yaml)）以及基于 SHA-256 闭包鉴权的原件/Markdown 下载（`GET /files/{sha256}`）。
 
 ## 2. 核心执行链路与数据流
 
@@ -58,14 +58,14 @@ sequenceDiagram
     end
     Op->>Domain: wlh snapshot create & publish (校验全部 CAS 引用闭包)
     API->>Domain: 读取 published_snapshot_id 下的通用法律文档与单元
-    API->>API: 经 Projector (canonical 或 template_16col) 投影并返回 JSON / CAS 字节流
+    API->>API: 经 Projector (canonical) 投影并返回英文标准 JSON / CAS 字节流
 ```
 
-- **核心数据合同（定义详见 [16 列核心采集模型与可插拔投影架构](canonical-legal-model.md)）**：
+**核心数据合同（定义详见 [16 列核心采集模型与可插拔投影架构](canonical-legal-model.md)）**：
   - `RawRecord`（及 `RawUnitSource`）：所有原生 Adapter 与五大开源生态 Bridge 的唯一统一上游输出数据结构（严格对齐 16 列所需字段）。
   - `wlh.inputs.v1`：文档输入血缘清单（绑定 `acquisition_id`、`archive_ref`、角色 `role`、精确 `locator` / `semantic_locator` 与局部切片哈希 `slice_hash`）。
   - `wlh.document.v1`：16 列对应的核心文档对象（落库至 `wlh.document_row`）。
-  - `Projector` 协议：将 `wlh.document_row` 确定性映射为下游目标 Schema（如对齐 [法规案例元数据上传模板](../reference/法规案例元数据上传模板.xlsx) 的 `template_16col` 投影）。
+  - `Projector` 协议：将 `wlh.document_row` 确定性映射为 `canonical` 英文规范键值对输出（与 [法规案例元数据上传模板](../reference/法规案例元数据上传模板.xlsx) 的中英字段对照维护于 [`examples/field_mapping.yaml`](../../examples/field_mapping.yaml)）。
 
 ## 3. 系统不变量与边界约束
 

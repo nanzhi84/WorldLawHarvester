@@ -1,0 +1,575 @@
+﻿Source ID,大洲/区域,法域/国家,业务子分类,资料类型,来源名称,官方入口 URL,优先级,推荐适配器,状态,备注与实测结论
+dd-500,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.1 核心官方法律法规、公报与财税库 (dd-500–dd-504),法律法规,国家法律法规数据库,https://flk.npc.gov.cn/,P0,web（接口/浏览器）,[ ] 待适配,普通自动 HTTP 请求返回 403，浏览器可访问，需低频受控会话并核验 DOCX/PDF 下载。
+dd-501,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.1 核心官方法律法规、公报与财税库 (dd-500–dd-504),政策文件,中华人民共和国国务院公报,https://www.gov.cn/gongbao/,P0,web,[ ] 待适配,1954 年至今按年/期号目录发布 HTML 单篇与整期 PDF，可按期次增量。
+dd-502,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.1 核心官方法律法规、公报与财税库 (dd-500–dd-504),法律法规,国家规章库,https://www.gov.cn/zhengce/xxgk/gjgzk/index.htm,P1,web,[ ] 待适配,现行有效部门规章与地方政府规章官方入口，需验证分页枚举完整性。
+dd-503,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.1 核心官方法律法规、公报与财税库 (dd-500–dd-504),法律法规,国家行政法规库,https://xzfg.moj.gov.cn/,P1,web,[ ] 待适配,司法部行政法规正式版本、沿革及文字版/图片版 PDF 单件下载。
+dd-504,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.1 核心官方法律法规、公报与财税库 (dd-500–dd-504),税务资料,国家税务总局政策法规库,https://fgk.chinatax.gov.cn/,P1,web,[ ] 待适配,页面与新近文件可访问，无公开 bulk，按文号与发布日增量巡检（配合 财政部政策发布 (https://www.mof.gov.cn/zhengwuxinxi/zhengcefabu/)）。
+dd-015,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,案例,中国裁判文书网,http://wenshu.court.gov.cn/,待复查,仅人工或授权,[ ] 待适配,强登录态、动态加密参数与反爬风控，不作为未授权自动采集源。
+dd-016,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,案例,最高人民法院公报案例,http://gongbao.court.gov.cn/ArticleList.html?serial_no=al,P2,web,[ ] 待适配,静态列表与详情页结构，待配置 XPath 规则与翻页。
+dd-017,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,案例,最高人民法院指导案例,https://www.court.gov.cn/shenpan/gengduo/77.html,P0,web（sources/dd-017.yaml）,[x] 已实网跑通,实网已跑通：已验证最高人民法院《指导性案例279号》（490521.html）collect + 离线 reparse（external_requests=0）。
+dd-018,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,案例,人民法院案例库,https://rmfyalk.court.gov.cn/,暂缓,web（浏览器渲染）,[ ] 待适配,含登录态与接口鉴权限制，需核验公开分页与全文边界。
+dd-019,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,最高人民法院,http://www.court.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-020,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,人民法院公告网,https://rmfygg.court.gov.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-021,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,全国法院被执行人信息查询,http://zxgk.court.gov.cn/zhzxgk/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-022,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,中国执行信息公开网,http://zxgk.court.gov.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-023,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,人民法院诉讼资产网,http://www.rmfysszc.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-024,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,人民法院网上保全系统,https://baoquan.court.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-025,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,中国司法大数据服务网,http://data.court.gov.cn/pages/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-026,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,人民法院司法评估机构名单库,http://zxgk.court.gov.cn/ccpg/findSfpgjgPage,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-027,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,选定评估机构公示,http://zxgk.court.gov.cn/ccpg/index_form_cccz03,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-028,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,人民法院委托鉴定系统,https://dwwtjd.court.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-029,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,人民法院公告网,https://rmfygg.court.gov.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-030,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,人民法院公告自助平台,http://zzpt.rmfyb.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-031,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,人民法院送达平台,http://songda.court.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-032,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,案例,中国庭审公开网,http://tingshen.court.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-033,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,案例,全国人民法庭信息网,http://rmft.court.gov.cn/0/index.jhtml,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-034,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,案例,中国海事审判网,https://cmt.court.gov.cn/hssp-zw/#/index,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-035,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,全国企业破产重整案件信息网,http://pccz.court.gov.cn/pcajxxw/index/xxwsy,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-036,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,人民法院诉讼资产网,http://www.rmfysszc.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-037,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,阿里司法拍卖,https://sf.taobao.com/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-038,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,京东司法拍卖,https://auction.jd.com/sifa.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-039,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,政策文件,最高人民检察院官网,https://www.spp.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-040,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,政策文件,最高人民检察院公报,https://www.spp.gov.cn/spp/gjgb/index.shtml,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-041,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,案例,最高人民检察院指导性案例,https://www.spp.gov.cn/spp/jczdal/index.shtml,P0,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-042,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,案例,12309中国检察网,https://www.12309.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-043,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,案例,12309中国检察网（检察文书公开）,https://login.12309.gov.cn:9443/12309/gj/zjxflws/index.shtml,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-044,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,案例,中国检察听证网,https://www.12309.gov.cn/jctzw/tzal/listTy.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-045,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,中国仲裁网,http://www.china-arbitration.com/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-046,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,中国国际经济贸易仲裁委员会,http://www.cietac.org/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-047,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,贸仲立案系统,https://www.cietac.org/articles/15771,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-048,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,北京仲裁委员会,https://www.bjac.org.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-049,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,北仲网上预约收案,https://yy.bjac.org.cn/bjac/index.html#/pagesGrxx/pc/login/index,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-050,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,法律法规,中国海事仲裁委员会（仲裁规则）,https://www.cmac.org.cn/index.php?catid=20,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-051,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,天津仲裁委员会,http://www.tjac.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-052,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,郑州仲裁委员会,http://www.zzac.org.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-053,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,青岛仲裁委员会,http://www.qdac.org/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-054,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,济南仲裁委员会,https://zcb.jinan.gov.cn/index.html,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-055,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,太原仲裁委员会,http://www.tyac.org.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-056,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,呼和浩特仲裁委员会,http://huhhotac.org.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-057,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,上海仲裁委员会,http://www.accsh.org/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-058,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,上海国际经济贸易仲裁委员会（上海国际仲裁中心）,http://www.shiac.org/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-059,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,杭州仲裁委员会,http://www.hzhac.org/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-060,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,宁波仲裁委员会,https://www.nbac.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-061,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,南京仲裁委员会,http://ac.nanjing.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-062,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,海南国际仲裁院,http://www.hnac.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-063,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,长沙仲裁委员会,https://www.cscac.net/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-064,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,武汉仲裁委员会,http://www.whac.org.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-065,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,苏州仲裁委员会,http://www.szac.net/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-066,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,大连仲裁委员会,https://www.diac.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-067,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,合肥仲裁委员会,http://www.hfac.net.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-068,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,中国广州仲裁委员会,https://www.gzac.org/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-069,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,深圳国际仲裁院,https://www.scia.com.cn/index.php/Home/index/aboutdetail/id/15.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-070,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,厦门仲裁委员会,http://www.xmac.org.cn/Home,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-071,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,长春仲裁委员会,http://www.ccac.org.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-072,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,哈尔滨仲裁委员会,http://www.hrbac.org.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-073,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,重庆仲裁委员会,http://www.cqac.org.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-074,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,成都仲裁委员会,http://www.cdac.org.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-075,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,兰州仲裁委员会,http://www.lzzcwyh.com.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-077,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,银川仲裁委员会,http://www.yinchuanzcw.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-078,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,石家庄仲裁委员会,https://sjzac.org.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-079,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,沈阳仲裁委员会,http://syzcb.shenyang.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-080,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,南京仲裁委员会,http://ac.nanjing.gov.cn/zczn/lalct/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-081,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,福州仲裁委员会,http://www.fuzhou.gov.cn/zgfzzt/szcw/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-082,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,南昌仲裁委员会,https://www.nczcw.org.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-083,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,南宁仲裁委员会,http://www.nnac.org.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-084,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,贵阳仲裁委员会心,https://www.gyac.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-085,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,昆明仲裁委员会,http://kmzcw.km.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-086,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,西安仲裁委员会,http://www.xaac.org/index.php,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-087,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.2 司法案例、诉讼与仲裁（共 72 项）,通知公告,西宁仲裁委员会,https://china-arbitration.com/index/institution/detail.html?id=3037,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-092,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,信用中国,https://www.creditchina.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-093,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,信用北京,http://creditbj.jxj.beijing.gov.cn/credit-portal/publicity/record/punish_publicity,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-094,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,信用广东,https://credit.gd.gov.cn/,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-095,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,信用山东,http://credit.shandong.gov.cn/creditsearch.publicity.dhtml,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-096,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,信用重庆,http://www.xycq.gov.cn/html/query/punish/list.html?navPage=1,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-097,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,信用四川,https://credit.sc.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-098,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,信用河南,https://credit.henan.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-099,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,中国市场监管行政处罚文书网,http://cfws.samr.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-100,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,银保监会/局,https://www.nfra.gov.cn/cn/view/pages/index/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-101,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,司法部（行政处罚与监管信息公开）,https://zwfw.12348.gov.cn/?type=govCallbackTicket&flag=false,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-102,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,外汇局（行政处罚与监管信息公开）,https://www.safe.gov.cn/beijing/xzcfxxgs/index.html,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-103,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,住建部（行政处罚与监管信息公开）,https://www.mohurd.gov.cn/?medium=01,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-104,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,国家统计局（行政处罚与监管信息公开）,https://www.stats.gov.cn/xxgk/list4.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-105,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,海关总署（行政处罚与监管信息公开）,http://www.customs.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-106,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,中国人民银行征信中心,http://www.pbccrc.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-107,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,外商投资企业年度投资经营信息联合报告,http://lhnbgs.mofcom.gov.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-108,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,信息通信行业信用信息查询,https://xy.cace.org.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-109,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,中征应收账款融资服务平台,https://www.crcrfsp.org.cn/index.do,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-110,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,海事处罚查询,https://zwfw.msa.gov.cn/zwfw/c100021/cxfw.shtml,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-111,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,上海市场监督管理局,http://fw.scjgj.sh.gov.cn/shaic/punish!getList.action?firstAccess=1,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-112,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,浙江政务服务网,http://www.zjzwfw.gov.cn/zjzw/punish/frontpunish/showadmins.do?webId=1,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-113,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,深圳市场监督管理局,https://amr.sz.gov.cn/outer/doublePublic/list.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-114,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,成都市监局,https://scjg.chengdu.gov.cn/datacenter/#/double-publicity,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-115,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,武汉市监局,https://scjgj.wuhan.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-116,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.3 行政处罚与信用公示（共 25 项）,通知公告,海口市监局,http://amr.haikou.gov.cn/xxgk/spgsxx/xzcfangsxx/,P0,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-256,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,纳税人信息查询,https://12366.chinatax.gov.cn/sscx/taxpayer/main,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-257,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,纳税信用查询,https://www.chinatax.gov.cn/chinatax/n810346/c102299/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-258,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,纳税信用A级纳税人名单公布栏,https://www.chinatax.gov.cn/chinatax/n810346/c102299/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-259,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,重大税收违法失信案件信息公布栏,http://www.chinatax.gov.cn/chinatax/c101249/n2020011502/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-260,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,全国增值税发票查验平台,https://inv-veri.chinatax.gov.cn/index.html?saasdianping-221128,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-261,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,信天游,http://www.travelsky.com/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-262,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,开票信息查询,https://www.qcc.com/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-263,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,12366查询,https://12366.chinatax.gov.cn/sszyfw/bulletinBoard/main,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-264,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,查询入口2,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/jgcx/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-265,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,中国注册税务师协会,http://www.cctaa.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-266,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,税务师事务所查询,http://hy.cctaaedu.cn/hygl/work/hygl/gzcx/swsswsxxcx/index.jsp,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-267,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,注册税务师查询,http://hy.cctaaedu.cn/hygl/work/hygl/gzcx/zcswsxxcx/index.jsp,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-268,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局北京税务局（涉税行政处罚公示）,http://beijing.chinatax.gov.cn/bjsat/xzzf/xzzf_sj/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-269,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局上海税务局（涉税行政处罚公示）,http://shanghai.chinatax.gov.cn/newxbwz/wzcx/QYDA_qyda03_xzcfajxxcx.jsp?swjgDm=13100000000,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-270,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局浙江税务局（涉税行政处罚公示）,http://zhejiang.chinatax.gov.cn:8080/sword?ctrl=XzzfgsptHomeCtrl_index&yjcd=xzcf&ejcd=xzcf_01,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-271,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局江苏税务局（涉税行政处罚公示）,https://jiangsu.chinatax.gov.cn/fggspt/main.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-272,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局江苏2税务局（涉税行政处罚公示）,https://jiangsu.chinatax.gov.cn/col/col8407/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-273,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局山东税务局（涉税行政处罚公示）,http://shandong.chinatax.gov.cn/zfgspt/extranet/index#1,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-274,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局河南税务局（涉税行政处罚公示）,https://henan.chinatax.gov.cn/xxgspt/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-275,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局湖北税务局（涉税行政处罚公示）,http://hubei.chinatax.gov.cn/gspt/jingmen/dbq/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-276,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局湖南税务局（涉税行政处罚公示）,http://hunan.chinatax.gov.cn/category/20200325400506,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-277,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局广东税务局（涉税行政处罚公示）,http://guangdong.chinatax.gov.cn/gdzfgs/zfpt_index.shtml,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-278,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局广西税务局（涉税行政处罚公示）,http://113.12.192.120:8208/zfgspt/extranet/xzzs,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-279,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局四川税务局（涉税行政处罚公示）,https://etax.sichuan.chinatax.gov.cn/zfgspt/extranet/index#1,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-280,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局贵州税务局（涉税行政处罚公示）,http://guizhou.chinatax.gov.cn/xzzfxxgspts/gzsswj/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-281,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局陕西税务局（涉税行政处罚公示）,http://zfgs.shaanxi.chinatax.gov.cn:88/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-282,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局甘肃税务局（涉税行政处罚公示）,http://gansu.chinatax.gov.cn/col/col49/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-283,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局青海税务局（涉税行政处罚公示）,http://etax.qinghai.chinatax.gov.cn:7201/sword?ctrl=XzzfgsptHomeCtrl_index,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-284,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局宁夏税务局（涉税行政处罚公示）,https://zfgs.ningxia.chinatax.gov.cn:9443/sword?ctrl=XzzfgsptHomeCtrl_index,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-285,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局内蒙古税务局（涉税行政处罚公示）,https://zfxxgs.neimenggu.chinatax.gov.cn/sword?ctrl=XzzfgsptHomeCtrl_index,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-286,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局山西税务局（涉税行政处罚公示）,http://shanxi.chinatax.gov.cn/xzzfgsptWeb/web,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-287,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局河北税务局（涉税行政处罚公示）,http://wzyy.hebei.chinatax.gov.cn/LawPublicity/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-288,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局天津税务局（涉税行政处罚公示）,http://tianjin.chinatax.gov.cn/xzzfgspt/init_xzzfmain.action,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-289,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局西藏税务局（涉税行政处罚公示）,https://xizang.chinatax.gov.cn/col/col7790/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-290,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局新疆税务局（涉税行政处罚公示）,https://etax.xinjiang.chinatax.gov.cn:16001/zfgspt/extranet/jcxx,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-291,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,国家税务总局12366纳税服务平台,https://12366.chinatax.gov.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-292,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,税收政策库,http://www.chinatax.gov.cn/chinatax/n810341/n810825/index.html?title=,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-293,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,进出口商品税率查询,http://202.127.48.116:18001/static/pages/taxRateQuery.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-294,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,出口退税率查询,https://hd.chinatax.gov.cn/nszx2023/cktslcx2023.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-295,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,商品和服务税收分类编码表,http://www.chinatax.gov.cn/n810341/n810755/c2978671/content.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-296,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.4 税务法规、处罚与涉税核验（共 41 项）,税务资料,进出口税目税号查询,http://www.customs.gov.cn/customs/302427/302442/jckszcx/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-001,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.5 市场主体登记与公示系统（共 6 项）,其他,企业信用信息公示,http://www.gsxt.gov.cn/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-002,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.5 市场主体登记与公示系统（共 6 项）,其他,北京市企业信用信息网,http://qyxy.scjgj.beijing.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-003,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.5 市场主体登记与公示系统（共 6 项）,其他,天津市市场主体信用信息公示系统,http://credit.scjg.tj.gov.cn/gsxt/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-004,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.5 市场主体登记与公示系统（共 6 项）,其他,深圳商事主体信用监管公示平台,https://amr.sz.gov.cn/xyjggs.webui/xyjggs/index.aspx,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-005,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.5 市场主体登记与公示系统（共 6 项）,其他,东莞市企业信用信息公示系统,http://qyxy.dg.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-006,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.5 市场主体登记与公示系统（共 6 项）,其他,厦门市商事主体登记及信用信息公示平台,https://credit.scjg.xm.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-117,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,中登网（动产融资统一登记公示系统）,https://www.zhongdengwang.org.cn/,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-118,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,全国不动产登记网上查询,https://bdcyc.mnr.gov.cn/#/index/adminArea.html?type=CXURL,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-119,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,通知公告,北京市不动产登记中心（不动产登记公告）,http://yewu.ghzrzyw.beijing.gov.cn/gwxxfb/bdcdjgggs/bdcdjgggs.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-120,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,通知公告,深圳市不动产登记中心（不动产登记公告）,http://pnr.sz.gov.cn/ywzy/bdcdj/szbdc/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-121,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,通知公告,广州市不动产登记中心（不动产登记公告）,https://ghzyj.gz.gov.cn/zwfw/xtzq/gzsbdcdjzlly/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-122,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,通知公告,珠海市不动产登记中心（不动产登记公告）,http://bdc.zhuhai.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-123,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,通知公告,东莞市不动产登记中心（不动产登记公告）,https://nr.dg.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-124,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,通知公告,上海市不动产登记中心（不动产登记公告）,https://ghzyj.sh.gov.cn/bdcdj/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-125,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,中国专利检索及分析,https://pss-system.cponline.cnipa.gov.cn/Disclaime,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-126,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,中国及多国专利审查信息查询,https://cpquery.cponline.cnipa.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-127,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,专利复审和无效查询,https://tysf.cponline.cnipa.gov.cn/am/#/user/login,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-128,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,专利代理机构查询,http://dlgl.cnipa.gov.cn/txnqueryAgencyOrg.do,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-129,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,专利代理师信息查询,http://dlgl.cnipa.gov.cn/txnqueryAgent.do,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-133,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,中国专利保护协会,http://www.ppac.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-134,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,全国专利代理公共服务平台,http://www.pppas.net/index,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-135,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,北京知识产权公共信息服务平台,http://search.beijingip.cn/search/search/index,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-136,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,上海市知识产权专利检索分析平台,http://xxfw.sipa.sh.gov.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-138,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,专利检索及分析系统,https://pss-system.cponline.cnipa.gov.cn/conventionalSearch,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-147,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,中国商标网,http://wcjs.sbj.cnipa.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-152,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,工信部ICP/IP地址/域名信息备案管理系统,https://beian.miit.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-153,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.6 知识产权、不动产与动产登记（共 21 项）,其他,中国互联网信息中心,http://www.cnnic.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-154,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,证监会,http://www.csrc.gov.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-155,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,证监会统计信息,http://www.csrc.gov.cn/csrc/tjsj/index.shtml,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-156,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,政策文件,证监会业务办理指南,https://neris.csrc.gov.cn/alappl/home/guideH,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-157,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,财务报告,巨潮网,http://www.cninfo.com.cn/new/index,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-158,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,财务报告,深交所,http://www.szse.cn/disclosure/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-159,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,财务报告,上交所,https://www.sse.com.cn/?c=index,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-160,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,财务报告,上交所科创板,http://star.sse.com.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-163,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,财务报告,北交所,http://www.bse.cn/disclosure/announcement.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-168,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,挂牌公司公告,http://www.neeq.com.cn/disclosure/overview_information.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-169,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,两网及退市公司公告,http://www.neeq.com.cn/disclosure/snadc_announcement.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-170,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,政策文件,新三板规则,http://www.neeq.com.cn/rule/list.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-171,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,挂牌审查,http://www.neeq.com.cn/disclosure/listing_review.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-172,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,定向发行审查,http://www.neeq.com.cn/disclosure/review_open_information/stock_issue_review.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-173,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,重大资产重组审查,http://www.neeq.com.cn/disclosure/major_asset_restructuring.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-174,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,全国股转系统监管公告,http://www.neeq.com.cn/disclosure/supervise.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-175,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,[证监会]非上市公众公司行政许可,http://www.csrc.gov.cn/csrc/c101830/c1021140/content.shtml,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-176,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,[证监会]公众公司定向发行批复,http://www.csrc.gov.cn/csrc/c100095/common_list.shtml,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-177,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,中国债券信息网,http://www.chinabond.com.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-178,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,中国银行间市场交易商协会,http://nafmii.org.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-179,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,全国银行间同业拆借中心,http://www.chinamoney.com.cn/chinese/zqfx/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-180,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,上交所债券,http://www.sse.com.cn/disclosure/bond/announcement/bookentry/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-181,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,深交所债券,http://www.szse.cn/disclosure/bond/notice/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-182,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,巨潮债券,http://www.cninfo.com.cn/new/commonUrl?url=disclosure/list/notice#bond,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-183,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,政策文件,地方债管理,http://yss.mof.gov.cn/zhuantilanmu/dfzgl/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-184,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,中国地方政府债券信息公开平台,http://www.celma.org.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-185,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,债券监管司公开发行公司债券反馈意见,http://www.csrc.gov.cn/csrc/c106307/c1045428/content.shtml,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-186,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,[证监会]区域性股权市场,http://www.csrc.gov.cn/pub/newsite/djffzqqhhdj/qyxgqzrsc/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-187,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,北京区域性股权市场,https://www.bjotc.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-188,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,上海股权托管交易中心,https://www.china-see.com/index.do,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-189,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,中原股权交易中心,https://www.ccotc.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-190,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,辽宁股权交易中心,http://service.lneec.com/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-191,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,山西股权交易中心,https://www.sxgq.net/m/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-192,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,陕西股权交易中心,http://www.sxeec.com/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-193,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,青海股权交易中心,http://www.qheec.com/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-194,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,甘肃股权交易中心,http://www.gsotc.com.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-195,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,新疆股权交易中心,http://www.casdaq.com.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-196,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,江苏股权交易中心,http://www.jseec.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-197,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,全国产权行业信息化综合服务平台,https://www.cspea.com.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-198,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,中国企业国有产权交易机构协会,http://www.cspea.org.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-199,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,北京产权交易所,https://www.cbex.com.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-200,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,北京金融资产交易所,https://www.cfae.cn/index/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-201,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,天津产权交易中心,https://www.tpre.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-202,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,天津农村产权交易所,http://www.tjnjs.com/#/home/home,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-203,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,河北产权市场,http://www.hebaee.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-204,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,上海联合产权交易所,https://www.suaee.com/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-205,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,杭州产权交易所,http://www.hzaee.com/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-206,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,宁波产权交易中心,http://www.nbcqjy.org/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-207,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,南方联合产权交易中心,https://www.csuaee.com.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-208,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,广东联合产权交易中心,https://www.gduaee.com/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-209,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,广州产权交易所,http://gz.gemas.com.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-210,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,深圳联合产权交易所,http://www.sotcbb.com/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-211,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,珠海产权交易中心,http://www.zhaeec.com/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-212,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,佛山南方产权交易所,https://www.fsaee.com/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-213,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,广西联合产权交易所,http://www.gxcq.com.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-214,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,广西北部湾产权交易所,http://www.bbwcq.com/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-215,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,福建省产权交易所,https://www.fjcqjy.com/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-216,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,厦门产权交易中心,http://www.xemas.com.cn/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-217,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,泉州市产权交易中心,http://www.qzcq0595.com/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-218,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,江苏产权交易所,http://www.jscq.com.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-219,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,无锡产权交易所,https://www.wxcq.com.cn/wuxicq/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-220,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,常州产权交易所,http://www.czcq.com.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-221,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,西南联合产权交易所,https://www.swuee.com/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-222,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,云南产权交易所,http://www.cynee.net/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-223,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,贵州阳光产权交易所,http://www.prechina.net/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-224,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,甘肃省产权交易所,http://www.gscq.com.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-225,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,江西省产权交易所,https://jxcq.jxggzyjy.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-226,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,湖南联合产权交易所,http://www.hnaee.com/hnaee/index.htm,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-227,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,长沙联合产权交易所,https://www.cscqjy.com.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-228,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,重庆产权交易网,https://cquae.cqggzy.com/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-229,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,黑龙江联合产权交易所,http://www.hljcqjy.com/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-230,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,河南中原产权交易有限公司,http://www.zycqjy.com/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-231,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,郑州市公共资源交易中心,https://zzggzy.zhengzhou.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-232,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,安徽产权交易中心,http://www.aaee.com.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-233,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,安徽省农村综合产权交易网,http://www.ahaee.com/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-234,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,安徽长江产权交易所,http://www.ccjex.com/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-235,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,山东产权交易中心,http://www.sdcqjy.com/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-236,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,青岛产权交易所,http://www.qdcq.net/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-237,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,烟台联合产权交易中心,http://www.ytcq.com/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-238,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,潍坊产权交易中心,http://www.wfcqjy.com/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-239,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,山西省产权交易市场,https://www.sxcqjy.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-240,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,长治产权交易市场,http://www.czscq.com/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-241,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,哈尔滨产权交易中心,https://hrbggzy.harbin.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-242,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,宁夏科技资源与产权交易所,https://www.ntree.com.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-243,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,新疆产权交易市场,http://www.xjcq.net.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-244,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,海南产权交易所,http://www.hncq.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-245,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,证券投资基金业协会信息公示系统,http://gs.amac.org.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-246,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,中国证券投资基金业协会,https://www.amac.org.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-247,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,公募基金管理人,https://www.amac.org.cn/fwdt/wyc/jgcprycx/jgcx/gmjjglrml/,P1,web（参数/接口）,[ ] 待适配,公开参数查询或 API 入口，可按固定查询参数归档。
+dd-248,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,公募基金销售机构,https://www.amac.org.cn/fwdt/wyc/jgcprycx/jgcx/gmjjxsjggs/,P1,web（参数/接口）,[ ] 待适配,公开参数查询或 API 入口，可按固定查询参数归档。
+dd-249,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,私募基金管理人,http://gs.amac.org.cn/amac-infodisc/res/pof/manager/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-250,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,基金托管机构,https://www.amac.org.cn/fwdt/wyc/jgcprycx/jgcx/jjtgrjjgs/,P1,web（参数/接口）,[ ] 待适配,公开参数查询或 API 入口，可按固定查询参数归档。
+dd-251,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,私募基金,http://gs.amac.org.cn/amac-infodisc/res/pof/fund/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-252,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,证券公司直投基金,http://gs.amac.org.cn/amac-infodisc/res/aoin/product/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-253,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,证券公司私募投资基金,http://gs.amac.org.cn/amac-infodisc/res/pof/subfund/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-254,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,基金公司及子公司集合资管,http://gs.amac.org.cn/amac-infodisc/res/fund/account/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-255,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.7 资本市场、证券基金与产权交易披露（共 96 项）,通知公告,基金从业人员,https://gs.amac.org.cn/amac-infodisc/res/pof/person/personOrgList.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-297,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,自然资源部数据服务,http://www.mnr.gov.cn/sj/sjfw/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-298,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,自然资源部行政审批信息公开,https://www.mnr.gov.cn/zt/zh/xzzfgs/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-299,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,自然资源确权登记网,https://www.rerc.com.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-300,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,中国土地市场网,https://www.landchina.com/#/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-301,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,全国征地信息共享平台,http://z.mnr.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-302,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,全国土地估价监管系统,http://tdgj.mnr.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-303,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,土地估价行业信息公示系统,http://gujia.mnr.gov.cn/JGPublish/Publish/Index,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-304,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,全国主要城市地价监测报告,http://www.mnr.gov.cn/sj/sjfw/td_19262/djjcbg/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-305,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,土地利用现状分类,http://c.gb688.cn/bzgk/gb/showGb?type=online&hcno=224BF9DA69F053DA22AC758AAAADEEAA,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-306,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,矿业权市场,http://ky.mnr.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-307,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,全国矿业权人勘查开采信息公示系统,http://kyqgs.mnr.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-308,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,全球地质矿产信息系统,http://geoglobal.mnr.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-309,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,全国地质资料馆,http://www.ngac.cn/125cms/c/qggnew/index.htm,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-310,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,全国矿产地数据库,http://geochina.cgs.gov.cn/article/doi/10.12029/gc2019Z201,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-311,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,地质云,https://geocloud.cgs.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-312,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,境外矿产资源开发备案,http://kczy.mofcom.gov.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-313,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,林木种子生产经营许可证查询,https://ydbg.forestry.gov.cn/adminapproval/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-314,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,林木业和草原行政许可查询,https://ydbg.forestry.gov.cn/adminapproval/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-315,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,珍稀动物查询,https://endangeredanimal.foodmate.net/index?type=1&cid=49,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-316,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,林业和草原局行政许可查询,https://ydbg.forestry.gov.cn/adminapproval/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-317,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,北京自然资源厅/局（政务与审批公开）,http://ghzrzyw.beijing.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-318,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,天津自然资源厅/局（政务与审批公开）,http://ghhzrzy.tj.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-319,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,河北自然资源厅/局（政务与审批公开）,http://zrzy.hebei.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-320,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,山西自然资源厅/局（政务与审批公开）,http://zrzyt.shanxi.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-321,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,内蒙古自然资源厅/局（政务与审批公开）,http://zrzy.nmg.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-322,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,辽宁自然资源厅/局（政务与审批公开）,http://zrzy.ln.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-323,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,吉林自然资源厅/局（政务与审批公开）,http://zrzy.jl.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-324,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,黑龙江自然资源厅/局（政务与审批公开）,http://zrzyt.hlj.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-325,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,上海自然资源厅/局（政务与审批公开）,http://ghzyj.sh.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-326,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,江苏自然资源厅/局（政务与审批公开）,http://zrzy.jiangsu.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-327,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,浙江自然资源厅/局（政务与审批公开）,http://zrzyt.zj.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-328,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,安徽自然资源厅/局（政务与审批公开）,http://zrzyt.ah.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-329,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,福建自然资源厅/局（政务与审批公开）,http://zrzyt.fujian.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-330,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,江西自然资源厅/局（政务与审批公开）,http://bnr.jiangxi.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-331,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,山东自然资源厅/局（政务与审批公开）,http://dnr.shandong.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-332,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,河南自然资源厅/局（政务与审批公开）,http://dnr.henan.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-333,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,湖北自然资源厅/局（政务与审批公开）,http://zrzyt.hubei.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-334,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,湖南自然资源厅/局（政务与审批公开）,http://zrzyt.hunan.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-335,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,广东自然资源厅/局（政务与审批公开）,http://nr.gd.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-336,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,广西自然资源厅/局（政务与审批公开）,http://dnr.gxzf.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-337,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,海南自然资源厅/局（政务与审批公开）,http://lr.hainan.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-338,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,重庆自然资源厅/局（政务与审批公开）,http://ghzrzyj.cq.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-339,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,四川自然资源厅/局（政务与审批公开）,http://dnr.sc.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-340,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,贵州自然资源厅/局（政务与审批公开）,http://zrzy.guizhou.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-341,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,云南自然资源厅/局（政务与审批公开）,http://dnr.yn.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-342,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,陕西自然资源厅/局（政务与审批公开）,http://zrzyt.shaanxi.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-343,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,甘肃自然资源厅/局（政务与审批公开）,http://zrzy.gansu.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-344,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,青海自然资源厅/局（政务与审批公开）,http://zrzyt.qinghai.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-345,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,宁夏自然资源厅/局（政务与审批公开）,http://zrzyt.nx.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-346,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,新疆自然资源厅/局（政务与审批公开）,http://zrzyt.xinjiang.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-347,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,大连自然资源厅/局（政务与审批公开）,http://www.zrzy.dl.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-348,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,青岛自然资源厅/局（政务与审批公开）,http://zrzygh.qingdao.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-349,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,宁波自然资源厅/局（政务与审批公开）,http://zgj.ningbo.gov.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-350,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,厦门自然资源厅/局（政务与审批公开）,http://zygh.xm.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-351,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,深圳自然资源厅/局（政务与审批公开）,http://pnr.sz.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-352,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,兵团自然资源厅/局（政务与审批公开）,http://zrzy.xjbt.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-353,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,国家地理信息公共服务平台,https://www.tianditu.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-354,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,自然资源部测绘地理信息政务服务,http://zwfw.ch.mnr.gov.cn/index;jsessionid=211B19F02ED92247C3EC00D86051DA46,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-355,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,自然资源部科技成果查询数据库,http://jlps.mnr.gov.cn/global/reward!KJCGsearch.do,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-356,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,自然资源部获奖成果查询,http://jlps.mnr.gov.cn/global/reward!listAllReward.do,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-357,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,全国排污许可证管理信息平台,http://permit.mee.gov.cn/permitExt/defaults/default-index!getInformation.action,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-358,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,环境影响评价信用平台,http://114.251.10.92:8080/XYPT/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-359,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,生态环境部污染源监控中心平台,http://www.envsc.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-360,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,政策文件,环境保护综合目录,http://www.gov.cn/xinwen/2018-02/06/5264316/files/27c5704a32e941e8ac20e40d61209a94.pdf,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-361,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,全国环境影响评价管理信息平台,https://eia.lem.org.cn/#/eia,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-362,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,环境影响评价信息公示平台,http://www.js-eia.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-363,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,建设项目环境影响登记表查询>>,https://beian.china-eia.com/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-364,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,取水许可审批信息查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/qsxkxxcx/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-365,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,水利工程建设监理单位资质查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/sljlzzcx/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-366,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,水利工程质量检测单位资质查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/slzlzzcx/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-367,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,中国安全产业协会,http://www.chinasia.org.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-368,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,中国安全生产协会,http://www.china-safety.org.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-369,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,中国再生资源回收利用协会,http://www.crra.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-370,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,中国化学品安全协会,http://www.chemicalsafety.org.cn/index.php,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-371,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,中国水利工程协会,http://www.cweun.org/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-372,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,中国水利企业协会,http://www.cwec.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-373,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,中国环境保护产业协会,http://www.caepi.org.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-374,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.8 自然资源、土地矿产与生态环境公示（共 78 项）,通知公告,中华环保联合会,http://www.acef.com.cn/index.html,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-375,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,行业标准,国民经济行业分类,https://www.stats.gov.cn/xxgk/tjbz/gjtjbz/201905/t20190521_1758938.html,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-376,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,行业标准,[证监会]上市公司行业分类指引,http://www.csrc.gov.cn/csrc/c100103/c1452025/content.shtml,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-377,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,行业标准,新三板行业分类指引,http://www.neeq.com.cn/m/fenglei/hyfl01.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-378,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,行业标准,战略性新兴产业分类,https://www.stats.gov.cn/xxgk/tjbz/gjtjbz/202008/t20200811_1782344.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-379,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,工信部电信业务市场综合管理信息系统,https://tsm.miit.gov.cn/dxxzsp/,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-380,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,高新技术企业认定管理工作网,http://www.innocom.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-381,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,高新技术企业备案查询,https://fuwu.most.gov.cn/html/fwcx/gxjsqybacx/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-382,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家科学技术奖励查询1,http://www.most.gov.cn/cxfw/kjjlcx/index.htm,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-383,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家科学技术奖励查询2,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/kjjl/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-384,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家级科技企业孵化器查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/fhq/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-385,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家级高新技术产业开发区名单,http://www.chinatorch.gov.cn/gxq/gxqmd/list.shtml,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-386,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,众创空间查询,https://fuwu.most.gov.cn/html/fwcx/zckjcx/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-387,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,电信设备进网许可标志查询,https://jwxkjwgl.miit.gov.cn/gatewayauthenticityquery,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-388,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,移动电话机图片查询,https://jwxkjwgl.miit.gov.cn/gatewayMobilePictureQuery,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-389,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家保密科技测评中心,http://www.nsstec.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-390,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,中国汽车燃料消耗量查询系统,https://yhgscx.miit.gov.cn/fuel-consumption-web/mainPage,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-391,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,新能源汽车动力蓄电池回收服务网点信息,https://www.miit.gov.cn/datainfo/zysjk/xnyqcdlxdchsfwwdxx/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-392,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,电器电子产品有害物质限制使用公共服务平台,https://chinarohs.miit.gov.cn/#/index,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-393,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,电子认证服务使用密码许可单位名录,http://www.oscca.gov.cn/app-zxfw/xzspsx/syxkdw.jsp?channel_code=c100142,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-394,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,外商投资电信企业设立审批,https://www.miit.gov.cn/datainfo/zzsjk/wstzdxqyslsp/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-395,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,互联网电子公告服务审批及备案,https://www.miit.gov.cn/datainfo/zzsjk/hlwdzggfwzxspjba/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-396,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,全国互联网安全管理服务平台,http://www.beian.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-397,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,军工电子计量技术机构建立认定,https://www.miit.gov.cn/datainfo/zzsjk/jgdzjljsjgjlrd/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-398,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,互联网信息服务投诉平台,https://ts.isc.org.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-399,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,中国临床试验注册中心检索入口,https://www.chictr.org.cn/searchproj.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-400,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,药物临床试验登记与信息公示平台,http://www.chinadrugtrials.org.cn/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-401,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家自然科学基金项目综合查询,https://kd.nsfc.cn/fundingProjectInit,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-402,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,【科技部】人类遗传资源管理审批,https://fuwu.most.gov.cn/html/jgcx/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-403,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家药监局数据查询,https://www.nmpa.gov.cn/datasearch/home-index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-404,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,医疗器械唯一标识数据库,https://udi.nmpa.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-405,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,三品一械广告审批结果查询,https://spyxggsc.samr.gov.cn/spyxggsc/MDAIS,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-406,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,中国医药信息查询平台,https://www.dayi.org.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-407,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,医保药品目录查询,https://wx.nhsa.gov.cn/#/pages/NRDL/index/index,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-408,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,行业标准,药包材标准,http://app.nifdc.org.cn/jianybz/jybzTwoGj.do,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-409,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,行业标准,医疗器械标准,http://app.nifdc.org.cn/jianybz/jybzTwoGj.do,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-410,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家药品监督管理局药品评审中心,https://www.cde.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-411,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,矿业权市场,http://ky.mnr.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-412,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,全国矿业权人勘查开采信息公示系统,https://kyqgs.mnr.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-413,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,全球地质矿产信息系统,http://geoglobal.mnr.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-414,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,全国地质资料馆,https://www.ngac.cn/125cms/c/qggnew/index.htm,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-415,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,全国矿产地数据库,http://ngac.org.cn/Kuangchandi/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-416,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,境外矿产资源开发备案,http://kczy.mofcom.gov.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-417,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,地质云,https://geocloud.cgs.gov.cn/#/home,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-418,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,批准开采黄金矿产的企业名单,https://wap.miit.gov.cn/datainfo/zzsjk/pzkchjkcsqqymd/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-419,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,公路企业经营资质查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/jtbglqyzz/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-420,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,道路运政经营业户查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/jtbdlyzyh/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-421,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,道路运政从业人员查询,https://ysfw.mot.gov.cn/NetRoadCGSS-web/information/query?searchType=person,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-422,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,道路运政营运车辆查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/jtbdlyzcl/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-423,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,[民航局]资质查询,http://www.caac.gov.cn/FWDT/ZZCX/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-424,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国际货运代理企业备案,http://gjhy.mofcom.gov.cn/tableLoad.shtml,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-425,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,航运企业经营资质查询（部本级数据）,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/jtbsyqyzz/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-426,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,船舶经营资质查询(部本级数据),http://app.gjzwfw.gov.cn/jmopen/webapp/html5/jtbcbjjzz/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-427,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,海员证书查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/jtbhyzs/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-428,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,民航企业业绩查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/caacqyyj/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-429,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,民航行程单验真,http://www.caac.gov.cn/INDEX/HLFW/DZKPYZ/,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-430,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,铁路局行政许可公告查询,https://zwfw.nra.gov.cn/col/col66/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-431,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,行业标准,铁路技术标准信息查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/tljsbzxxfwpt/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-432,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,试验检测人员考试合格查询,https://syjc.jtzyzg.org.cn/SYJC/LEAP/syjc/html/publicQuery.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-433,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,全国出版物发行单位年度核验查询,https://www.nppa.gov.cn/cbwfxdwndhycx/cbwfxdwndhy_cxy/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-434,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,全国只读类光盘复制单位光盘来源识别码查询,https://www.nppa.gov.cn/bsfw/cyjghcpcx/202112/P020211208753495011054.pdf,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-435,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,行政审批事项清单,https://www.nppa.gov.cn/bsfw/xksx/xzxksxqd/201802/t20180208_4922.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-436,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,图书出版单位,https://www.nppa.gov.cn/bsfw/cyjghcpcx/tcdw/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-437,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,报纸/报社,https://www.nppa.gov.cn/bsfw/cyjghcpcx/bzbs/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-438,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,期刊/期刊社,https://www.nppa.gov.cn/bsfw/cyjghcpcx/qkan/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-439,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,音像出版单位,https://www.nppa.gov.cn/bsfw/cyjghcpcx/yxcb/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-440,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,电子出版物出版单位,https://www.nppa.gov.cn/bsfw/cyjghcpcx/dzcb/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-441,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,网络出版服务单位,https://www.nppa.gov.cn/bsfw/cyjghcpcx/wlcb/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-442,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,发行机构,https://www.nppa.gov.cn/bsfw/cyjghcpcx/fxjg/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-443,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,出版物信息查询,https://pdc.capub.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-444,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,连续型电子出版物,https://www.nppa.gov.cn/bsfw/cyjghcpcx/lxdz/index.html,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-445,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,记者证,https://press.nppa.gov.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-446,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,中国电影数据信息网,https://www.zgdypw.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-447,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家新闻出版广电总局电影电子政务平台,https://dy.chinafilm.gov.cn/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-448,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,电影备案公示,https://www.chinafilm.gov.cn/xxgk/gsxx/dybalx/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-449,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,电影公映许可证公示,https://www.chinafilm.gov.cn/xxgk/gsxx/dygyxkz/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-450,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家新闻出版广电总局电视剧电子政务平台,https://dsj.nrta.gov.cn/index.shanty,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-451,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家文物局信息查询服务,http://www.ncha.gov.cn/col/col2262/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-452,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,电视剧备案公示,https://www.nrta.gov.cn/col/col8/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-453,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,动画片备案公示,https://www.nrta.gov.cn/col/col2111/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-454,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,重点网络影视剧信息备案系统,http://211.146.10.138:8080/YSJBA/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-455,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,电子游戏审批,https://www.nppa.gov.cn/bsfw/jggs/yxspjg/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-456,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,社会艺术水平考级机构查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/shysspkjjg/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-457,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,全国文物保护工程资质单位数据库,http://gl.ncha.gov.cn/#/Industry/cul-protection-unit-info,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-458,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,文化市场经营单位查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/whscjydw/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-459,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,经营出境旅游业务旅行社名单查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/abroadnamelistjingwai/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-460,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,社会组织活动备案查询,https://chinanpo.mca.gov.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-461,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,体育竞赛信息查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/tyzjjsxxcx/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-462,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,运动员技术等级查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/tyzjydyjsdjcx/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-463,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,全国文物保护工程资格人员数据库,http://gl.ncha.gov.cn/#/Industry/industry-supervision-management-search,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-464,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,12318全国文化市场举报平台,https://jbts.mct.gov.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-465,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,农药产品生产批准证书名单,https://wap.miit.gov.cn/datainfo/zysjk/nycpscpzzsmd/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-466,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,中国高等教育学生信息网(学信网),https://www.chsi.com.cn/xlcx/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-467,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,[教育部]阳光高考信息公开平台,https://gaokao.chsi.com.cn/gkzx.do,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-468,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,[教育部]高校名单,http://www.moe.gov.cn/jyb_xxgk/s5743/s5744/A03/202110/t20211025_574874.html,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-469,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,学位证书网上查询,https://ssza.psxjsz.com/v2/graduation?qhclickid=c5ce171436d5edb5,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-470,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国(境)外学历学位认证书在线查询,http://zwfwbl.cscse.edu.cn/homeView/contactUs?type=2,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-471,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,中国民办学校网,http://www.hrmbedu.com.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-472,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家职业资格证书全国联网查询,http://zscx.osta.org.cn/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-473,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,国家职业资格证书查询,http://app.gjzwfw.gov.cn/jmopen/webapp/html5/tyzjgjzyzgzs/index.html,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-474,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,中国人事考试网,http://www.cpta.com.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-475,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,英语四六级考试成绩查询,https://cjcx.neea.edu.cn/html1/folder/21045/4883-1.htm,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-476,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,普通话水平测试成绩查询,http://www.cltt.org/#/scoreQuery,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-477,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,中国民办教育信息网,https://www.cnhsi.com.cn/hy,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-478,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,中国少数民族汉语水平等级考试成绩查询,http://zwfw.moe.gov.cn/qualificat?activeType=3&addrida0a85a29922644e3a436aea87c34f567,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-479,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,全国民办高校学生信息公共查询平台,http://www.cxedu.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-480,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,中小学教师资格考试成绩查询,http://zwfw.moe.gov.cn/qualificat?activeType=4&addrida87d9521316442258d3275fe1e790bee,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-481,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.9 行业标准与特定行业资质监管（共 107 项）,通知公告,中国民办教育公共信息服务平台,https://cnhsi.com.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-482,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.10 政府采购、投资审批与历史页脚保留号（共 10 项）,通知公告,中国政府采购网,http://www.ccgp.gov.cn/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-483,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.10 政府采购、投资审批与历史页脚保留号（共 10 项）,通知公告,政府采购代理机构名单,http://www.ccgp.gov.cn/agency/md/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-484,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.10 政府采购、投资审批与历史页脚保留号（共 10 项）,通知公告,政府采购合同公示,http://htgs.ccgp.gov.cn/GS8/contractpublish/search,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-485,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.10 政府采购、投资审批与历史页脚保留号（共 10 项）,通知公告,中国招标投标协会,http://www.ctba.org.cn/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-486,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.10 政府采购、投资审批与历史页脚保留号（共 10 项）,通知公告,全国公共资源交易平台-招投标信息,http://www.cebpubservice.com/NewIndex/index.shtml,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-487,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.10 政府采购、投资审批与历史页脚保留号（共 10 项）,通知公告,中国招标投标公共服务平台,http://bulletin.cebpubservice.com/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-488,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.10 政府采购、投资审批与历史页脚保留号（共 10 项）,通知公告,[发改委]全国投资项目在线审批监管平台,http://www.tzxm.gov.cn/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-489,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.10 政府采购、投资审批与历史页脚保留号（共 10 项）,其他,全国互联网安全管理服务平台（网安备案页脚噪声）,http://www.beian.gov.cn/portal/registerSystemInfo?recordcode=11010502039017,排除,不适配（页脚噪声）,[ ] 待适配,源文档提取时的页脚备案链接噪声，保留历史编号，不做采集。
+dd-490,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.10 政府采购、投资审批与历史页脚保留号（共 10 项）,其他,工信部电信业务市场综合管理信息系统（ICP证页脚噪声）,https://dxzhgl.miit.gov.cn/dxxzsp/xkz/xkzgl/resource/qiyesearch.jsp?num=%25E4%25BA%25ACICP%25E8%25AF%2581110182%25E5%258F%25B7&type=xuke,排除,不适配（页脚噪声）,[ ] 待适配,源文档提取时的页脚备案链接噪声，保留历史编号，不做采集。
+dd-491,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),1.1.10 政府采购、投资审批与历史页脚保留号（共 10 项）,其他,工信部政务服务平台（ICP备案页脚噪声）,http://beian.miit.gov.cn/,排除,不适配（页脚噪声）,[ ] 待适配,源文档提取时的页脚备案链接噪声，保留历史编号，不做采集。
+dd-007,1. 亚洲法域 (Asia),1.2 中国香港与中国澳门 (Hong Kong & Macau),—,其他,中国香港公司注册处综合资讯系统,https://www.icris.cr.gov.hk/csci/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-008,1. 亚洲法域 (Asia),1.2 中国香港与中国澳门 (Hong Kong & Macau),—,其他,中国澳门商业登记讯息平台,https://eservice.dsaj.gov.mo/dsajservice9/commercial-platform/index.xhtml,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-076,1. 亚洲法域 (Asia),1.2 中国香港与中国澳门 (Hong Kong & Macau),—,通知公告,香港国际仲裁中心（HKIAC）,https://www.hkiac.org/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-130,1. 亚洲法域 (Asia),1.2 中国香港与中国澳门 (Hong Kong & Macau),—,其他,中国香港知识产权署,http://ipsearch.ipd.gov.hk/index.html,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-131,1. 亚洲法域 (Asia),1.2 中国香港与中国澳门 (Hong Kong & Macau),—,其他,中国澳门经济局,https://www.economia.gov.mo/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-137,1. 亚洲法域 (Asia),1.2 中国香港与中国澳门 (Hong Kong & Macau),—,其他,中国香港专利检索,https://esearch.ipd.gov.hk/nis-pos-view/#/pt/quicksearch,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-148,1. 亚洲法域 (Asia),1.2 中国香港与中国澳门 (Hong Kong & Macau),—,其他,中国香港商标检索,https://esearch.ipd.gov.hk/nis-pos-view/#/tm/quicksearch?lang=en,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-161,1. 亚洲法域 (Asia),1.2 中国香港与中国澳门 (Hong Kong & Macau),—,财务报告,香港交易所披露易（HKEXnews）,https://www.hkexnews.hk/index_c.htm,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-505,1. 亚洲法域 (Asia),1.2 中国香港与中国澳门 (Hong Kong & Macau),—,法律法规,"电子版香港法例（Hong Kong e-Legislation, HKeL）",https://www.elegislation.gov.hk/,P0,web,[ ] 待适配,具法律地位的香港官方成文法数据库，支持按章号（Cap.）与版本日期获取 PDF。
+dd-506,1. 亚洲法域 (Asia),1.2 中国香港与中国澳门 (Hong Kong & Macau),—,案例,香港司法机构法律参考资料系统（LRS）,https://legalref.judiciary.hk/,P0,web / worldwidelaw_bridge,[ ] 待适配,香港各级法院判案书与裁决理由官方库，已有 WWL HK 开源抓取先例。
+dd-507,1. 亚洲法域 (Asia),1.2 中国香港与中国澳门 (Hong Kong & Macau),—,税务资料,香港税务局（IRD）释义及执行指引（DIPN）,https://www.ird.gov.hk/,P1,web,[ ] 待适配,公开香港税务条例指引（DIPN）与税务上诉委员会（Board of Review）裁决。
+dd-508,1. 亚洲法域 (Asia),1.2 中国香港与中国澳门 (Hong Kong & Macau),—,法律法规,澳门印务局（Imprensa Oficial）公报与法例,https://www.io.gov.mo/,P1,web / worldwidelaw_bridge,[ ] 待适配,澳门特别行政区公报与官方成文法入口，已有 WWL MO 抓取先例。
+dd-132,1. 亚洲法域 (Asia),1.3 中国台湾 (Taiwan),—,其他,中国台湾经济部智慧财产局,https://www.tipo.gov.tw/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-162,1. 亚洲法域 (Asia),1.3 中国台湾 (Taiwan),—,财务报告,台湾证券交易所,https://www.twse.com.tw/zh/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-509,1. 亚洲法域 (Asia),1.3 中国台湾 (Taiwan),—,法律法规,全国法规资料库（LawBank Taiwan）,https://law.moj.gov.tw/ENG/index.aspx,P0,web / structured_xml,[ ] 待适配,提供台湾地区现行法规、行政规则、英译及政府开放资料（JSON/XML/CSV）下载。
+dd-510,1. 亚洲法域 (Asia),1.3 中国台湾 (Taiwan),—,案例,司法院法学资料检索系统（裁判书查询）,https://judgment.judicial.gov.tw/,P1,web,[ ] 待适配,公开各级法院裁判书及司法院开放数据批次压缩包，需核对批次包更新周期。
+dd-511,1. 亚洲法域 (Asia),1.3 中国台湾 (Taiwan),—,税务资料,财政部主管法规共用系统（赋税法规与解释函令）,https://law-out.mof.gov.tw/,P1,web,[ ] 待适配,集中公开台湾地区税法条文、财政部解释函令与立法沿革。
+dd-492,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),—,法律法规,越南政府文献门户（vanban.chinhphu.vn）,https://vanban.chinhphu.vn/,P0,vietnam_law（sources/dd-492.yaml）,[x] 已实网跑通,实网已跑通：已验证 ASP.NET DoPostBack 列表、越语详情题录（Số ký hiệu 85/2026/NĐ-CP 等）与附件下载、PDF 扫描判定及 OCR 主备切换 + 离线 reparse。
+dd-493,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),—,法律法规,Công báo Chính phủ（越南电子公报）,https://congbao.chinhphu.vn/,P0,vietnam_law / worldwidelaw_bridge（sources/dd-493.yaml）,[x] 已实网跑通,实网已跑通：已验证公报详情页（如 48/2026/QĐ-TTg）题录提取、g7.cdnchinhphu.vn 附件流（补齐 GlobalSign RSA OV SSL CA 2018 中间证书链）DOCX/PDF 原件下载归档、扫描页 OCR 主备切换 + 离线 reparse（external_requests=0）。
+dd-494,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),—,法律法规,Cơ sở dữ liệu quốc gia về văn bản pháp luật (VBPL),https://vbpl.vn/,P2,vietnam_law（sources/dd-494.yaml）,[ ] 实测受阻,实测受阻（源站改版 + WAF 403）：站点已由旧版 ASP.NET 改版为 Next.js 并接入前置 PWS CDN/WAF（注入 /_fec_sbu/fec_wrapper.js 动态挑战，对纯 HTTP 请求全站含 /robots.txt 返回 403，且网关偶发返回自签名拦截证书链）；越南中央法规与公报由已实网跑通的 dd-492 与 dd-493 覆盖。
+dd-495,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),—,法律法规,LuatVietnam 法规库,https://luatvietnam.vn/,P2,web（受控检索）,[ ] 待适配,商业法规库，部分元数据公开，下载与高级功能需登录，仅作辅助交叉核验。
+dd-496,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),—,案例,LuatVietnam 判决库,https://luatvietnam.vn/ban-an/,P2,web（受控检索）,[ ] 待适配,商业判决库，需核对服务条款与访问频控。
+dd-497,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),—,法律法规,Thư Viện Pháp Luật 法规库,https://thuvienphapluat.vn/page/tim-van-ban.aspx,P2,web（受控检索）,[ ] 待适配,含 Cloudflare 防护与登录限制，不建议高频深抓。
+dd-498,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),—,案例,Thư Viện Pháp Luật 判决库,https://thuvienphapluat.vn/banan/,P2,web（受控检索）,[ ] 待适配,含 Cloudflare 防护与会员限制，仅作公开题录辅助核对。
+dd-512,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),—,法律法规,越南国会法律文书系统（Văn bản quy phạm pháp luật Quốc hội）,https://quochoi.vn/tintuc/Pages/van-ban-phap-luat.aspx,P1,web,[ ] 待适配,越南国会立法与决议官方入口，可与 dd-492 / dd-494 交叉核验。
+dd-513,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),—,法律法规,"越南政府门户政策与法规建设专栏（Xây dựng chính sách, pháp luật）",https://xaydungchinhsach.chinhphu.vn/,P1,web,[ ] 待适配,越南政府官方立法草案、新规解读与规范性文件动态发布门户。
+dd-514,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),—,案例,越南最高人民法院判例门户（Án lệ TANDTC）,https://anle.toaan.gov.vn/,P0,web,[ ] 待适配,越南最高人民法院正式公布的指导性判例（Án lệ）集合，体量可控、结构清晰。
+dd-515,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),—,案例,"越南最高人民法院电子门户公开判决库（Công bố bản án, quyết định）",https://congbobanan.toaan.gov.vn/,P1,web（浏览器渲染/验证码识别）,[ ] 待适配,越南全国各级法院公开裁判文书官方库，存在检索校验码与会话频控，需低速受控采集。
+dd-516,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),—,税务资料,越南财政部 / 税务总局法规与公文库（Bộ Tài chính / Tổng cục Thuế）,https://gdt.gov.vn/,P1,web,[ ] 待适配,包含越南税收法规、部委通告（Thông tư）与税务指导公文（Công văn，配合 越南财政部 (https://mof.gov.vn/)）。
+dd-143,1. 亚洲法域 (Asia),1.5 日本 (Japan),—,其他,日本专利信息平台,https://www.j-platpat.inpit.go.jp/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-517,1. 亚洲法域 (Asia),1.5 日本 (Japan),—,法律法规,e-Gov 法令检索 / 法令 API v2（デジタル庁）,https://laws.e-gov.go.jp/,P0,structured_xml（e-Gov API v2）,[ ] 待适配,日本数字厅官方支持 XML/JSON API v2 与批量下载，已实测 200 OK，最适合原生结构化接入。
+dd-518,1. 亚洲法域 (Asia),1.5 日本 (Japan),—,政策文件,互联网版官报（インターネット版官報）,https://www.kanpo.go.jp/,P1,web,[ ] 待适配,官方公开直连，免费公开直近 90 日官报全文，90 日以前受检索/付费限制，必须建设每日增量归档。
+dd-519,1. 亚洲法域 (Asia),1.5 日本 (Japan),—,案例,裁判所判例检索系统（Courts in Japan）,https://www.courts.go.jp/app/hanrei_jp/search1,P1,web,[ ] 待适配,日本最高裁、高裁、下级裁、行政及知产判例官方检索与裁判书 PDF。
+dd-520,1. 亚洲法域 (Asia),1.5 日本 (Japan),—,税务资料,国税厅法令解释通达、质义应答与文书回答事例（NTA）,https://www.nta.go.jp/law/index.htm,P1,web,[ ] 待适配,国税厅官方集中公开税法通达、问答事例、文书回答，辅以 国税不服审判所 (https://www.kfs.go.jp/) 裁决事例。
+dd-142,1. 亚洲法域 (Asia),1.6 韩国 (South Korea),—,其他,韩国特许厅（KIPO）,https://www.kipo.go.kr/ko/MainApp.do,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-521,1. 亚洲法域 (Asia),1.6 韩国 (South Korea),—,法律法规,国家法令情报中心（국가법령정보센터 & LAW Open API）,https://www.law.go.kr/,P0,structured_xml（LAW Open API）,[ ] 待适配,提供法令、行政规则、自治法规、判例、宪法裁判所决定与条约 API；需申请 OC 账号参数。
+dd-522,1. 亚洲法域 (Asia),1.6 韩国 (South Korea),—,政策文件,大韩民国电子官报（대한민국 전자관보）,https://gwanbo.go.kr/,P1,web,[ ] 待适配,韩国行政安全部官方电子官报，按日发布法律公布与行政公告。
+dd-523,1. 亚洲法域 (Asia),1.6 韩国 (South Korea),—,案例,大法院综合法律情报门户（대법원 종합법률정보）,https://glaw.scourt.go.kr/,P1,web（浏览器会话）,[ ] 待适配,韩国大法院判例、规则、例规与先例官方库，需维护检索 Session。
+dd-524,1. 亚洲法域 (Asia),1.6 韩国 (South Korea),—,税务资料,国税法令情报系统（국세법령정보시스템）与租税审判院,https://txsi.hometax.go.kr/,P1,web,[ ] 待适配,包含国税法令、解释例规、审查请求与 租税审判院 (https://www.tt.go.kr/) 裁决例。
+dd-091,1. 亚洲法域 (Asia),1.7 新加坡 (Singapore),—,通知公告,新加坡国际仲裁中心（SIAC）,https://siac.org.sg/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-166,1. 亚洲法域 (Asia),1.7 新加坡 (Singapore),—,财务报告,新加坡交易所（SGX）,https://www.sgx.com/zh-hans/securities/company-announcements,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-525,1. 亚洲法域 (Asia),1.7 新加坡 (Singapore),—,法律法规,Singapore Statutes Online (SSO),https://sso.agc.gov.sg/,P0,web / worldwidelaw_bridge,[ ] 待适配,总检察署官方成文法库，但是实测触发 Cloudflare 403 Just a moment，需受控浏览器会话或低频缓存。
+dd-526,1. 亚洲法域 (Asia),1.7 新加坡 (Singapore),—,案例,eLitigation 新加坡法院判决库,https://www.elitigation.sg/_layouts/IELS/HomePage/Pages/Home.aspx,P0,web / worldwidelaw_bridge,[ ] 待适配,公开 2000 年以来最高法院、国家法院与家事法院判决，WWL 已有 SG 抓取先例。
+dd-527,1. 亚洲法域 (Asia),1.7 新加坡 (Singapore),—,税务资料,新加坡国内税务局（IRAS）e-Tax Guides,https://www.iras.gov.sg/,P1,web,[ ] 待适配,官方公开各税种电子税务指南（e-Tax Guides PDF）与预提税/激励政策说明。
+dd-528,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,法律法规,马来西亚联邦电子宪报与法律门户（Federal Gazette / LOM）,https://lom.agc.gov.my/,P1,web,[ ] 待适配,马来西亚总检察署官方联邦宪报与成文法汇编 PDF（配合 LOM 门户 (https://lom.agc.gov.my/)）。
+dd-529,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,案例,马来西亚联邦法院与上诉院公开判决（e-Judgments Malaysia）,https://kehakiman.gov.my/,P2,web,[ ] 待适配,马来西亚司法机构官方公布的最新法院判词（Grounds of Judgment）。
+dd-530,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,税务资料,马来西亚内陆税收局（LHDN / IRBM）Public Rulings & Guidelines,https://www.hasil.gov.my/,P1,web,[ ] 待适配,官方公开税务公共裁定（Public Rulings）与实务指引 PDF。
+dd-531,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,法律法规,印尼国家法律文献信息网与法规库（JDIH BPK / Peraturan.go.id）,https://peraturan.bpk.go.id/,P1,web,[ ] 待适配,印尼审计署 JDIH BPK 与法务部 Peraturan.go.id (https://peraturan.go.id/) 结构清晰、覆盖广、PDF 附件规整。
+dd-532,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,案例,印尼最高法院裁判文书目录（Direktori Putusan Mahkamah Agung）,https://putusan3.mahkamahagung.go.id/,P1,web,[ ] 待适配,超过百万份公开判决书，含 HTML 元数据与 PDF 原件，需严格控制并发与速率。
+dd-533,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,税务资料,印尼财政部 JDIH 与税务总局（DJP）法规库,https://jdih.kemenkeu.go.id/,P1,web,[ ] 待适配,印尼财政部财税规章（PMK）与 税务总局 DJP (https://www.pajak.go.id/) 通告（PER/SE）。
+dd-534,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,法律法规,印度国家法典门户与电子宪报（India Code / eGazette）,https://www.indiacode.nic.in/,P1,web,[ ] 待适配,印度中央与各邦成文法官方库（配合 电子宪报 eGazette (https://egazette.gov.in/)）。
+dd-535,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,案例,印度最高法院判决库与 eCourts（SCI Judgments / eSCR）,https://www.sci.gov.in/,P1,web,[ ] 待适配,印度最高法院 电子判例汇编 eSCR (https://digiscr.sci.gov.in/) 与 全国高院判决入口 (https://judgments.ecourts.gov.in/)；存在验证码，公开 AWS S3 镜像数据集可作补充。
+dd-536,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,税务资料,印度所得税局与间接税及海关中央委员会（Income Tax / CBIC）,https://incometaxindia.gov.in/,P1,web,[ ] 待适配,公开直接税与 GST/关税法案、通知（Notifications）与通告（Circulars，配合 CBIC 税讯门户 (https://taxinformation.cbic.gov.in/)）。
+dd-537,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,法律法规,泰国皇家政府公报与国务委员会法制库（Royal Gazette / Krisdika）,https://ratchakitcha.soc.go.th/,P2,web,[ ] 待适配,泰语皇家公报 PDF 与国务委员会法规库 (https://www.ocs.go.th/)，多扫描件或泰语编码需配合 OCR。
+dd-538,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,税务资料,泰国税务局（Revenue Department）税法与解释库,https://www.rd.go.th/,P2,web,[ ] 待适配,公开泰国《税法典》（Revenue Code）、皇家法令与税务局通告解释。
+dd-539,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,法律法规,菲律宾官方公报与最高法院电子图书馆（Official Gazette / SC E-Library）,https://www.officialgazette.gov.ph/,P2,web,[ ] 待适配,公开共和国法案（Republic Acts）、总统行政令及 最高法院电子图书馆 (https://elibrary.judiciary.gov.ph/) 判例。
+dd-540,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,税务资料,菲律宾国内税务局（BIR）Revenue Regulations & Rulings,https://www.bir.gov.ph/,P2,web,[ ] 待适配,公开税收条例（RR）、税务备忘通告（RMC）与税务命令（RMO）。
+dd-541,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,法律法规,阿联酋联邦法律门户（UAE Legislation）与联邦税务局（FTA）,https://uaelegislation.gov.ae/,P1,web,[ ] 待适配,阿英双语官方联邦法律与内阁决议，配合 联邦税务局 FTA (https://tax.gov.ae/) 企业税与增值税指南。
+dd-542,1. 亚洲法域 (Asia),1.8 其他亚洲法域：马来西亚、印尼、印度、泰国、菲律宾、阿联酋 (Other Asian Jurisdictions),—,案例,迪拜国际金融中心法院（DIFC Courts）与 ADGM 法院判决库,https://www.difccourts.ae/,P2,web,[ ] 待适配,全英文普通法商事判例与程序规则，结构清晰。
+dd-139,2. 欧洲法域 (Europe),2.1 欧盟及欧洲跨国机构 (European Union & Council of Europe),—,其他,EuropeanPatentOffice,https://www.epo.org/,P1,web,[ ] 待适配,静态正文或名单页，可直接编写 web XPath 规则适配。
+dd-141,2. 欧洲法域 (Europe),2.1 欧盟及欧洲跨国机构 (European Union & Council of Europe),—,其他,欧盟知识产权局（EUIPO）,https://www.euipo.europa.eu/en,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-150,2. 欧洲法域 (Europe),2.1 欧盟及欧洲跨国机构 (European Union & Council of Europe),—,其他,欧盟商标查询系统,https://eutms.gippc.com.cn/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-543,2. 欧洲法域 (Europe),2.1 欧盟及欧洲跨国机构 (European Union & Council of Europe),—,法律法规,EUR-Lex 欧盟法律门户（CELLAR REST / SPARQL / Bulk）,https://eur-lex.europa.eu/,P0,structured_xml（Formex / Akoma Ntoso）,[ ] 待适配,按 CELEX 编号组织，官方提供网页服务、SPARQL 与批量数据包，已实测 200 OK。
+dd-544,2. 欧洲法域 (Europe),2.1 欧盟及欧洲跨国机构 (European Union & Council of Europe),—,案例,欧盟法院（CURIA / InfoCuria）判例库,https://curia.europa.eu/,P0,web,[ ] 待适配,收录欧盟法院与普通法院判决、裁定及总法律顾问意见书（多语种）。
+dd-545,2. 欧洲法域 (Europe),2.1 欧盟及欧洲跨国机构 (European Union & Council of Europe),—,案例,欧洲人权法院判例库（HUDOC - ECHR）,https://hudoc.echr.coe.int/,P1,web（JSON 接口）,[ ] 待适配,结构化 JSON 检索接口，覆盖欧洲委员会成员国人权与司法判例。
+dd-546,2. 欧洲法域 (Europe),2.1 欧盟及欧洲跨国机构 (European Union & Council of Europe),—,税务资料,欧盟委员会税务与海关同盟（DG TAXUD）法规与数据库,https://taxation-customs.ec.europa.eu/,P1,web,[ ] 待适配,公开欧盟增值税指令（VAT）、关税规则、支柱二（Pillar 2）及跨国税制协调文件。
+dd-009,2. 欧洲法域 (Europe),2.2 英国 (United Kingdom),—,其他,英国公司注册处（Companies House）,https://find-and-update.company-information.service.gov.uk/,P1,web（参数/接口）,[ ] 待适配,公开参数查询或 API 入口，可按固定查询参数归档。
+dd-089,2. 欧洲法域 (Europe),2.2 英国 (United Kingdom),—,通知公告,伦敦国际仲裁院（LCIA）,https://www.lcia.org/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-151,2. 欧洲法域 (Europe),2.2 英国 (United Kingdom),—,其他,TheIntellectualPropertyOffice,https://www.gov.uk/government/organisations/intellectual-property-office,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-167,2. 欧洲法域 (Europe),2.2 英国 (United Kingdom),—,财务报告,伦敦证券交易所（LSE）,https://www.londonstockexchange.com/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-547,2. 欧洲法域 (Europe),2.2 英国 (United Kingdom),—,法律法规,英国国家立法库（legislation.gov.uk）,https://www.legislation.gov.uk/,P0,structured_xml / worldwidelaw_bridge,[ ] 待适配,全球最规范的开放立法 API 之一，任何法规 URL 加 /data.xml 或 /data.akn 即可获结构化全文，Atom feed 支持增量，已实测 200 OK。
+dd-548,2. 欧洲法域 (Europe),2.2 英国 (United Kingdom),—,案例,英国国家档案馆判例库（Find Case Law - National Archives）,https://caselaw.nationalarchives.gov.uk/,P0,structured_xml,[ ] 待适配,提供 LegalDocML (Akoma Ntoso) XML 与开放许可 API，已实测 200 OK；需遵守开放司法许可中关于禁止重识别及自动化决策的附加条款。
+dd-549,2. 欧洲法域 (Europe),2.2 英国 (United Kingdom),—,税务资料,英国税务海关总署内部手册（HMRC Internal Manuals）与税务裁判所判决,https://www.gov.uk/government/collections/hmrc-manuals,P1,web（GOV.UK Content API）,[ ] 待适配,HMRC 全部税种内部手册均可通过 GOV.UK Content API（/api/content/...）获取结构化 JSON；另见 税务与衡平裁判所判决 (https://www.gov.uk/tax-and-chancery-tribunal-decisions)。
+dd-011,2. 欧洲法域 (Europe),2.3 德国 (Germany),—,其他,德国企业信息门户（Firmenwissen）,http://www.firmenwissen.de/index.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-144,2. 欧洲法域 (Europe),2.3 德国 (Germany),—,其他,DPMAregister,https://register.dpma.de/DPMAregister/Uebersicht?lang=en,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-550,2. 欧洲法域 (Europe),2.3 德国 (Germany),—,法律法规,德国联邦司法部法律库（Gesetze im Internet）与联邦法律公报（BGBl.）,https://www.gesetze-im-internet.de/,P0,structured_xml,[ ] 待适配,官方提供全量/单部联邦法律 XML 压缩包索引（gii-toc.xml），联邦法律公报 (https://www.recht.bund.de/) 自 2023 年起免费公开官方 PDF，已实测 200 OK。
+dd-551,2. 欧洲法域 (Europe),2.3 德国 (Germany),—,案例,德国联邦最高法院及七大联邦法院判例库（Rechtsprechung im Internet）,https://www.rechtsprechung-im-internet.de/,P0,structured_xml / oldp_bridge（sources/dd-551.yaml）,[x] 已实网跑通,实网已跑通（de-bgh）：已验证 oldp_bridge 采集德国联邦最高法院（BGH 9. Zivilsenat，IX ZB 72/08）官方 XML ZIP 原件归档、结构化字段提取 + 离线 reparse（external_requests=0），并兼容 Open Legal Data API。
+dd-552,2. 欧洲法域 (Europe),2.3 德国 (Germany),—,税务资料,德国联邦财政部（BMF-Schreiben）与联邦财税法院（BFH）,https://www.bundesfinanzministerium.de/,P1,web,[ ] 待适配,公开德国联邦财政部税务通函（BMF-Schreiben）与联邦财税法院 BFH (https://www.bundesfinanzhof.de/)裁判。
+dd-553,2. 欧洲法域 (Europe),2.4 法国 (France),—,法律法规,法国国家法律门户（Légifrance / PISTE API / DILA Open Data）,https://www.legifrance.gouv.fr/,P0,structured_xml / worldwidelaw_bridge,[ ] 待适配,DILA 官方提供 PISTE OAuth2 API 及全量开放数据包（LEGI/JORF/KALI/CASS/JADE，echanges.dila.gouv.fr），无需硬爬网页。
+dd-554,2. 欧洲法域 (Europe),2.4 法国 (France),—,案例,法国最高法院（Cour de cassation - Judilibre API）与最高行政法院（ArianeWeb）,https://www.courdecassation.fr/,P1,web（PISTE Judilibre API）,[ ] 待适配,法国最高法院通过 Judilibre 开放全量匿名化判决 API，最高行政法院通过 ArianeWeb (https://www.conseil-etat.fr/arianeweb) 公开行政与税务判例。
+dd-555,2. 欧洲法域 (Europe),2.4 法国 (France),—,税务资料,法国公共财政官方公报税务库（BOFiP-Impôts）,https://bofip.impots.gouv.fr/,P0,structured_xml,[ ] 待适配,法国官方税务解释库，除在线检索外还在 data.gouv.fr 提供开放归档数据包下载。
+dd-012,2. 欧洲法域 (Europe),2.5 瑞士 (Switzerland),—,其他,瑞士联邦企业识别号登记簿（UID Register）,https://www.uid.admin.ch/search.aspx?lang=en,暂缓,暂缓（输入/登录型）,[ ] 待适配,需输入特定主体参数或登录授权，无公开全量列表，按需单点核验。
+dd-556,2. 欧洲法域 (Europe),2.5 瑞士 (Switzerland),—,案例,瑞士联邦法律平台（Fedlex）与联邦最高法院（BGer）及联邦税务局（ESTV）,https://www.fedlex.admin.ch/,P0,structured_xml / opencaselaw_bridge（sources/dd-556.yaml）,[x] 已实网跑通,实网已跑通（ch-bger）：已验证 opencaselaw_bridge 对接 mcp.opencaselaw.ch 采集瑞士联邦最高法院（Bundesgericht - BGer，7F_22/2026）判例列表与裁判全文 + 离线 reparse（external_requests=0）；bger.ch 官网直连受 Imperva Incapsula WAF 拦截。
+dd-090,2. 欧洲法域 (Europe),2.6 瑞典 (Sweden),—,通知公告,斯德哥尔摩商会仲裁院（SCC）,https://sccarbitrationinstitute.se/en/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-140,3. 美洲法域 (Americas),3.1 美国 (United States),—,其他,美国专利商标局（USPTO）,https://www.uspto.gov/,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-164,3. 美洲法域 (Americas),3.1 美国 (United States),—,财务报告,美国证监会 EDGAR（SEC EDGAR）,https://www.sec.gov/edgar/searchedgar/companysearch.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-165,3. 美洲法域 (Americas),3.1 美国 (United States),—,财务报告,纳斯达克交易所（Nasdaq）,https://www.sec.gov/edgar/searchedgar/companysearch.html,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-499,3. 美洲法域 (Americas),3.1 美国 (United States),—,法律法规,Federal Register (federalregister.gov),https://www.federalregister.gov/developers/documentation/api/v1,P2,federal_register（sources/dd-499.yaml）,[x] 已实网跑通,实网已跑通：已验证 JSON API 列表 + RFC 6901 JSON Pointer + 全文 XML 转 Markdown + GPO PDF 原件归档（2026-07625）+ 离线 reparse。
+dd-557,3. 美洲法域 (Americas),3.1 美国 (United States),—,法律法规,GovInfo (U.S. Government Publishing Office API & Bulk Data),https://www.govinfo.gov/,P0,structured_xml（GovInfo API / Bulk）,[ ] 待适配,官方提供 CFR、FR、USCODE、BILLS、STATUTE 全量 XML/PDF Bulk 仓库与 API（支持免费申请 api.data.gov Key）。
+dd-558,3. 美洲法域 (Americas),3.1 美国 (United States),—,法律法规,美国众议院《美国法典》官方门户（OLRC - uscode.house.gov）,https://uscode.house.gov/download/download.shtml,P0,structured_xml（USLM XML）,[ ] 待适配,提供《美国法典》全部 Title 的官方 USLM XML、XHTML 与 PDF 批量包直链下载，无需任何 Key。
+dd-559,3. 美洲法域 (Americas),3.1 美国 (United States),—,法律法规,电子联邦法规汇编（eCFR API - ecfr.gov）,https://www.ecfr.gov/developers/documentation/api/v1,P0,structured_xml（eCFR REST/XML）,[ ] 待适配,提供按日期切面的美国联邦行政法规（CFR）完整结构化 XML 与 JSON 元数据，已实测 200 OK。
+dd-560,3. 美洲法域 (Americas),3.1 美国 (United States),—,法律法规,Open States 美国 50 州立法与法案聚合,https://openstates.org/,P1,openstates_bridge（sources/dd-560.yaml）,[x] 已实网跑通,实网已跑通：已通过 .env 配置 OPENSTATES_API_KEY，验证 openstates_bridge 对接 v3.openstates.org/bills 获取华盛顿州法案（HB 1345）并顺着版本链接从 lawfilesext.leg.wa.gov 下载 3 个官方 PDF 原件版本（Passed Legislature / Bill / Engrossed Bill）直提入库 + 离线 reparse（external_requests=0）。
+dd-561,3. 美洲法域 (Americas),3.1 美国 (United States),—,案例,CourtListener / Free Law Project & Juriscraper（美国联邦与各州判例）,https://www.courtlistener.com/,P0,juriscraper_bridge（sources/dd-561.yaml）,[x] 已实网跑通,实网已跑通（us-ca1）：已验证 juriscraper_bridge 对接 CourtListener REST API v4 检索美国联邦第一巡回上诉法院（ca1，25-1348）判例、下载 storage.courtlistener.com 判决书 PDF 原件直提 + 离线 reparse（external_requests=0）。
+dd-562,3. 美洲法域 (Americas),3.1 美国 (United States),—,案例,美国联邦最高法院官网（supremecourt.gov）与 Caselaw Access Project (CAP),https://www.supremecourt.gov/opinions/opinions.aspx,P1,web / structured_xml,[ ] 待适配,最高法院官网公开 Slip Opinions 与 Bound Volumes PDF；哈佛法学院 CAP (https://case.law/)开放美国历史判例数据集。
+dd-563,3. 美洲法域 (Americas),3.1 美国 (United States),—,税务资料,美国国税局（IRS Internal Revenue Bulletins / Written Determinations）与美国税务法院（DAWSON）,https://www.irs.gov/irb,P0,web,[ ] 待适配,公开 IRS 税收公报（IRB）、私信裁定 PLRs/TAMs (https://www.irs.gov/written-determinations) 与 美国税务法院 DAWSON (https://dawson.ustaxcourt.gov/) 判例。
+dd-010,3. 美洲法域 (Americas),3.2 加拿大与英属维尔京群岛 (Canada & BVI),—,其他,BVI 金融服务委员会（BVI Financial Services Commission）,http://www.bvifsc.vg/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-013,3. 美洲法域 (Americas),3.2 加拿大与英属维尔京群岛 (Canada & BVI),—,其他,加拿大联邦企业登记库（Corporations Canada）,https://www.ic.gc.ca/app/scr/cc/CorporationsCanada/fdrlCrpSrch.html?locale=en_CA,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-564,3. 美洲法域 (Americas),3.2 加拿大与英属维尔京群岛 (Canada & BVI),—,法律法规,加拿大司法部联邦法规库（Justice Laws Website & GitHub XML）,https://laws-lois.justice.gc.ca/,P0,structured_xml,[ ] 待适配,加拿大司法部在官网与官方 GitHub 仓库 (https://github.com/justicecanada/laws-lois-xml)同步开源全套英法双语联邦法律与法规 XML，极易全量接入。
+dd-565,3. 美洲法域 (Americas),3.2 加拿大与英属维尔京群岛 (Canada & BVI),—,案例,加拿大最高法院（SCC / Lexum）、联邦法院与 CanLII,https://decisions.scc-csc.ca/,P1,web,[ ] 待适配,加拿大最高法院、联邦法院与加拿大税务法院 (https://decision.tcc-cci.gc.ca/)均基于 Lexum 平台公开判决；CanLII 提供 API（需申请 Key）。
+dd-566,3. 美洲法域 (Americas),3.2 加拿大与英属维尔京群岛 (Canada & BVI),—,税务资料,"加拿大税务局（CRA Income Tax Folios, Circulars & Rulings）",https://www.canada.ca/en/revenue-agency.html,P1,web,[ ] 待适配,公开所得税专题指南（Income Tax Folios）、信息通告（Information Circulars）与 GST/HST 备忘录。
+dd-014,4. 大洋洲法域 (Oceania),4.1 澳大利亚 (Australia),—,其他,澳大利亚商业登记簿（ABR Lookup）,http://abr.business.gov.au/,待复查,待复查（连接/风控限制）,[ ] 待适配,历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。
+dd-567,4. 大洋洲法域 (Oceania),4.1 澳大利亚 (Australia),—,法律法规,澳大利亚联邦立法登记库（Federal Register of Legislation）,https://www.legislation.gov.au/,P0,web,[ ] 待适配,澳大利亚官方权威成文法、条例与公报库，OpenAustralia / AustLII 提供开源解析参考。
+dd-568,4. 大洋洲法域 (Oceania),4.1 澳大利亚 (Australia),—,案例,澳大利亚高等法院（HCA）、联邦法院与 AustLII（Open Australian Legal Corpus）,https://www.hcourt.gov.au/,P1,web,[ ] 待适配,高等法院与联邦法院公开判决，且 HuggingFace isaacus/open-australian-legal-corpus 已汇总超过 22 万篇开放许可法规与判例。
+dd-569,4. 大洋洲法域 (Oceania),4.1 澳大利亚 (Australia),—,税务资料,澳大利亚税务局法律数据库（ATO Legal Database）,https://www.ato.gov.au/law,P1,web,[ ] 待适配,集中公开 ATO 税收裁定（TR/TD/GSTR）、实务声明（PS LA）与判例影响声明。
+dd-570,4. 大洋洲法域 (Oceania),4.2 新西兰 (New Zealand),—,法律法规,新西兰立法门户（New Zealand Legislation - PCO）,https://www.legislation.govt.nz/,P0,structured_xml,[ ] 待适配,新西兰议会法律起草办公室（PCO）提供官方 XML 架构与开放许可法规数据（/subscribe/ 目录可直接遍历 XML）。
+dd-571,4. 大洋洲法域 (Oceania),4.2 新西兰 (New Zealand),—,税务资料,新西兰司法部判决库（NZLII / Courts of NZ）与税务局税务政策（IRD Tax Policy）,https://www.courtsofnz.govt.nz/,P1,web,[ ] 待适配,公开新西兰高级法院判决与税务局政策库 (https://www.taxtechnical.ird.govt.nz/)税务裁定、解释声明（Interpretation Statements）。
+dd-572,5. 非洲法域与国际组织 (Africa & International Organizations),"5.1 非洲开放法律联盟 (Africa — South Africa, Kenya, Nigeria, Tanzania, Uganda)",—,法律法规,Laws.Africa Commons & 非洲各国 LII 联盟（SouthLII / Kenya Law / TanzLII 等）,https://commons.laws.africa/,P1,structured_xml（Akoma Ntoso）,[ ] 待适配,采用统一 Akoma Ntoso XML 标准，遵循开放许可提供南非、肯尼亚、尼日利亚、坦桑尼亚、乌干达等国政府公报、成文法与高院判例。
+dd-088,5. 非洲法域与国际组织 (Africa & International Organizations),5.2 国际组织与跨法域条约/税制库 (UN / OECD / WTO / WIPO / ICC),—,通知公告,国际商会国际仲裁院（ICC）,https://iccwbo.org/,P2,web,[ ] 待适配,静态列表与详情链接，需核验详情页正文与附件提取规则。
+dd-145,5. 非洲法域与国际组织 (Africa & International Organizations),5.2 国际组织与跨法域条约/税制库 (UN / OECD / WTO / WIPO / ICC),—,其他,全球外观设计数据库,https://www3.wipo.int/designdb/en/index.jsp,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-146,5. 非洲法域与国际组织 (Africa & International Organizations),5.2 国际组织与跨法域条约/税制库 (UN / OECD / WTO / WIPO / ICC),—,其他,PATENTSCOPE数据库,https://patentscope.wipo.int/search/zh/search.jsf,P2,web（待定位栏目）,[ ] 待适配,站点首页可读，具体业务列表深层栏目 URL 待进一步定位。
+dd-149,5. 非洲法域与国际组织 (Africa & International Organizations),5.2 国际组织与跨法域条约/税制库 (UN / OECD / WTO / WIPO / ICC),—,其他,WIPOIPPORTAL,https://ipportal.wipo.int/,P2,web（浏览器渲染/动态接口）,[ ] 待适配,动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。
+dd-573,5. 非洲法域与国际组织 (Africa & International Organizations),5.2 国际组织与跨法域条约/税制库 (UN / OECD / WTO / WIPO / ICC),—,税务资料,OECD 国际税收标准与联合国（UN）国际税务合作指南,https://www.oecd.org/en/topics/taxation.html,P1,web,[ ] 待适配,公开 OECD/UN 税收协定范本、转让定价指南、BEPS 支柱一/支柱二（Pillar 1/2）全球最低税规则。
+dd-574,5. 非洲法域与国际组织 (Africa & International Organizations),5.2 国际组织与跨法域条约/税制库 (UN / OECD / WTO / WIPO / ICC),—,法律法规,联合国条约系列（UNTS）、WIPO Lex、WTO 法律文本与联合国国际贸易法委员会（UNCITRAL）,https://treaties.un.org/,P1,web,[ ] 待适配,覆盖多边条约、WIPO Lex 知识产权立法 (https://www.wipo.int/wipolex/)、WTO 争端裁决与 UNCITRAL 国际商事仲裁/破产示范法及判例库（CLOUT）。

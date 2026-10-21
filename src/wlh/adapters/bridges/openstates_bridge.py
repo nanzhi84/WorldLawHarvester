@@ -49,7 +49,7 @@ class Adapter(RecordAdapter):
                     "doc_number": item["identifier"],
                     "issuer": scalar(item.get("from_organization")),
                     "published_at": item.get("first_action_date") or item.get("latest_action_date"),
-                    "status": item.get("status"),
+                    "status": item.get("status") or item.get("latest_action_description"),
                     "detail_url": detail,
                     "text": "# " + item["title"] + "\n\n" + body if body else "",
                     "downloads": downloads,

@@ -16,7 +16,7 @@
    - 不在采集层设计或抽取 `citations`、`amends`、`repeals`、`legal_hierarchy`、`structure_ast` 或复杂的 `case_meta`。
 2. **保留轻量可插拔投影器层（`src/wlh/projections/`）**：
    - 数据库 `wlh.document_row` 表使用干净的英文标准列名存储。
-   - 通过 `src/wlh/projections/template_16col.py` 将 `document_row` 的英文字段无损投影为 16 列中文模板格式（`GET /results` 默认输出）。
+   - 数据库 `wlh.document_row` 表与只读 API（`GET /results`）统一通过 `src/wlh/projections/canonical.py` 输出干净的英文标准键值对（`projection=canonical`），中英字段映射关系独立维护于 [`examples/field_mapping.yaml`](../../examples/field_mapping.yaml)。
 
 ## 3. 影响与后果 (Consequences)
 

@@ -1,0 +1,138 @@
+# Canonical English-to-Chinese Field Mapping Reference
+# GET /results统一输出 canonical 英文规范键值对（见 src/wlh/projections/canonical.py）。
+# 本文件维护 canonical 英文字段与下游《法规案例元数据上传模板.xlsx》16 列中文名称的对照关系。
+
+projection: canonical
+columns:
+  - index: 1
+    canonical_key: title
+    zh_label: 资料名称
+    type: string
+    nullable: false
+    description: NFC 归一化后的法规/案例/公文标准标题
+
+  - index: 2
+    canonical_key: markdown_file
+    zh_label: 解析后文件
+    type: string
+    nullable: false
+    description: 规范化 Markdown 文件名（{safe_title}_{markdown_hash[:8]}[_{volume_order:02d}].md）
+
+  - index: 3
+    canonical_key: doc_type
+    zh_label: 资料类型
+    type: string
+    nullable: false
+    allowed_values:
+      - 法律法规
+      - 政策文件
+      - 案例
+      - 行业标准
+      - 通知公告
+      - 财务报告
+      - 会计准则
+      - 税务资料
+      - 其他
+    description: 受控资料类型枚举
+
+  - index: 4
+    canonical_key: acquired_at
+    zh_label: 采集时间
+    type: datetime
+    nullable: false
+    description: 权威采集时间（UTC ISO-8601 / YYYY-MM-DD HH:MM:SS）
+
+  - index: 5
+    canonical_key: original_file
+    zh_label: 原始文件
+    type: string
+    nullable: true
+    description: 原件规范文件名（如 PDF/DOC/DOCX）；仅网页正文无独立附件时为 null
+
+  - index: 6
+    canonical_key: volume_order
+    zh_label: 文件顺序
+    type: integer
+    nullable: true
+    description: 仅多卷本（role=volume）为 1..N 连续正整数，其余为 null
+
+  - index: 7
+    canonical_key: doc_number
+    zh_label: 文号/案号
+    type: string
+    nullable: true
+    description: 官方发文字号或法院案号
+
+  - index: 8
+    canonical_key: issuer
+    zh_label: 发布机构
+    type: string
+    nullable: true
+    description: 发文机关或审理法院名称
+
+  - index: 9
+    canonical_key: published_at
+    zh_label: 发布日期
+    type: date
+    nullable: true
+    description: 发布/颁布日期（YYYY-MM-DD）
+
+  - index: 10
+    canonical_key: effective_at
+    zh_label: 生效日期
+    type: date
+    nullable: true
+    description: 生效/施行日期（YYYY-MM-DD）
+
+  - index: 11
+    canonical_key: expired_at
+    zh_label: 失效日期
+    type: date
+    nullable: true
+    description: 失效/废止日期（YYYY-MM-DD）
+
+  - index: 12
+    canonical_key: status
+    zh_label: 状态
+    type: string
+    nullable: true
+    description: 效力状态（如现行有效、尚未生效、已修改、已废止或源站原始状态）
+
+  - index: 13
+    canonical_key: source_name
+    zh_label: 来源名称
+    type: string
+    nullable: false
+    description: 官方来源名称（默认继承自 sources/dd-xxx.yaml 的 metadata.source_name）
+
+  - index: 14
+    canonical_key: detail_url
+    zh_label: 来源详情页
+    type: string
+    nullable: false
+    description: 公开来源详情页 URL
+
+  - index: 15
+    canonical_key: source_record_hash
+    zh_label: 来源记录号
+    type: string
+    nullable: false
+    description: 由 (source_id, namespace, external_key) 计算的 64 位小写 hex SHA-256
+
+  - index: 16
+    canonical_key:
+      - source_id
+      - resource_id
+      - version_id
+      - row_index
+      - role
+      - markdown_hash
+      - original_hash
+      - original_media_type
+      - locator
+      - extensions
+    zh_label: 附加寻址与血缘字段
+    type: object
+    nullable: false
+    description: 供下游通过 GET /files/{sha256} 按 markdown_hash / original_hash 从 MinIO CAS 拉取字节流及追溯血缘
+

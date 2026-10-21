@@ -1,5 +1,7 @@
 """OpenCaseLaw Decision records and Swiss Bundesgericht HTML."""
 
+from urllib.parse import urljoin
+
 from wlh.adapters.bridges.common import RecordAdapter, html_records, items, payload
 
 
@@ -7,21 +9,42 @@ class Adapter(RecordAdapter):
     CONTRACT = "wlh.adapter.opencaselaw.v1"
     NAMESPACE = "opencaselaw/decision"
 
+    def next_requests(self, data, acquisition):
+        if not data.lstrip().startswith((b"{", b"[")):
+            return []
+        entries = items(payload(data), ("decisions", "results"))
+        limit = self.config["budget"]["documents"]
+        requests = []
+        for r in entries[:limit]:
+            if (
+                isinstance(r, dict)
+                and r.get("decision_id")
+                and not (r.get("full_text") or r.get("text") or r.get("pdf_url"))
+            ):
+                target = urljoin(acquisition["actual_url"], f"/api/decisions/{r['decision_id']}")
+                requests.append({"url": target, "role": "page", "depth": 1})
+        return requests
+
     def records(self, data, acquisition):
         if data.lstrip().startswith((b"{", b"[")):
+            entries = items(payload(data), ("decisions", "results"))
+            limit = self.config["budget"]["documents"]
             return [
                 {
                     "external_key": str(r.get("decision_id") or r.get("id") or r["docket_number"]),
-                    "title": r.get("title") or r.get("docket_number"),
+                    "title": r.get("title")
+                    or r.get("citation_string_de")
+                    or r.get("docket_number"),
                     "doc_type": "案例",
                     "doc_number": r.get("docket_number") or r.get("case_number"),
-                    "issuer": r.get("court") or r.get("court_name"),
+                    "issuer": r.get("court_name") or r.get("court"),
                     "published_at": r.get("decision_date") or r.get("date"),
                     "text": r.get("full_text") or r.get("text"),
-                    "detail_url": r.get("source_url") or r.get("url"),
+                    "detail_url": r.get("canonical_url") or r.get("source_url") or r.get("url"),
                     "downloads": [{"url": r["pdf_url"]}] if r.get("pdf_url") else [],
                 }
-                for r in items(payload(data), ("decisions", "results"))
+                for r in entries[:limit]
+                if r.get("full_text") or r.get("text") or r.get("pdf_url")
             ]
         return html_records(
             data,

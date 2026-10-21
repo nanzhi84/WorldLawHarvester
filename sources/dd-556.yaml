@@ -1,0 +1,26 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-556
+id: dd-556
+adapter: opencaselaw_bridge
+entry_urls:
+- https://mcp.opencaselaw.ch/api/decisions?court=bger&limit=1
+allowed_hosts:
+- mcp.opencaselaw.ch
+allowed_path_prefixes:
+- /api/decisions
+- /entscheid/
+archive_approved: true
+scope: 瑞士联邦最高法院（Bundesgericht - BGer）公开判例列表与裁判全文有界采集。
+robots: false
+budget:
+  requests: 20
+  documents: 1
+  seconds: 300
+  response_bytes: 52428800
+metadata:
+  source_name: Schweizerisches Bundesgericht (OpenCaseLaw / BGer)
+  document_type: 案例
+  language: de
+  jurisdiction: CH
+fetch:
+  mode: http
+  max_depth: 1

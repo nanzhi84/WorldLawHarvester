@@ -12,6 +12,7 @@ import ssl
 import time
 from datetime import datetime, timezone
 from email.message import Message
+from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 import aiohttp
@@ -40,6 +41,34 @@ BLOCKERS = (
     r"<title[^>]*>[^<]*(?:sign in|log in|login|captcha|access denied|just a moment)",
     r"verify you are human|checking your browser",
 )
+# Public intermediate CA (GlobalSign RSA OV SSL CA 2018 -> GlobalSign Root CA - R3)
+# omitted by certain government attachment CDNs (e.g., g7.cdnchinhphu.vn).
+EXTRA_INTERMEDIATE_CAS_PEM = """-----BEGIN CERTIFICATE-----
+MIIETjCCAzagAwIBAgINAe5fIh38YjvUMzqFVzANBgkqhkiG9w0BAQsFADBMMSAw
+HgYDVQQLExdHbG9iYWxTaWduIFJvb3QgQ0EgLSBSMzETMBEGA1UEChMKR2xvYmFs
+U2lnbjETMBEGA1UEAxMKR2xvYmFsU2lnbjAeFw0xODExMjEwMDAwMDBaFw0yODEx
+MjEwMDAwMDBaMFAxCzAJBgNVBAYTAkJFMRkwFwYDVQQKExBHbG9iYWxTaWduIG52
+LXNhMSYwJAYDVQQDEx1HbG9iYWxTaWduIFJTQSBPViBTU0wgQ0EgMjAxODCCASIw
+DQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKdaydUMGCEAI9WXD+uu3Vxoa2uP
+UGATeoHLl+6OimGUSyZ59gSnKvuk2la77qCk8HuKf1UfR5NhDW5xUTolJAgvjOH3
+idaSz6+zpz8w7bXfIa7+9UQX/dhj2S/TgVprX9NHsKzyqzskeU8fxy7quRU6fBhM
+abO1IFkJXinDY+YuRluqlJBJDrnw9UqhCS98NE3QvADFBlV5Bs6i0BDxSEPouVq1
+lVW9MdIbPYa+oewNEtssmSStR8JvA+Z6cLVwzM0nLKWMjsIYPJLJLnNvBhBWk0Cq
+o8VS++XFBdZpaFwGue5RieGKDkFNm5KQConpFmvv73W+eka440eKHRwup08CAwEA
+AaOCASkwggElMA4GA1UdDwEB/wQEAwIBhjASBgNVHRMBAf8ECDAGAQH/AgEAMB0G
+A1UdDgQWBBT473/yzXhnqN5vjySNiPGHAwKz6zAfBgNVHSMEGDAWgBSP8Et/qC5F
+JK5NUPpjmove4t0bvDA+BggrBgEFBQcBAQQyMDAwLgYIKwYBBQUHMAGGImh0dHA6
+Ly9vY3NwMi5nbG9iYWxzaWduLmNvbS9yb290cjMwNgYDVR0fBC8wLTAroCmgJ4Yl
+aHR0cDovL2NybC5nbG9iYWxzaWduLmNvbS9yb290LXIzLmNybDBHBgNVHSAEQDA+
+MDwGBFUdIAAwNDAyBggrBgEFBQcCARYmaHR0cHM6Ly93d3cuZ2xvYmFsc2lnbi5j
+b20vcmVwb3NpdG9yeS8wDQYJKoZIhvcNAQELBQADggEBAJmQyC1fQorUC2bbmANz
+EdSIhlIoU4r7rd/9c446ZwTbw1MUcBQJfMPg+NccmBqixD7b6QDjynCy8SIwIVbb
+0615XoFYC20UgDX1b10d65pHBf9ZjQCxQNqQmJYaumxtf4z1s4DfjGRzNpZ5eWl0
+6r/4ngGPoJVpjemEuunl1Ig423g7mNA2eymw0lIYkN5SQwCuaifIFJ6GlazhgDEw
+fpolu4usBCOmmQDo8dIm7A9+O4orkjgTHY+GzYZSR+Y0fFukAj6KYXwidlNalFMz
+hriSqHKvoflShx8xpfywgVcvzfTO3PYkz6fiNJBonf6q8amaEsybwMbDqKWwIX7e
+SPY=
+-----END CERTIFICATE-----"""
 
 
 def request_key(request):
@@ -173,13 +202,22 @@ class Transport:
 
     async def start(self):
         if self.session is None:
+            for env_file in (Path.cwd() / ".env", Path(__file__).resolve().parents[3] / ".env"):
+                if env_file.is_file():
+                    for line in env_file.read_text(encoding="utf-8").splitlines():
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, _, v = line.partition("=")
+                            os.environ.setdefault(k.strip(), v.strip().strip("\"'"))
             ssl_ctx = (
                 ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
                 if os.environ.get("SSL_CERT_FILE")
-                else True
+                else ssl.create_default_context()
             )
+            ssl_ctx.load_verify_locations(cadata=EXTRA_INTERMEDIATE_CAS_PEM)
             self.session = aiohttp.ClientSession(
                 headers={"User-Agent": self.config["user_agent"]},
+                trust_env=(os.environ.get("WLH_ALLOW_LOOPBACK") != "1"),
                 connector=aiohttp.TCPConnector(
                     limit=self.config["concurrency"],
                     resolver=Resolver(),
@@ -236,8 +274,11 @@ class Transport:
             async with self.slots:
                 await self.paced()
                 self.budget.active()
+                req_headers = dict(headers) if headers else {}
+                if urlsplit(url).hostname == "v3.openstates.org" and os.environ.get("OPENSTATES_API_KEY"):
+                    req_headers.setdefault("X-API-KEY", os.environ["OPENSTATES_API_KEY"])
                 async with self.session.request(
-                    method, url, data=form, headers=headers, allow_redirects=False
+                    method, url, data=form, headers=req_headers or None, allow_redirects=False
                 ) as response:
                     body = bytearray()
                     async for chunk in response.content.iter_chunked(65536):

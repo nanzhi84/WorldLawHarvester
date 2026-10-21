@@ -40,12 +40,15 @@ class Adapter(RecordAdapter):
     NAMESPACE = "oldp/case"
 
     def records(self, data, acquisition):
+        raw_bytes = data
         zipped = data.startswith(b"PK\x03\x04")
         if zipped:
             data = rii_xml(data, self.config["budget"]["response_bytes"])
         if data.lstrip().startswith((b"{", b"[")):
             result = []
-            for raw in items(payload(data), ("results", "cases", "data")):
+            for raw in items(payload(data), ("results", "cases", "data"))[
+                : self.config["budget"]["documents"]
+            ]:
                 if raw.get("model") and raw["model"] != "cases.case":
                     continue
                 r = raw.get("fields", raw)
@@ -86,6 +89,15 @@ class Adapter(RecordAdapter):
                         for n in tree.xpath(
                             ".//leitsatz|.//tenor|.//tatbestand|.//entscheidungsgruende|.//gruende|.//gründe"
                         )
+                    ),
+                    "original": (
+                        {
+                            "ref": acquisition["archive_ref"],
+                            "kind": "zip",
+                            "byte_size": len(raw_bytes),
+                        }
+                        if zipped
+                        else None
                     ),
                 }
             ]

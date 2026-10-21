@@ -51,9 +51,19 @@ class Adapter(WebAdapter):
             return self.json_adapter.parse(ctx, task, acquisition)
         if detect_real_format(data) == "html":
             tree, _, _ = parse_html(data, acquisition.get("charset"))
-            if tree.xpath('//h1|//*[contains(@class,"doc-number")]|//td[contains(.,"Số ký hiệu")]'):
+            if tree.xpath(
+                '//*[contains(@class,"doc-number")]|//td[contains(.,"Số ký hiệu")]'
+                '|//*[contains(@class,"name") and contains(.,"Số, ký hiệu")]'
+            ):
                 self.detail_url = acquisition["actual_url"]
-        return super().parse(ctx, task, acquisition)
+        result = super().parse(ctx, task, acquisition)
+        if result["targets"]:
+            result["requests"] = []
+        elif any(self.is_detail(r["url"]) for r in result["requests"]):
+            limit = self.config["budget"]["documents"]
+            details = [r for r in result["requests"] if self.is_detail(r["url"])]
+            result["requests"] = details[:limit]
+        return result
 
     def detail_values(self, data, kind, acquisition, url):
         values, title, encoding = super().detail_values(data, kind, acquisition, url)

@@ -1,0 +1,25 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-551
+id: dd-551
+adapter: oldp_bridge
+entry_urls:
+- https://www.rechtsprechung-im-internet.de/jportal/docs/bsjrs/jb-JURE100055033.zip
+allowed_hosts:
+- www.rechtsprechung-im-internet.de
+allowed_path_prefixes:
+- /jportal/docs/bsjrs/
+archive_approved: true
+scope: 德国联邦最高法院（BGH / Rechtsprechung im Internet）官方公开裁判文书 XML ZIP 有界采集。
+robots: false
+budget:
+  requests: 20
+  documents: 1
+  seconds: 300
+  response_bytes: 52428800
+metadata:
+  source_name: Rechtsprechung im Internet (Bundesgerichtshof - BGH)
+  document_type: 案例
+  language: de
+  jurisdiction: DE
+fetch:
+  mode: http
+  max_depth: 1
