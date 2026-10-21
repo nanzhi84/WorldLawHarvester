@@ -1,0 +1,440 @@
+"""Office containers, structured direct extraction and Vietnamese TCVN3 recovery.
+
+Core logic refactored from docs/reference/office_text_extract.py. Inputs are always files
+materialized from verified CAS objects; LibreOffice runs headless in an isolated profile,
+its own process group and a bounded timeout. Windows COM fallbacks are not supported.
+"""
+
+import codecs
+import io
+import os
+import re
+import shutil
+import signal
+import subprocess
+import tempfile
+import zipfile
+from pathlib import Path
+
+from wlh.core import WlhError
+from wlh.extraction.markdown import compact
+from wlh.extraction.vi_tcvn3 import (
+    legal_markdown,
+    normalize_detected_tcvn3,
+    rtf_bytes_to_tcvn3_raw,
+    rtf_uses_tcvn3,
+)
+
+OFFICE_CONTRACT = "wlh.office.v2"
+OFFICE_KINDS = {"doc", "docx", "rtf", "xls", "xlsx"}
+ZIP_MEMBER_KINDS = OFFICE_KINDS | {"pdf", "txt", "html"}
+MAX_ZIP_MEMBERS = 50
+MAX_ZIP_DEPTH = 2
+
+
+def detect_real_format(data: bytes, suffix: str = "") -> str:
+    hint = suffix.lstrip(".")
+    """Real container type from magic bytes and structure, never from a URL suffix."""
+    head = data[:8]
+    if data[:5] == b"%PDF-" or b"%PDF-" in data[:1024]:
+        return "pdf"
+    if head[:4] == b"PK\x03\x04":
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                names = {n.replace("\\", "/") for n in archive.namelist()}
+        except (zipfile.BadZipFile, OSError, ValueError):
+            return "unknown"
+        if "word/document.xml" in names:
+            return "docx"
+        if "xl/workbook.xml" in names:
+            return "xlsx"
+        return "zip"
+    if head == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        if "WordDocument".encode("utf-16-le") in data:
+            return "doc"
+        if "Workbook".encode("utf-16-le") in data or "Book".encode("utf-16-le") in data:
+            return "xls"
+        return "unknown"
+    stripped = data[:4096].lstrip(b"\xef\xbb\xbf \t\r\n")
+    if stripped.startswith(b"{\\rtf"):
+        return "rtf"
+    lowered = re.sub(rb"^(?:<!--.*?-->\s*)+", b"", stripped[:2048], flags=re.S).lower()
+    if (
+        lowered.startswith((b"<!doctype html", b"<html", b"<head", b"<body"))
+        or b"<html" in lowered
+        or b"<body" in lowered
+        or (hint == "html" and lowered.startswith(b"<") and not lowered.startswith(b"<?xml"))
+    ):
+        return "html"
+    if lowered.startswith(b"<?xml") or lowered.startswith(b"<"):
+        return "xml"
+    if lowered.startswith((b"{", b"[")):
+        return "json"
+    sample = data[:65536]
+    if b"\x00" in sample:
+        return "unknown"
+    try:
+        codecs.getincrementaldecoder("utf-8")().decode(sample, final=len(data) <= len(sample))
+        return "txt"
+    except UnicodeDecodeError:
+        return hint if hint in {"txt", "html"} else "unknown"
+
+
+def soffice():
+    configured = os.environ.get("WLH_SOFFICE")
+    for candidate in (
+        configured,
+        shutil.which("soffice"),
+        shutil.which("libreoffice"),
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    ):
+        if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
+            return str(Path(candidate).resolve())
+    return None
+
+
+def bounded_run(args, timeout, cwd=None, limit=65536):
+    """Own process group; stderr never forwarded (it can contain document text/paths)."""
+    process = subprocess.Popen(
+        args,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        env={k: v for k, v in os.environ.items() if k in ("PATH", "LANG", "LC_ALL", "HOME")},
+    )
+    try:
+        output, _ = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.communicate()
+        raise WlhError("libreoffice_timeout") from None
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    return process.returncode, output[:limit]
+
+
+def libreoffice_identity():
+    executable = soffice()
+    if not executable:
+        return {"status": "unavailable"}
+    try:
+        with tempfile.TemporaryDirectory(prefix="wlh-office-id-") as temp:
+            profile = (Path(temp) / "profile").as_uri()
+            code, output = bounded_run(
+                [executable, "-env:UserInstallation=" + profile, "--headless", "--version"], 60
+            )
+        if code != 0:
+            raise ValueError
+        version = output.decode("utf-8", errors="replace").strip().splitlines()[0][:200]
+        return {"status": "available", "version": version}
+    except (OSError, ValueError, IndexError, WlhError):
+        return {"status": "unavailable"}
+
+
+def libreoffice_convert(path, target_format, extension, timeout, kind):
+    executable = soffice()
+    if not executable:
+        raise WlhError("libreoffice_unavailable")
+    with tempfile.TemporaryDirectory(prefix="wlh-office-") as temp:
+        folder = Path(temp)
+        source = folder / ("input." + kind)
+        shutil.copyfile(path, source)
+        code, _ = bounded_run(
+            [
+                executable,
+                "-env:UserInstallation=" + (folder / "profile").as_uri(),
+                "--headless",
+                "--norestore",
+                "--convert-to",
+                target_format,
+                "--outdir",
+                str(folder / "out"),
+                str(source),
+            ],
+            timeout,
+        )
+        target = folder / "out" / ("input." + extension)
+        if code != 0 or not target.is_file():
+            raise WlhError("libreoffice_conversion_failed")
+        return target.read_bytes()
+
+
+def extract_libreoffice_text(path, timeout, kind):
+    raw = libreoffice_convert(path, "txt:Text (encoded):UTF8", "txt", timeout, kind)
+    text = compact(raw.decode("utf-8", errors="replace"))
+    if len(text) < 8:
+        raise WlhError("libreoffice_text_unusable")
+    return text + "\n"
+
+
+def table_markdown(rows):
+    """One Markdown table block; the first row is the header (source geometry unknown)."""
+    width = max(len(row) for row in rows)
+    rows = [row + [""] * (width - len(row)) for row in rows]
+    lines = ["| " + " | ".join(rows[0]) + " |", "| " + " | ".join(["---"] * width) + " |"]
+    lines.extend("| " + " | ".join(row) + " |" for row in rows[1:])
+    return "\n".join(lines)
+
+
+def excel_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return compact(str(value))
+
+
+def normalized_office_archive(path):
+    """Normalize Windows-signed Office ZIPs in memory, preserving the archived original."""
+    with io.BytesIO(Path(path).read_bytes()) as source, zipfile.ZipFile(source) as archive:
+        if not any(
+            "\\" in name or name.startswith("[trash]/") for name in archive.namelist()
+        ):
+            return io.BytesIO(source.getvalue())
+        normalized = io.BytesIO()
+        with zipfile.ZipFile(normalized, "w", compression=zipfile.ZIP_DEFLATED) as output:
+            for member in archive.infolist():
+                name = member.filename.replace("\\", "/")
+                if not name.startswith("[trash]/"):
+                    output.writestr(name, archive.read(member))
+    normalized.seek(0)
+    return normalized
+
+
+def extract_excel(path, kind):
+    """XLS/XLSX workbooks (including spreadsheets disguised as DOC/DOCX) as Markdown tables."""
+    sheets = []
+    try:
+        if kind == "xls":
+            import xlrd
+
+            workbook = xlrd.open_workbook(str(path), formatting_info=False, on_demand=True)
+            for sheet in workbook.sheets():
+                rows = [
+                    [excel_value(sheet.cell_value(r, c)) for c in range(sheet.ncols)]
+                    for r in range(sheet.nrows)
+                ]
+                sheets.append((sheet.name, rows))
+            extractor = "xlrd"
+        else:
+            from openpyxl import load_workbook
+
+            with normalized_office_archive(path) as handle:
+                workbook = load_workbook(handle, read_only=True, data_only=True)
+                try:
+                    for sheet in workbook.worksheets:
+                        rows = [
+                            [excel_value(v) for v in row] for row in sheet.iter_rows(values_only=True)
+                        ]
+                        sheets.append((sheet.title, rows))
+                finally:
+                    workbook.close()
+            extractor = "openpyxl"
+    except Exception:
+        raise WlhError("spreadsheet_invalid") from None
+    parts = []
+    for name, rows in sheets:
+        nonempty = [row for row in rows if any(cell for cell in row)]
+        if not nonempty:
+            continue
+        width = max(len(row) for row in nonempty)
+        rows = [row + [""] * (width - len(row)) for row in nonempty]
+        parts.append("# " + compact(str(name)))
+        parts.append(table_markdown([[c.replace("|", "\\|") for c in row] for row in rows]))
+    value = "\n\n".join(parts).strip()
+    if len(value) < 8:
+        raise WlhError("spreadsheet_empty")
+    return value + "\n", extractor
+
+
+def extract_docx(path):
+    from docx import Document
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    try:
+        with normalized_office_archive(path) as handle:
+            document = Document(handle)
+    except Exception:
+        raise WlhError("docx_invalid") from None
+    parts = []
+    for child in document.element.body.iterchildren():
+        if child.tag.endswith("}p"):
+            paragraph = Paragraph(child, document)
+            text = compact(paragraph.text)
+            if not text:
+                continue
+            style = ((paragraph.style.name if paragraph.style else "") or "").lower()
+            level = re.match(r"heading\s*([1-6])", style)
+            if style == "title":
+                parts.append("# " + text)
+            elif level:
+                parts.append("#" * int(level[1]) + " " + text)
+            else:
+                parts.append(text)
+        elif child.tag.endswith("}tbl"):
+            rows = []
+            for row in Table(child, document).rows:
+                cells = [compact(cell.text).replace("|", "\\|") for cell in row.cells]
+                # Word represents horizontal merges as repeated cell objects.
+                cells = [c for i, c in enumerate(cells) if i == 0 or c != cells[i - 1]]
+                rows.append(cells)
+            if rows:
+                parts.append(table_markdown(rows))
+    value = "\n\n".join(parts).strip()
+    if len(compact(value)) < 8:
+        raise WlhError("docx_text_unusable")
+    return value + "\n"
+
+
+def safe_member(name):
+    parts = [p for p in Path(name.replace("\\", "/")).parts if p not in ("", ".", "/")]
+    if not parts or any(p == ".." for p in parts) or name.startswith(("/", "\\")):
+        return None
+    return "/".join(parts)
+
+
+def unpack_zip(path, folder, max_bytes):
+    """Inner real documents with lineage paths; never hand the outer container to LibreOffice."""
+    members = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            infos = [i for i in archive.infolist() if not i.is_dir()]
+            if len(infos) > MAX_ZIP_MEMBERS:
+                raise WlhError("zip_member_limit_exceeded")
+            if sum(i.file_size for i in infos) > max_bytes:
+                raise WlhError("zip_expanded_size_exceeded")
+            total = 0
+            for index, info in enumerate(sorted(infos, key=lambda i: i.filename)):
+                name = safe_member(info.filename)
+                if name is None:
+                    raise WlhError("zip_member_path_invalid")
+                if name.startswith("__MACOSX/") or Path(name).name.startswith("._"):
+                    continue
+                with archive.open(info) as stream:
+                    data = stream.read(max_bytes - total + 1)
+                total += len(data)
+                if total > max_bytes:
+                    raise WlhError("zip_expanded_size_exceeded")
+                kind = detect_real_format(data)
+                if kind not in ZIP_MEMBER_KINDS and kind != "zip":
+                    continue
+                target = Path(folder) / f"member-{index}"
+                target.write_bytes(data)
+                members.append({"path": name, "file": target, "kind": kind})
+    except (zipfile.BadZipFile, OSError, RuntimeError, ValueError):
+        raise WlhError("zip_invalid") from None
+    if not members:
+        raise WlhError("zip_without_documents")
+    return members
+
+
+def extract_office(path, kind=None, timeout=120):
+    path = Path(path)
+    cfg = (
+        timeout
+        if isinstance(timeout, dict)
+        else {"libreoffice_timeout_seconds": timeout, "office_text_policy": "prefer"}
+    )
+    raw = path.read_bytes()
+    kind = detect_real_format(raw, kind or path.suffix)
+    if kind == "html":
+        from wlh.extraction.markdown import html_to_markdown
+
+        return html_to_markdown(raw), {"kind": kind, "detected_format": kind}
+    if kind in {"zip", "pdf"}:
+        from wlh.config import OCRConfig
+        from wlh.extraction.extract_worker import extract
+
+        result = extract(
+            path,
+            kind,
+            {
+                "ocr": OCRConfig().model_dump(),
+                "parser": cfg,
+                "profile": "generic",
+                "max_bytes": 128 * 1024 * 1024,
+            },
+        )
+        return result[0], {**result[1], "detected_format": kind}
+
+    """Structured direct extraction first (office_text_policy=prefer), LibreOffice fallback."""
+    timeout = cfg["libreoffice_timeout_seconds"]
+    prefer = cfg["office_text_policy"] == "prefer"
+    info = {
+        "kind": kind,
+        "detected_format": kind,
+        "legacy_encoding": None,
+        "legacy_fonts": [],
+        "attempts": [],
+    }
+    if kind in {"xls", "xlsx"}:
+        markdown, info["extractor"] = extract_excel(path, kind)
+        return markdown, info
+    if kind == "docx":
+        if prefer:
+            markdown, info["extractor"] = extract_docx(path), "python_docx"
+        else:
+            markdown = legal_markdown(extract_libreoffice_text(path, timeout, kind))
+            info["extractor"] = "libreoffice_text"
+        markdown, changed = normalize_detected_tcvn3(markdown)
+        if changed:
+            info["legacy_encoding"] = "tcvn3"
+        return markdown, info
+    raw = Path(path).read_bytes()
+    if kind == "rtf":
+        markdown = None
+        if prefer:
+            try:
+                uses, _ = rtf_uses_tcvn3(raw)
+                if uses:
+                    markdown = rtf_bytes_to_tcvn3_raw(raw)
+                else:
+                    from striprtf.striprtf import rtf_to_text
+
+                    markdown = rtf_to_text(raw.decode("latin-1"))
+                info["extractor"] = "rtf_direct_text"
+            except WlhError as exc:
+                info["attempts"].append(exc.code)
+        if markdown is None:
+            markdown, info["extractor"] = (
+                extract_libreoffice_text(path, timeout, kind),
+                "libreoffice_text",
+            )
+        uses, fonts = rtf_uses_tcvn3(raw)
+        info["legacy_fonts"] = fonts
+        # Line-level conversion protects Unicode headers and dates in mixed documents.
+        markdown, converted = normalize_detected_tcvn3(markdown, font_evidence=uses)
+        if converted:
+            info["legacy_encoding"] = "tcvn3"
+        return legal_markdown(markdown), info
+    if kind == "doc":
+        try:
+            text, info["extractor"] = (
+                extract_libreoffice_text(path, timeout, kind),
+                "libreoffice_text",
+            )
+        except WlhError as exc:
+            info["attempts"].append(exc.code)
+            from wlh.config import OCRConfig
+            from wlh.extraction.pdf_scan import extract_pdf
+
+            data = libreoffice_convert(path, "pdf:writer_pdf_Export", "pdf", timeout, kind)
+            with tempfile.TemporaryDirectory(prefix="wlh-office-pdf-") as folder:
+                pdf_path = Path(folder) / "input.pdf"
+                pdf_path.write_bytes(data)
+                text, pdf_info, quality, _ = extract_pdf(
+                    pdf_path, OCRConfig().model_dump(), "generic"
+                )
+            if quality["recommended_route"] not in {"accept", "accept_ocr", "accept_with_warning"}:
+                raise WlhError("quality_check_failed")
+            info.update(extractor="libreoffice_pdf", pdf=pdf_info)
+        text, converted = normalize_detected_tcvn3(text)
+        if converted:
+            info["legacy_encoding"] = "tcvn3"
+        return legal_markdown(text), info
+    raise WlhError("unsupported_office_type")
