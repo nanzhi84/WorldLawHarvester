@@ -95,7 +95,6 @@ class TestSourceConfigValidation:
 
         required_adapters = {
             "web",
-            "vietnam_law",
             "federal_register",
             "structured_xml",
             "worldwidelaw_bridge",
@@ -200,3 +199,67 @@ allowed_path_prefixes:
         with pytest.raises(WlhError) as exc_loopback:
             load_file(loopback_yaml)
         assert exc_loopback.value.code in {"non_public_address", "invalid_source_config"}
+
+    def test_all_registered_source_configs_match_schema_and_matrix_ledger(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every `sources/dd-*.yaml` passes strict public-network schema validation and aligns with the matrix CSV and MD."""
+        import csv
+        import re
+
+        from wlh.config import load_file
+        from wlh.matrix import render_markdown_from_csv
+
+        monkeypatch.setenv("WLH_ALLOW_LOOPBACK", "0")
+        repo_root = Path(__file__).resolve().parents[1]
+        sources_dir = repo_root / "sources"
+        matrix_csv = repo_root / "docs" / "runbooks" / "source-adaptation-matrix.csv"
+        matrix_md = repo_root / "docs" / "runbooks" / "source-adaptation-matrix.md"
+
+        assert render_markdown_from_csv(matrix_csv, matrix_md) == matrix_md.read_text(
+            encoding="utf-8"
+        ), "source-adaptation-matrix.md is out of sync with source-adaptation-matrix.csv"
+
+        with matrix_csv.open(encoding="utf-8-sig", newline="") as handle:
+            matrix_rows = {row["Source ID"]: row for row in csv.DictReader(handle)}
+
+        yaml_files = sorted(sources_dir.glob("*.yaml"))
+        assert len(yaml_files) >= 9
+
+        configured_ids: set[str] = set()
+        for yaml_path in yaml_files:
+            assert re.fullmatch(r"dd-\d{3}\.yaml", yaml_path.name), (
+                f"Invalid source config filename in sources/: {yaml_path.name}"
+            )
+            raw_text = yaml_path.read_text(encoding="utf-8")
+            expected_anchor = (
+                f"# 来源台账：docs/runbooks/source-adaptation-matrix.md#{yaml_path.stem}"
+            )
+            assert expected_anchor in raw_text, f"{yaml_path.name} missing ledger anchor comment"
+
+            cfg = load_file(yaml_path)
+            assert cfg.id == yaml_path.stem
+            assert cfg.archive_approved is True
+            assert cfg.id in matrix_rows, f"{cfg.id} missing from source-adaptation-matrix.csv"
+
+            row = matrix_rows[cfg.id]
+            csv_adapters = {
+                part.strip()
+                for part in row["推荐适配器"].split("（")[0].split("(")[0].split("/")
+            }
+            assert cfg.adapter in csv_adapters, (
+                f"{cfg.id} adapter mismatch between YAML ({cfg.adapter}) and CSV ({row['推荐适配器']})"
+            )
+            assert row["资料类型"] == cfg.metadata.document_type, (
+                f"{cfg.id} document_type mismatch between YAML ({cfg.metadata.document_type}) and CSV ({row['资料类型']})"
+            )
+            configured_ids.add(cfg.id)
+
+        verified_in_csv = {
+            source_id
+            for source_id, row in matrix_rows.items()
+            if row["状态"].startswith("[x]")
+        }
+        assert verified_in_csv.issubset(configured_ids), (
+            f"Matrix [x] sources missing YAML files: {verified_in_csv - configured_ids}"
+        )

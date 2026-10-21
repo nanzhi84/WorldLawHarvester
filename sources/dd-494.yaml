@@ -1,6 +1,6 @@
 # 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-494
 id: dd-494
-adapter: vietnam_law
+adapter: web
 entry_urls:
 - https://vbpl.vn/TW/Pages/vbpq-toanvan.aspx?ItemID=142881
 allowed_hosts:

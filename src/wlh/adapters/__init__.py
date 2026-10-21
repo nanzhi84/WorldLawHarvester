@@ -23,7 +23,6 @@ MODULES = {
         )
     },
     "web": "wlh.adapters.web",
-    "vietnam_law": "wlh.adapters.vietnam_law",
     "federal_register": "wlh.adapters.federal_register",
 }
 

@@ -1,6 +1,6 @@
 # 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-492
 id: dd-492
-adapter: vietnam_law
+adapter: web
 adapter_options:
   max_pages: 1
 entry_urls:
@@ -35,8 +35,25 @@ metadata:
   language: vi
   jurisdiction: VN
 documents:
+  detail_url_patterns:
+  - '[?&]docid=\d+'
   detail_body: never
   attachment_title: file_name
+  fields:
+    title:
+      xpath: (//h4[contains(@class,"title")] | //title)[1]
+    document_number:
+      xpath: //tr[count(td)=2 and normalize-space(td[1])="Số ký hiệu"]/td[2]
+    published_at:
+      xpath: //tr[count(td)=2 and normalize-space(td[1])="Ngày ban hành"]/td[2]
+    effective_at:
+      xpath: //tr[count(td)=2 and (normalize-space(td[1])="Ngày hiệu lực" or normalize-space(td[1])="Ngày có hiệu lực")]/td[2]
+    expired_at:
+      xpath: //tr[count(td)=2 and normalize-space(td[1])="Ngày hết hiệu lực"]/td[2]
+    issuer:
+      xpath: //tr[count(td)=2 and normalize-space(td[1])="Cơ quan ban hành"]/td[2]
+    status:
+      xpath: //tr[count(td)=2 and normalize-space(td[1])="Tình trạng hiệu lực"]/td[2]
 ocr:
   languages: vie
   dpi: 96

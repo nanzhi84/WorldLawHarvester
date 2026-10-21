@@ -68,7 +68,23 @@ def file_name(url):
     return name or "file"
 
 
-def field_value(tree, text, rule):
+DATE_FIELDS = {"published_at", "effective_at", "expired_at"}
+
+
+def parse_date(value, fmt=None):
+    text = value.strip()
+    if not text:
+        return None
+    formats = (fmt,) if fmt else ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y")
+    for candidate in formats:
+        try:
+            return datetime.strptime(text if fmt else text[:10], candidate).date().isoformat()
+        except ValueError:
+            continue
+    raise WlhError("document_date_unparseable")
+
+
+def field_value(tree, text, rule, *, is_date=False):
     if rule.get("value") is not None:
         return rule["value"]
     value = text
@@ -93,19 +109,64 @@ def field_value(tree, text, rule):
         if not match:
             return None
         value = match.groupdict().get("value") or (match.group(1) if match.groups() else match[0])
-    if rule.get("date_format"):
-        try:
-            value = datetime.strptime(value.strip(), rule["date_format"]).date().isoformat()
-        except ValueError:
-            raise WlhError("document_date_unparseable") from None
+    if not value.strip():
+        return None
+    if rule.get("date_format") or is_date:
+        return parse_date(value, rule.get("date_format"))
     return value.strip() or None
+
+
+def _aspnet_next_page(tree, url, page, max_pages, config):
+    forms = tree.xpath('//form[@method="post" or @method="POST"]')
+    if not forms:
+        return None, None
+    form = forms[0]
+    events = []
+    for href in form.xpath(".//a/@href"):
+        match = re.search(r"__doPostBack\('([^']+)','(Page\$[^']+)'\)", href)
+        if match:
+            events.append(match.groups())
+    following = next((e for e in events if e[1] == f"Page${page + 1}"), None)
+    if following is None:
+        return None, None
+    if page >= max_pages:
+        return None, "page_limit_exceeded"
+    fields = {}
+    for node in form.xpath(".//input[@name] | .//select[@name] | .//textarea[@name]"):
+        if node.tag == "select":
+            options = node.xpath("./option[@selected]") or node.xpath("./option")[:1]
+            fields[node.get("name")] = options[0].get("value", "") if options else ""
+        elif node.get("type", "").lower() not in {"submit", "button", "image", "checkbox", "radio"}:
+            fields[node.get("name")] = node.get("value", "")
+    action = guard(config, urljoin(url, form.get("action", "")))
+    target, argument = following
+    return {
+        "url": action,
+        "method": "POST",
+        "idempotent": True,
+        "form": dict(fields, __EVENTTARGET=target, __EVENTARGUMENT=argument),
+        "role": "page",
+        "depth": 0,
+        "meta": {"page": page + 1},
+    }, None
 
 
 class Adapter(Base):
     CONTRACT = "wlh.adapter.web.v3"
+    PLANNING_OPTIONS = ("max_pages",)
+
+    @staticmethod
+    def validate_options(options):
+        allowed = {"max_pages"}
+        if set(options) - allowed:
+            raise ValueError("unexpected_adapter_options")
+        pages = options.get("max_pages", 1)
+        if type(pages) is not int or not 1 <= pages <= 10000:
+            raise ValueError("invalid_max_pages")
 
     def __init__(self, config):
         super().__init__(config)
+        self.max_pages = config["adapter_options"].get("max_pages", 1)
         rules = config["documents"]
         self.details = [re.compile(p) for p in rules["detail_url_patterns"]]
         self.attachment = re.compile(rules["attachment_url_pattern"])
@@ -133,6 +194,7 @@ class Adapter(Base):
         url = acquisition["actual_url"] or acquisition["request_url"]
         detail = self.is_detail(url)
         requests, attachments = [], []
+        truncated = None
         if kind == "html":
             tree, _, _ = parse_html(data, acquisition["charset"])
             seen = set()
@@ -148,7 +210,19 @@ class Adapter(Base):
                     elif (not self.details or self.is_detail(link)) and ctx.follow_links(task):
                         requests.append({"url": link, "role": "page", "depth": task["depth"] + 1})
                 elif ctx.follow_links(task):
-                    requests.append({"url": link, "role": "page", "depth": task["depth"] + 1})
+                    if (
+                        not self.details
+                        or self.is_detail(link)
+                        or task["depth"] + 1 < self.config["fetch"]["max_depth"]
+                    ):
+                        requests.append({"url": link, "role": "page", "depth": task["depth"] + 1})
+            if not detail and ctx.follow_links(task):
+                page = (request.get("meta") or {}).get("page", 1)
+                next_req, truncated = _aspnet_next_page(
+                    tree, url, page, self.max_pages, self.config
+                )
+                if next_req is not None:
+                    requests.append(next_req)
         targets = []
         if detail and (kind in TEXT_KINDS | BINARY_KINDS):
             inputs = [{"request": request, "role": "detail"}]
@@ -175,7 +249,11 @@ class Adapter(Base):
                     "inputs": inputs,
                 }
             )
-        return {"requests": requests, "targets": targets}
+        return {
+            "requests": requests,
+            "targets": targets,
+            **({"truncated": truncated} if truncated else {}),
+        }
 
     def deliverable_text(self, ctx, data, kind, acquisition):
         if kind == "html":
@@ -209,7 +287,9 @@ class Adapter(Base):
         if kind == "html":
             tree, _, encoding = parse_html(data, acquisition["charset"])
             for name, rule in fields.items():
-                values[name] = field_value(tree, tree.text_content(), rule)
+                values[name] = field_value(
+                    tree, tree.text_content(), rule, is_date=(name in DATE_FIELDS)
+                )
             h1 = next(
                 (
                     re.sub(r"\s+", " ", node.text_content()).strip()

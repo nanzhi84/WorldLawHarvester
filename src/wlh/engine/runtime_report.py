@@ -30,13 +30,14 @@ def failure_category(error):
         "reparse_input_unavailable",
     }:
         return "required_input_missing"
-    if code in {"inputs_unavailable", "page_limit_exceeded"}:
+    if code in {"inputs_unavailable", "page_limit_exceeded", "zero_targets_discovered"}:
         return "enumeration_incomplete"
     return "parse_failed"
 
 
 def build_report(run_id, adapter, checkpoint, truncated, finish_reason):
     with connect() as c:
+        mode = one(c, "SELECT mode FROM wlh.run WHERE id=%s", (run_id,))["mode"]
         tasks = c.execute(
             """SELECT kind,state,count(*) AS n FROM wlh.task WHERE run_id=%s
             GROUP BY kind,state""",
@@ -51,15 +52,14 @@ def build_report(run_id, adapter, checkpoint, truncated, finish_reason):
             "SELECT count(*) AS n FROM wlh.acquisition WHERE run_id=%s AND acquisition_kind='http'",
             (run_id,),
         )["n"]
-    counts = {"request": {}, "target": {}}
-    for row in tasks:
-        counts[row["kind"]][row["state"]] = row["n"]
-    with connect() as c:
         errors = c.execute(
             """SELECT kind,error,count(*) AS n FROM wlh.task WHERE run_id=%s
             AND error IS NOT NULL GROUP BY kind,error""",
             (run_id,),
         ).fetchall()
+    counts = {"request": {}, "target": {}}
+    for row in tasks:
+        counts[row["kind"]][row["state"]] = row["n"]
     failures = {}
     for row in errors:
         category = failure_category(row["error"])
@@ -70,11 +70,24 @@ def build_report(run_id, adapter, checkpoint, truncated, finish_reason):
         category = failure_category(truncated)
         failures[category] = max(1, failures.get(category, 0))
     pending = counts["request"].get("pending", 0)
+    failed_requests = counts["request"].get("failed", 0)
+    zero_targets = (
+        mode in {"collect", "reparse"}
+        and finish_reason == "finished"
+        and not truncated
+        and not pending
+        and not failed_requests
+        and not sum(counts["target"].values())
+    )
+    if zero_targets:
+        category = failure_category("zero_targets_discovered")
+        failures[category] = failures.get(category, 0) + 1
     complete = (
         finish_reason == "finished"
         and not truncated
         and not pending
-        and not counts["request"].get("failed", 0)
+        and not failed_requests
+        and not zero_targets
     )
     return {
         "adapter": adapter,
@@ -90,7 +103,15 @@ def build_report(run_id, adapter, checkpoint, truncated, finish_reason):
             "site_population": "UNKNOWN",
             "unknown_coverage": True,
             "known_gaps": sorted(
-                {value for value in (truncated, checkpoint.get("truncated")) if value}
+                {
+                    value
+                    for value in (
+                        truncated,
+                        checkpoint.get("truncated"),
+                        "zero_targets_discovered" if zero_targets else None,
+                    )
+                    if value
+                }
             ),
             "absence_semantics": "unobserved_is_unknown_never_deleted",
         },

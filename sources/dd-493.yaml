@@ -1,6 +1,6 @@
 # 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-493
 id: dd-493
-adapter: vietnam_law
+adapter: worldwidelaw_bridge
 entry_urls:
 - https://congbao.chinhphu.vn/
 allowed_hosts:
@@ -25,6 +25,9 @@ metadata:
 fetch:
   mode: http
   max_depth: 1
+documents:
+  detail_url_patterns:
+  - /van-ban/[^/?#]+\.htm$
 ocr:
   engine: br-ocr-v1
   languages: vie
