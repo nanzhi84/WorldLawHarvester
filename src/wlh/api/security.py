@@ -103,7 +103,7 @@ class Settings(Strict):
 
 
 class Cursor(Strict):
-    projection: str = "template_16col"
+    projection: str = "canonical"
     purpose: str = Field(default="results-cursor", pattern="^results-cursor$")
     caller: str
     source: str

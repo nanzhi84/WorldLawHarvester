@@ -199,6 +199,7 @@ class RecordAdapter(Base):
                     input=0,
                     quality=ctx.text_quality(markdown),
                     parsers=["markdown", "quality"],
+                    original=record.get("original"),
                 )
             ]
         for unit in units:

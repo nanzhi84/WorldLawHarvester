@@ -133,8 +133,8 @@ async def results(request):
             len(query.getall(key)) != 1 for key in query
         ):
             raise ValueError
-        projection = query.get("projection", "template_16col")
-        if projection not in {"template_16col", "canonical"}:
+        projection = query.get("projection", "canonical")
+        if projection != "canonical":
             raise ValueError
         source_id = query.get("source_id")
         if source_id is not None and (

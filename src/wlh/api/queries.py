@@ -22,7 +22,7 @@ def published(c):
     return pointer["published_snapshot_id"]
 
 
-def results(settings, tokens, caller, source_id, limit, cursor_value, projection="template_16col"):
+def results(settings, tokens, caller, source_id, limit, cursor_value, projection="canonical"):
     project = PROJECTORS[projection]
     if source_id is not None:
         caller.authorize(source_id)

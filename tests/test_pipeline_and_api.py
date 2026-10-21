@@ -200,30 +200,34 @@ callers:
 
                 headers = {"Authorization": f"Bearer {token_secret}"}
 
-                resp_16 = await client.get("/results?source_id=dd-902", headers=headers)
-                assert resp_16.status == 200
-                data_16 = await resp_16.json()
-                assert data_16["snapshot_id"] == snapshot_id
-                items_16 = data_16["items"]
-                assert len(items_16) == 3
+                resp_default = await client.get("/results?source_id=dd-902", headers=headers)
+                assert resp_default.status == 200
+                data_default = await resp_default.json()
+                assert data_default["snapshot_id"] == snapshot_id
+                items_default = data_default["items"]
+                assert len(items_default) == 3
 
-                vol1, vol2, annex = items_16[0], items_16[1], items_16[2]
-                assert vol1["文件顺序"] == "1"
-                assert vol1["解析后文件"].endswith("_01.md")
-                assert vol1["文号/案号"] == "100/2026/ND-CP"
-                assert vol1["发布机构"] == "Government"
-                assert vol1["发布日期"] == "2026-05-01"
-                assert vol1["生效日期"] == "2026-07-01"
-                assert vol1["状态"] == "Effective"
-                assert vol1["来源记录号"] == vol2["来源记录号"] == annex["来源记录号"]
+                vol1, vol2, annex = items_default[0], items_default[1], items_default[2]
+                assert vol1["volume_order"] == 1
+                assert vol1["markdown_file"].endswith("_01.md")
+                assert vol1["doc_number"] == "100/2026/ND-CP"
+                assert vol1["issuer"] == "Government"
+                assert vol1["published_at"] == "2026-05-01"
+                assert vol1["effective_at"] == "2026-07-01"
+                assert vol1["status"] == "Effective"
+                assert (
+                    vol1["source_record_hash"]
+                    == vol2["source_record_hash"]
+                    == annex["source_record_hash"]
+                )
 
-                assert vol2["文件顺序"] == "2"
-                assert vol2["解析后文件"].endswith("_02.md")
+                assert vol2["volume_order"] == 2
+                assert vol2["markdown_file"].endswith("_02.md")
 
-                assert annex["文件顺序"] == ""
-                assert annex["资料名称"] == "Tariff Schedule Annex"
-                assert annex["文号/案号"] == ""
-                assert annex["发布机构"] == ""
+                assert annex["volume_order"] is None
+                assert annex["title"] == "Tariff Schedule Annex"
+                assert annex["doc_number"] is None
+                assert annex["issuer"] is None
 
                 resp_can = await client.get(
                     "/results?source_id=dd-902&projection=canonical", headers=headers
@@ -231,12 +235,9 @@ callers:
                 assert resp_can.status == 200
                 data_can = await resp_can.json()
                 items_can = data_can["items"]
-                assert len(items_can) == 3
+                assert items_can == items_default
                 assert items_can[0]["role"] == "volume"
-                assert items_can[0]["volume_order"] == 1
-                assert items_can[0]["doc_number"] == "100/2026/ND-CP"
                 assert items_can[2]["role"] == "independent_attachment"
-                assert items_can[2]["doc_number"] is None
 
                 for sha_key in ("markdown_hash", "original_hash"):
                     file_sha = vol1[sha_key]

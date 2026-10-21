@@ -11,7 +11,7 @@
 ## Core ideas
 
 - **受控获取与五大开源生态桥接（Adapter Bridges）**：彻底弃用臃肿的 `crawl4ai`，以轻量受控 HTTP / CDP 浏览器底座先将所有外部原始字节归档至私有 S3 CAS 并校验 SHA-256；原生提供五大桥接器无缝复用 `Juriscraper`、`oldp-ingestor`、`Open States`、`OpenCaseLaw` 与 `World Wide Law` 的站点解析逻辑，与原生 Adapter 统一汇聚为唯一的 16 列对标候选结构 `RawRecord`，支持零外部网络离线重解析（`wlh reparse`）。
-- **聚焦 16 列核心采集模型 + 可插拔投影器**：采集层只负责把数据干净抓下来，核心表（`wlh.document_row`）用英文标准字段存储 16 列所需属性，拒绝过度设计；同时保留 `src/wlh/projections/` 可插拔投影设计，默认通过 `template_16col` 对齐 16 列中文上传模板。
+- **聚焦 16 列核心采集模型 + 可插拔投影器**：采集层只负责把数据干净抓下来，核心表（`wlh.document_row`）与只读接口（`GET /results?projection=canonical`）统一使用英文规范键值对，拒绝过度设计；同时在 [examples/field_mapping.yaml](examples/field_mapping.yaml) 中维护与下游 16 列中文模板的中英字段映射表。
 - **内网 `br-ocr-v1` 与 Office 深度提取管道**：复用并内化 [office_text_extract.py](docs/reference/office_text_extract.py) 与 [production_document_parse.py](docs/reference/production_document_parse.py)，内置容器魔数探测、Office 结构化直提、越南语 TCVN3 历史字体逐行恢复、基于 `PyMuPDF` (`fitz`) 的 PDF 逐页墨迹扫描件判定、内网 `br-ocr-v1` 版面 OCR（带 S3 CAS 结果缓存，兼顾 `tesseract` 备选）与多语种参数化的客观质量门禁（`quality_check`）。
 
 ## Get started
@@ -73,7 +73,7 @@ uv run wlh snapshot create
 uv run wlh snapshot list
 uv run wlh snapshot publish <snapshot_id>
 
-# 启动只读查询与文件下载服务（默认提供 template_16col 16 列中文投影与 canonical 英文投影）
+# 启动只读查询与文件下载服务（统一提供 canonical 英文规范键值对投影）
 uv run wlh serve --config examples/api.yaml --host 127.0.0.1 --port 8080
 ```
 
