@@ -1,7 +1,7 @@
 # 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-502
 id: dd-502
 adapter: web
-scope: "中国政府网国家规章库（gjgzk）部门规章列表发现与规章全文有界采集"
+scope: "中国政府网国家规章库（gjgzk）国务院部门规章与地方政府规章列表发现及规章全文有界采集"
 entry_urls: ["https://www.gov.cn/zhengce/xxgk/gjgzk/index.htm"]
 allowed_hosts: ["www.gov.cn", "user.www.gov.cn", "sousuoht.www.gov.cn"]
 allowed_path_prefixes: ["/zhengce/", "/static/js/", "/athena/forward/"]

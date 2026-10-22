@@ -46,6 +46,8 @@ class _IPv6ThreadingHTTPServer(ThreadingHTTPServer):
 
 class _BridgeFixtureHandler(BaseHTTPRequestHandler):
     sample_pdf: bytes = b""
+    scotus_pdf_1: bytes = b""
+    scotus_pdf_2: bytes = b""
     secondary_netloc: str = ""
     active_source_id: str = ""
     rii_zip: bytes = _make_rii_zip_bytes(
@@ -1281,24 +1283,60 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/tax-and-chancery-tribunal-decisions":
-            body = b"""<!DOCTYPE html><html><head><title>Tax and Chancery Tribunal Decisions</title></head><body>
-            <a href="/tax-and-chancery-tribunal-decisions/2026-ukut-00301-tcc-hmrc-v-acme">HMRC v Acme</a>
+        elif self.path in (
+            "/government/collections/hmrc-manuals",
+            "/hmrc-internal-manuals/appeals-reviews-and-tribunals-guidance",
+        ):
+            body = b"""<!DOCTYPE html><html><head><title>HMRC internal manuals</title></head><body>
+            <main id="content">
+              <a href="/hmrc-internal-manuals/admin-law-manual">Admin Law Manual</a>
+            </main>
             </body></html>"""
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/tax-and-chancery-tribunal-decisions/2026-ukut-00301-tcc-hmrc-v-acme":
-            body = """<!DOCTYPE html><html><head><title>HMRC v Acme Ltd [2026] UKUT 301 (TCC)</title></head><body>
+        elif self.path == "/hmrc-internal-manuals/admin-law-manual":
+            body = b"""<!DOCTYPE html><html><head><title>Admin Law Manual</title></head><body>
             <main id="content">
-              <h1>HM Revenue &amp; Customs v Acme Ltd: [2026] UKUT 301 (TCC)</h1>
+              <h1>Admin Law Manual</h1>
+              <a href="/hmrc-internal-manuals/admin-law-manual/adml1000">ADML1000 - Incorrect Advice to Customers</a>
+              <a href="/hmrc-internal-manuals/admin-law-manual/adml1100">ADML1100 - Incorrect Advice to Customers: Background</a>
+            </main>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/hmrc-internal-manuals/admin-law-manual/adml1000":
+            body = """<!DOCTYPE html><html><head><title>ADML1000 - Incorrect Advice to Customers - HMRC internal manual</title></head><body>
+            <main id="content">
               <dl>
-                <dt>From:</dt><dd>Upper Tribunal (Tax and Chancery Chamber)</dd>
-                <dt>Published:</dt><dd>21 October 2026</dd>
+                <dt>From:</dt><dd>HM Revenue &amp; Customs</dd>
+                <dt>Published</dt><dd>11 March 2016</dd>
               </dl>
-              <p>Decision of the Upper Tribunal (Tax and Chancery Chamber) on corporation tax relief.</p>
+              <h1>Admin Law Manual</h1>
+              <h1>ADML1000 - Incorrect Advice to Customers</h1>
+              <p>This manual explains what to do when a customer claims that HM Revenue and Customs has given them incorrect advice.</p>
+            </main>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/hmrc-internal-manuals/admin-law-manual/adml1100":
+            body = """<!DOCTYPE html><html><head><title>ADML1100 - Incorrect Advice to Customers: Background - HMRC internal manual</title></head><body>
+            <main id="content">
+              <dl>
+                <dt>From:</dt><dd>HM Revenue &amp; Customs</dd>
+                <dt>Published</dt><dd>11 March 2016</dd>
+              </dl>
+              <h1>Admin Law Manual</h1>
+              <h1>ADML1100 - Incorrect Advice to Customers: Background</h1>
+              <p>HMRC aims to provide accurate and timely advice to taxpayers under statutory collection and management powers.</p>
             </main>
             </body></html>""".encode("utf-8")
             self.send_response(200)
@@ -1623,45 +1661,32 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/us/500/html/":
-            body = b"""<!DOCTYPE html><html><head><title>U.S. Reports Volume 500</title></head><body>
-            <a href="/us/500/html/0001-01.html">Case 1</a>
-            <a href="/us/500/html/0013-01.html">Case 2</a>
+        elif self.path in (
+            "/opinions/opinions.aspx",
+            "/opinions/slipopinion/25",
+            "/opinions/relatingtoorders/25",
+        ):
+            body = b"""<!DOCTYPE html><html><head><title>Opinions of the Court - 2025</title></head><body>
+            <a href="/opinions/25pdf/26a388_q86b.pdf">26A388 People Not Politicians v. Onder</a>
+            <a href="/opinions/25pdf/24-43_2b35.pdf">24-43 West Virginia v. B. P. J.</a>
+            <a href="/opinions/25pdf/609us2r67_g3bi.pdf">Preliminary Print</a>
             </body></html>"""
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/us/500/html/0001-01.html":
-            body = """<!DOCTYPE html><html><head><title>Stevens v. Department of the Treasury</title></head><body>
-            <section class="casebody">
-              <section class="head-matter">
-                <h4 class="parties">STEVENS v. DEPARTMENT OF THE TREASURY et al.</h4>
-                <p class="docketnumber">No. 89-1821.</p>
-                <p class="decisiondate">Decided April 24, 1991</p>
-              </section>
-              <article class="opinion"><p>Justice Blackmun delivered the opinion of the Court concerning the Age Discrimination in Employment Act of 1967.</p></article>
-            </section>
-            </body></html>""".encode("utf-8")
+        elif self.path == "/opinions/25pdf/26a388_q86b.pdf":
+            body = self.scotus_pdf_1 or self.sample_pdf
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Type", "application/pdf")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/us/500/html/0013-01.html":
-            body = """<!DOCTYPE html><html><head><title>Eastern Airlines, Inc. v. Floyd</title></head><body>
-            <section class="casebody">
-              <section class="head-matter">
-                <h4 class="parties">EASTERN AIRLINES, INC. v. FLOYD et al.</h4>
-                <p class="docketnumber">No. 89-1598.</p>
-                <p class="decisiondate">Decided April 17, 1991</p>
-              </section>
-              <article class="opinion"><p>Justice Marshall delivered the opinion of the Court regarding Warsaw Convention liability for mental injury.</p></article>
-            </section>
-            </body></html>""".encode("utf-8")
+        elif self.path == "/opinions/25pdf/24-43_2b35.pdf":
+            body = self.scotus_pdf_2 or self.sample_pdf
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Type", "application/pdf")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -1671,8 +1696,8 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
         ):
             body = b"""<!DOCTYPE html><html><head><title>SCC Decisions</title></head><body>
             <main>
-              <a href="/scc-csc/scc-csc/en/item/40000/index.do?iframe=true">Christian Chukwuedozie Chijindu v. Law Society of Ontario</a>
-              <a href="/scc-csc/scc-csc/en/item/40001/index.do?iframe=true">R. v. Bissonnette</a>
+              <a href="/scc-csc/scc-csc/en/item/40000/index.do">Christian Chukwuedozie Chijindu v. Law Society of Ontario</a>
+              <a href="/scc-csc/scc-csc/en/item/40001/index.do">R. v. Bissonnette</a>
             </main>
             </body></html>"""
             self.send_response(200)
@@ -1843,6 +1868,19 @@ class TestStructuredXmlAndBridgeAdapters:
                 tmp_path / "sample.pdf",
                 ["Official Legal Document Full Text Body Content for Verification."],
             ).read_bytes()
+        if not _BridgeFixtureHandler.scotus_pdf_1:
+            _BridgeFixtureHandler.scotus_pdf_1 = make_native_pdf(
+                tmp_path / "scotus1.pdf",
+                [
+                    "SUPREME COURT OF THE UNITED STATES No. 26A388 PEOPLE NOT POLITICIANS, ET AL. v. ROBERT ONDER, ET AL. ON APPLICATION FOR STAY [September 25, 2026] PER CURIAM. The application for stay presented to the Court is denied."
+                ],
+            ).read_bytes()
+            _BridgeFixtureHandler.scotus_pdf_2 = make_native_pdf(
+                tmp_path / "scotus2.pdf",
+                [
+                    "SUPREME COURT OF THE UNITED STATES Syllabus WEST VIRGINIA ET AL. v. B. P. J., BY HER NEXT FRIEND AND MOTHER, HEATHER JACKSON CERTIORARI TO THE UNITED STATES COURT OF APPEALS FOR THE FOURTH CIRCUIT No. 24–43. Argued January 13, 2026—Decided June 30, 2026 Held: The judgment of the Court of Appeals is reversed."
+                ],
+            ).read_bytes()
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), _BridgeFixtureHandler)
         port = server.server_address[1]
@@ -1919,8 +1957,12 @@ metadata:
                     if source_id == "dd-520":
                         assert projected["issuer"] == "国税庁"
                     if source_id == "dd-549":
-                        assert projected["issuer"] == "Upper Tribunal (Tax and Chancery Chamber)"
-                        assert projected["published_at"] == "2026-10-21"
+                        assert projected["issuer"] == "HM Revenue & Customs"
+                        assert projected["published_at"] == "2016-03-11"
+                    if source_id == "dd-562":
+                        assert projected["issuer"] == "Supreme Court of the United States"
+                        assert projected["published_at"] in {"2026-09-25", "2026-06-30"}
+                        assert " v. " in (projected["title"] or "")
 
             server.shutdown()
             thread.join(timeout=2.0)
@@ -1958,7 +2000,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-520", "税务资料", "第1章　納税義務者"),
             ("dd-527", "税务资料", "Tax Treatment of Research & Development Expenditure"),
             ("dd-548", "案例", "[2024] UKSC 1"),
-            ("dd-549", "税务资料", "[2026] UKUT 301 (TCC)"),
+            ("dd-549", "税务资料", "ADML1000"),
             ("dd-550", "法律法规", "GG"),
             ("dd-551", "案例", "VIII ZR 12/25"),
             ("dd-556", "案例", "4A_101/2026"),
@@ -1966,7 +2008,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-559", "法律法规", "1 CFR Part 1"),
             ("dd-560", "法律法规", "HB 1091"),
             ("dd-561", "案例", "25-1402"),
-            ("dd-562", "案例", "89-1821"),
+            ("dd-562", "案例", "26A388"),
             ("dd-563", "税务资料", "2026-16"),
             ("dd-564", "法律法规", "A-1"),
             ("dd-565", "案例", "2022 SCC 18"),
@@ -1996,6 +2038,19 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             _BridgeFixtureHandler.sample_pdf = make_native_pdf(
                 tmp_path / "sample.pdf",
                 ["Official Legal Document Full Text Body Content for Verification."],
+            ).read_bytes()
+        if not _BridgeFixtureHandler.scotus_pdf_1:
+            _BridgeFixtureHandler.scotus_pdf_1 = make_native_pdf(
+                tmp_path / "scotus1.pdf",
+                [
+                    "SUPREME COURT OF THE UNITED STATES No. 26A388 PEOPLE NOT POLITICIANS, ET AL. v. ROBERT ONDER, ET AL. ON APPLICATION FOR STAY [September 25, 2026] PER CURIAM. The application for stay presented to the Court is denied."
+                ],
+            ).read_bytes()
+            _BridgeFixtureHandler.scotus_pdf_2 = make_native_pdf(
+                tmp_path / "scotus2.pdf",
+                [
+                    "SUPREME COURT OF THE UNITED STATES Syllabus WEST VIRGINIA ET AL. v. B. P. J., BY HER NEXT FRIEND AND MOTHER, HEATHER JACKSON CERTIORARI TO THE UNITED STATES COURT OF APPEALS FOR THE FOURTH CIRCUIT No. 24–43. Argued January 13, 2026—Decided June 30, 2026 Held: The judgment of the Court of Appeals is reversed."
+                ],
             ).read_bytes()
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), _BridgeFixtureHandler)
@@ -2096,6 +2151,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                 "dd-517",
                 "dd-527",
                 "dd-548",
+                "dd-549",
                 "dd-550",
                 "dd-551",
                 "dd-558",
@@ -2152,6 +2208,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         "dd-513",
                         "dd-560",
                         "dd-561",
+                        "dd-562",
                         "dd-565",
                     }:
                         assert {
@@ -2198,8 +2255,12 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                     if source_id == "dd-520":
                         assert projected["issuer"] == "国税庁"
                     if source_id == "dd-549":
-                        assert projected["issuer"] == "Upper Tribunal (Tax and Chancery Chamber)"
-                        assert projected["published_at"] == "2026-10-21"
+                        assert projected["issuer"] == "HM Revenue & Customs"
+                        assert projected["published_at"] == "2016-03-11"
+                    if source_id == "dd-562":
+                        assert projected["issuer"] == "Supreme Court of the United States"
+                        assert projected["published_at"] in {"2026-09-25", "2026-06-30"}
+                        assert " v. " in (projected["title"] or "")
 
             server.shutdown()
             server_v6.shutdown()
@@ -2286,3 +2347,157 @@ documents:
             server.shutdown()
             thread.join(timeout=2.0)
             server.server_close()
+
+    def test_browser_detail_subrequest_http_503_propagates_failure_and_blocks_target(
+        self, initialized_db: dict[str, str], tmp_path: Path
+    ) -> None:
+        """When a rendered_dom detail page encounters a same-origin/in-scope subrequest HTTP 503, WebAdapter.parse and collect propagate `http_503` and refuse to register or commit the truncated detail target."""
+        from types import SimpleNamespace
+
+        from wlh.adapters.web import Adapter as WebAdapter
+        from wlh.config import load_file
+        from wlh.core import WlhError
+
+        repo_root = Path(__file__).resolve().parents[1]
+        dd512_cfg = load_file(repo_root / "sources" / "dd-512.yaml").model_dump()
+        adapter = WebAdapter(dd512_cfg)
+        truncated_detail_html = (
+            '<!DOCTYPE html><html data-wlh-truncated="http_503"><head><title>Draft</title></head><body>'
+            '<div class="info-dt-l"><h3>Luật sửa đổi</h3>Cơ quan chủ trì soạn thảo: Bộ Tư pháp</div>'
+            '<div id="nav-home">Ngày đăng: 05/08/2026 Toàn văn hồ sơ dự án</div>'
+            "</body></html>"
+        ).encode("utf-8")
+        detail_url = "https://duthaoonline.quochoi.vn/dt/luat-sua-doi/260805100059615084"
+        fake_ctx = SimpleNamespace(
+            runtime=SimpleNamespace(mode="collect"),
+            read=lambda _acq: truncated_detail_html,
+            follow_links=lambda _task: True,
+        )
+        parsed = adapter.parse(
+            fake_ctx,
+            {"payload": {"url": detail_url, "role": "page"}, "depth": 1},
+            {
+                "outcome": "ok",
+                "mime_type": "text/html",
+                "charset": "utf-8",
+                "actual_url": detail_url,
+                "request_url": detail_url,
+            },
+        )
+        assert parsed.get("truncated") == "http_503"
+        assert parsed["targets"] == []
+
+        with pytest.raises(WlhError) as exc_build:
+            adapter.build(
+                fake_ctx,
+                {
+                    "identity": {
+                        "namespace": "url",
+                        "external_key": detail_url,
+                        "public_url": detail_url,
+                        "recheck_locator": {"url": detail_url, "role": "page"},
+                    }
+                },
+                [
+                    {
+                        "acquisition": {
+                            "id": "acq-1",
+                            "archive_ref": "0" * 64,
+                            "mime_type": "text/html",
+                            "charset": "utf-8",
+                            "actual_url": detail_url,
+                            "request_url": detail_url,
+                            "byte_size": len(truncated_detail_html),
+                        }
+                    }
+                ],
+            )
+        assert exc_build.value.code == "http_503"
+
+        class _DetailSubrequest503Handler(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def do_GET(self) -> None:
+                if self.path == "/dt":
+                    body = b'<!DOCTYPE html><html><body><a href="/dt/law-draft/260805100059615084">Draft 1</a></body></html>'
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif self.path == "/dt/law-draft/260805100059615084":
+                    body = (
+                        b"<!DOCTYPE html><html><head><title>Draft 1</title>"
+                        b"<script>fetch('/dt/api/dossier');</script></head><body>"
+                        b'<div class="info-dt-l"><h3>Draft 1</h3>C\xc6\xa1 quan ch\xe1\xbb\xa7 tr\xc3\xac so\xe1\xba\xa1n th\xe1\xba\xa3o: B\xe1\xbb\x99 T\xc6\xb0 ph\xc3\xa1p</div>'
+                        b'<div id="nav-home">Ng\xc3\xa0y \xc4\x91\xc4\x83ng: 05/08/2026 To\xc3\xa0n v\xc4\x83n h\xe1\xbb\x93 s\xc6\xa1 d\xe1\xbb\xb1 \xc3\xa1n</div>'
+                        b"</body></html>"
+                    )
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif self.path == "/dt/api/dossier":
+                    body = b'{"error":"service_unavailable"}'
+                    self.send_response(503)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), _DetailSubrequest503Handler)
+        srv_port = srv.server_address[1]
+        srv_thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        srv_thread.start()
+        try:
+            sub503_yaml = tmp_path / "dd-997.yaml"
+            sub503_yaml.write_text(
+                f"""
+id: dd-997
+adapter: web
+archive_approved: true
+robots: false
+scope: "Detail page subrequest 503 propagation E2E test"
+entry_urls:
+  - "http://127.0.0.1:{srv_port}/dt"
+allowed_hosts:
+  - "127.0.0.1"
+allowed_path_prefixes:
+  - "/dt"
+delay: 0.0
+fetch:
+  mode: rendered_dom
+  wait_until: load
+  max_depth: 1
+  retries: 0
+  page_timeout_ms: 15000
+metadata:
+  source_name: "Subrequest 503 Test"
+  document_type: "法律法规"
+  language: "vi"
+  jurisdiction: "VN"
+documents:
+  detail_url_patterns:
+    - "^http://127\\\\.0\\\\.0\\\\.1:{srv_port}/dt/[^/?#]+/\\\\d{{15,}}$"
+  detail_body: always
+  content_xpath: '//div[contains(@class, "info-dt-l")] | //div[@id="nav-home"]'
+""".strip(),
+                encoding="utf-8",
+            )
+            from wlh.engine.runs import execute_run, prepare_run
+
+            run_id = prepare_run(sub503_yaml, "collect")
+            res = execute_run(run_id)
+            assert res["status"] == "failed", f"Expected detail subrequest 503 run to fail: {res}"
+            assert "http_503" in res["errors"]
+            assert "http_503" in res["report"]["coverage"]["known_gaps"]
+            assert res["report"]["failures"].get("network_failed", 0) >= 1
+        finally:
+            srv.shutdown()
+            srv_thread.join(timeout=2.0)
+            srv.server_close()

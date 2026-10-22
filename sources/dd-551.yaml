@@ -8,7 +8,7 @@ allowed_hosts:
 allowed_path_prefixes:
 - /jportal/docs/bsjrs/
 archive_approved: true
-scope: 德国联邦最高法院（BGH / Rechtsprechung im Internet）官方公开目录与裁判文书 XML ZIP 有界采集。
+scope: 德国联邦最高法院及七大联邦法院判例库（Rechtsprechung im Internet）官方公开目录 bsjrs-toc.xml 与裁判文书 XML ZIP 有界采集。
 robots: false
 budget:
   requests: 50
@@ -16,7 +16,7 @@ budget:
   seconds: 300
   response_bytes: 52428800
 metadata:
-  source_name: Rechtsprechung im Internet (Bundesgerichtshof - BGH)
+  source_name: 德国联邦最高法院及七大联邦法院判例库（Rechtsprechung im Internet）
   document_type: 案例
   language: de
   jurisdiction: DE

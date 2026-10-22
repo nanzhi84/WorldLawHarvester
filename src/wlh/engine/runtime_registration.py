@@ -22,11 +22,21 @@ def register(
     """Persist follow-up requests/targets and complete the parent in one transaction."""
 
     def apply(c: DbConn) -> None:
-        if result.get("truncated"):
+        non_error_trunc = (
+            None,
+            "document_budget_exceeded",
+            "max_depth_exceeded",
+            "page_limit_exceeded",
+        )
+        if result.get("truncated") and (
+            self.truncated in non_error_trunc
+            or result["truncated"] not in non_error_trunc
+        ):
             self.truncated = result["truncated"]
             self.checkpoint["truncated"] = self.truncated
         for request in result.get("requests", []):
             self.insert_request(c, request, request.get("depth", depth))
+        skipped_budget = False
         for target in result.get("targets", []):
             key = target_key(target)
             count: int = cast(dict[str, Any], c.execute(
@@ -89,7 +99,9 @@ def register(
                 ),
             )
             if state == "skipped":
-                self.truncated = "document_budget_exceeded"
+                skipped_budget = True
+                if self.truncated in non_error_trunc:
+                    self.truncated = "document_budget_exceeded"
                 self.checkpoint["truncated"] = self.truncated
                 continue
             for position, item in enumerate(target["inputs"]):
@@ -131,7 +143,7 @@ def register(
                 ),
             )
 
-        if self.truncated == "document_budget_exceeded":
+        if skipped_budget or self.truncated == "document_budget_exceeded":
             active_targets: int = cast(
                 dict[str, Any],
                 c.execute(

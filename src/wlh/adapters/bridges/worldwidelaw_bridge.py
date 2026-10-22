@@ -81,9 +81,16 @@ class Adapter(WebAdapter):
         return result
 
     def detail_values(
-        self, data: bytes, kind: str, acquisition: Mapping[str, Any], url: str
+        self,
+        data: bytes,
+        kind: str,
+        acquisition: Mapping[str, Any],
+        url: str,
+        text: str | None = None,
     ) -> tuple[dict[str, Any], str | None, str | None]:
-        values, title, encoding = super().detail_values(data, kind, acquisition, url)
+        values, title, encoding = super().detail_values(
+            data, kind, acquisition, url, text=text
+        )
         if kind != "html":
             return values, title, encoding
         tree, _, _ = parse_html(data, acquisition.get("charset"))
