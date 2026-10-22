@@ -1,0 +1,28 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-512
+id: dd-512
+adapter: web
+scope: "越南国会法律文书与立法草案门户（duthaoonline.quochoi.vn）指定法律法案详情有界采集"
+entry_urls: ["https://duthaoonline.quochoi.vn/dt/luat-sua-doi-bo-sung-mot-so-dieu-cua-09-luat-ve-quan-su-quoc-phong/260805100059615084"]
+allowed_hosts: ["duthaoonline.quochoi.vn"]
+allowed_path_prefixes: ["/dt/"]
+archive_approved: true
+robots: false
+delay: 0.5
+user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+fetch: {mode: rendered_dom, wait_until: domcontentloaded, max_depth: 0, retries: 2, page_timeout_ms: 60000}
+budget: {requests: 10, documents: 1, seconds: 180, response_bytes: 33554432}
+metadata:
+  source_name: "越南国会法律文书系统（Văn bản quy phạm pháp luật Quốc hội）"
+  document_type: "法律法规"
+  language: "vi"
+  jurisdiction: "VN"
+documents:
+  detail_url_patterns: ['^https://duthaoonline\.quochoi\.vn/dt/[^/]+/\d+$']
+  attachment_url_pattern: '^\b$'
+  detail_body: always
+  content_xpath: '//div[contains(@class, "info-dt-l")] | //div[@id="nav-tabContent"]'
+  fields:
+    title: {xpath: '//title'}
+    document_number: {xpath: '//div[contains(@class, "info-dt-l")]', regex: 'Dự kiến thông qua:\s*([^\n\r+]+)'}
+    issuer: {xpath: '//div[contains(@class, "info-dt-l")]', regex: 'Cơ quan chủ trì soạn thảo:\s*(.+?)\s+Cơ quan chủ trì thẩm tra'}
+

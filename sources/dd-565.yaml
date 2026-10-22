@@ -1,0 +1,27 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-565
+id: dd-565
+adapter: web
+scope: "加拿大最高法院（Supreme Court of Canada）官方案件卷宗与裁判摘要（Case No. 40000）有界采集"
+entry_urls: ["https://www.scc-csc.ca/cases-dossiers/search-recherche/40000/"]
+allowed_hosts: ["www.scc-csc.ca"]
+allowed_path_prefixes: ["/cases-dossiers/"]
+archive_approved: true
+robots: true
+delay: 0.5
+fetch: {mode: http, max_depth: 0, retries: 2, page_timeout_ms: 60000}
+budget: {requests: 10, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "加拿大最高法院（SCC / Lexum）、联邦法院与 CanLII"
+  document_type: "案例"
+  language: "en"
+  jurisdiction: "CA"
+documents:
+  detail_url_patterns: ['^https://www\.scc-csc\.ca/cases-dossiers/search-recherche/\d+/$']
+  attachment_url_pattern: '^\b$'
+  detail_body: always
+  content_xpath: '//main'
+  fields:
+    title: {xpath: '//p[@id="soc"]'}
+    document_number: {xpath: '//h2[@id="case-no"]'}
+    issuer: {value: "Supreme Court of Canada"}
+    published_at: {xpath: '//main', regex: '(\d{4}-\d{2}-\d{2})\s+Judgment of the Court'}

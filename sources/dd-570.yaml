@@ -1,0 +1,28 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-570
+id: dd-570
+adapter: web
+scope: "新西兰立法门户（New Zealand Legislation PCO）指定公共法案（2024 No 1）全文与 PDF 原件有界采集"
+entry_urls: ["https://www.legislation.govt.nz/act/public/2024/1/en/latest/"]
+allowed_hosts: ["www.legislation.govt.nz"]
+allowed_path_prefixes: ["/act/public/2024/"]
+archive_approved: true
+robots: true
+delay: 0.5
+user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+fetch: {mode: http, max_depth: 0, retries: 2, page_timeout_ms: 60000}
+budget: {requests: 10, documents: 1, seconds: 180, response_bytes: 33554432}
+metadata:
+  source_name: "新西兰立法门户（New Zealand Legislation - PCO）"
+  document_type: "法律法规"
+  language: "en"
+  jurisdiction: "NZ"
+documents:
+  detail_url_patterns: ['^https://www\.legislation\.govt\.nz/act/public/\d+/\d+/en/latest/$']
+  attachment_url_pattern: '^\b$'
+  detail_body: always
+  content_xpath: '//div[@id="legislation"]'
+  fields:
+    title: {xpath: '(//h1)[1]'}
+    document_number: {xpath: '//div[@id="legislation"]', regex: 'Public Act\s+(\d{4}\s+No\s+\d+)'}
+    issuer: {value: "Parliamentary Counsel Office (New Zealand)"}
+    published_at: {xpath: '//div[@id="legislation"]', regex: 'Date of assent\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})'}

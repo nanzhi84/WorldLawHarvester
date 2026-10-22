@@ -1,0 +1,27 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-516
+id: dd-516
+adapter: web
+scope: "越南财政部 / 税务总局财税政策官方解答门户（portal.mof.gov.vn/hoidapcstc）指定财税政策解答（166356）全文有界采集"
+entry_urls: ["https://portal.mof.gov.vn/hoidapcstc/home/cthoidap/166356"]
+allowed_hosts: ["portal.mof.gov.vn"]
+allowed_path_prefixes: ["/hoidapcstc/"]
+archive_approved: true
+robots: false
+delay: 0.5
+user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+fetch: {mode: http, max_depth: 0, retries: 2, page_timeout_ms: 60000}
+budget: {requests: 10, documents: 1, seconds: 180, response_bytes: 33554432}
+metadata:
+  source_name: "越南财政部 / 税务总局法规与公文库（Bộ Tài chính / Tổng cục Thuế）"
+  document_type: "税务资料"
+  language: "vi"
+  jurisdiction: "VN"
+documents:
+  detail_url_patterns: ['^https://portal\.mof\.gov\.vn/hoidapcstc/home/cthoidap/\d+$']
+  attachment_url_pattern: '^\b$'
+  detail_body: always
+  content_xpath: '//div[contains(@class, "new-content")]/div[position() <= 3]'
+  fields:
+    title: {xpath: '(//div[contains(@class, "new-content")]/div[1]//div[contains(text(), "V/v:")])[1]'}
+    document_number: {xpath: '(//div[contains(@class, "new-content")]/div[1]//div[contains(text(), "V/v:")])[1]', regex: 'Nghị định số\s+([0-9]+/[0-9]+/NĐ-CP)'}
+    issuer: {value: "Bộ Tài chính (Cục Thuế)"}

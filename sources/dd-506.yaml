@@ -1,0 +1,26 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-506
+id: dd-506
+adapter: web
+scope: "香港司法机构法律参考资料系统（LRS）指定高等法院原讼法庭判案书（HCAL 371/2021）全文有界采集"
+entry_urls: ["https://legalref.judiciary.hk/lrs/common/ju/ju_body.jsp?DIS=158000"]
+allowed_hosts: ["legalref.judiciary.hk"]
+allowed_path_prefixes: ["/lrs/common/ju/"]
+archive_approved: true
+robots: false
+delay: 0.5
+fetch: {mode: http, max_depth: 0, retries: 2, page_timeout_ms: 60000}
+budget: {requests: 10, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "香港司法机构法律参考资料系统（LRS）"
+  document_type: "案例"
+  language: "en"
+  jurisdiction: "HK"
+documents:
+  detail_url_patterns: ['^https://legalref\.judiciary\.hk/lrs/common/ju/ju_body\.jsp\?DIS=\d+$']
+  detail_body: always
+  content_xpath: '//form[@name="search_body"]/table/tr/td/*'
+  fields:
+    title: {xpath: '//title'}
+    document_number: {xpath: '(//p[contains(text(), "[") or contains(text(), "/")])[1]'}
+    issuer: {value: "High Court of the Hong Kong Special Administrative Region"}
+    published_at: {xpath: '//body', regex: 'on\s+(\d{1,2}/\d{1,2}/\d{4})'}

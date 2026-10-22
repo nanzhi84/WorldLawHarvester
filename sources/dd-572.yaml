@@ -1,0 +1,27 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-572
+id: dd-572
+adapter: web
+scope: "非洲开放法律联盟（Kenya Law / Laws.Africa AKN 门户）指定成文法（Act No. 718 of 1963）全文有界采集"
+entry_urls: ["https://new.kenyalaw.org/akn/ke/act/1963/718/eng@1963-12-10"]
+allowed_hosts: ["new.kenyalaw.org"]
+allowed_path_prefixes: ["/akn/ke/act/"]
+archive_approved: true
+robots: false
+delay: 0.5
+fetch: {mode: http, max_depth: 0, retries: 2, page_timeout_ms: 60000}
+budget: {requests: 10, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "Laws.Africa Commons & 非洲各国 LII 联盟（SouthLII / Kenya Law / TanzLII 等）"
+  document_type: "法律法规"
+  language: "en"
+  jurisdiction: "KE"
+documents:
+  detail_url_patterns: ['^https://new\.kenyalaw\.org/akn/ke/act/\d+/\d+(?:/[^/]+)?$']
+  attachment_url_pattern: '^\b$'
+  detail_body: always
+  content_xpath: '//div[contains(@class, "akn-akomaNtoso")] | //main'
+  fields:
+    title: {xpath: '(//h1)[1]'}
+    document_number: {xpath: '(//h2)[1]'}
+    issuer: {value: "National Council for Law Reporting (Kenya Law)"}
+    published_at: {xpath: '//dl', regex: 'Date\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})'}

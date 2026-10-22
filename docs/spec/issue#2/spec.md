@@ -111,10 +111,10 @@
 ## 3. 分阶段实施 Checklist 与真实执行验收标准 (Verification)
 
 ### Phase 1（Batch A · P0 第一优先）：越南法域全量未跑通源攻坚批次（10 个源）
-- [ ] `dd-512`（越南国会法律文书系统 `quochoi.vn`）实网 `collect -> reparse` 验证与 `sources/dd-512.yaml` 落库。
+- [x] `dd-512`（越南国会法律文书系统 `quochoi.vn`）实网 `collect -> reparse` 验证与 `sources/dd-512.yaml` 落库。
 - [x] `dd-513`（越南政府门户政策与法规建设专栏 `xaydungchinhsach.chinhphu.vn`）实网 `collect -> reparse` 验证与 `sources/dd-513.yaml` 落库。
-- [ ] `dd-514`（越南最高人民法院判例门户 `anle.toaan.gov.vn`）实网 `collect -> reparse` 验证与 `sources/dd-514.yaml` 落库。
-- [ ] `dd-516`（越南财政部 / 税务总局法规与公文库 `gdt.gov.vn`）实网 `collect -> reparse` 验证与 `sources/dd-516.yaml` 落库。
+- [x] `dd-514`（越南最高人民法院判例门户 `anle.toaan.gov.vn`）实网 `collect -> reparse` 验证与 `sources/dd-514.yaml` 落库。
+- [x] `dd-516`（越南财政部 / 税务总局法规与公文库 `gdt.gov.vn`）实网 `collect -> reparse` 验证与 `sources/dd-516.yaml` 落库。
 - [x] `dd-495`（LuatVietnam 法规库 `luatvietnam.vn`）实网 `collect -> reparse` 验证与 `sources/dd-495.yaml` 落库。
 - [x] `dd-496`（LuatVietnam 判决库 `luatvietnam.vn/ban-an/`）实网 `collect -> reparse` 验证与 `sources/dd-496.yaml` 落库。
 - [ ] `dd-497`（Thư Viện Pháp Luật 法规库 `thuvienphapluat.vn`）实网 `collect -> reparse` 验证与 `sources/dd-497.yaml` 落库。
@@ -128,12 +128,12 @@
 - [ ] `dd-547`（英国国家立法库 `legislation.gov.uk`）实网 `collect -> reparse` 验证与 `sources/dd-547.yaml` 落库。
 - [x] `dd-548`（英国国家档案馆判例库 `caselaw.nationalarchives.gov.uk`）实网 `collect -> reparse` 验证与 `sources/dd-548.yaml` 落库。
 - [x] `dd-550`（德国联邦司法部法律库 `gesetze-im-internet.de`）实网 `collect -> reparse` 验证与 `sources/dd-550.yaml` 落库。
-- [ ] `dd-517`（日本 e-Gov 法令 API v2 `laws.e-gov.go.jp`）实网 `collect -> reparse` 验证与 `sources/dd-517.yaml` 落库。
+- [x] `dd-517`（日本 e-Gov 法令 API v2 `laws.e-gov.go.jp`）实网 `collect -> reparse` 验证与 `sources/dd-517.yaml` 落库。
 - [x] `dd-558`（美国众议院《美国法典》门户 `uscode.house.gov`）实网 `collect -> reparse` 验证与 `sources/dd-558.yaml` 落库。
 - [x] `dd-559`（美国电子联邦法规汇编 `ecfr.gov`）实网 `collect -> reparse` 验证与 `sources/dd-559.yaml` 落库。
 - [x] `dd-564`（加拿大司法部联邦法规库 `laws-lois.justice.gc.ca`）实网 `collect -> reparse` 验证与 `sources/dd-564.yaml` 落库。
-- [ ] `dd-570`（新西兰立法门户 `legislation.govt.nz`）实网 `collect -> reparse` 验证与 `sources/dd-570.yaml` 落库。
-- [ ] `dd-572`（非洲开放法律联盟 `commons.laws.africa`）实网 `collect -> reparse` 验证与 `sources/dd-572.yaml` 落库。
+- [x] `dd-570`（新西兰立法门户 `legislation.govt.nz`）实网 `collect -> reparse` 验证与 `sources/dd-570.yaml` 落库。
+- [x] `dd-572`（非洲开放法律联盟 `commons.laws.africa`）实网 `collect -> reparse` 验证与 `sources/dd-572.yaml` 落库。
 - [x] 在 `tests/test_source_adapters.py` 中补齐 Batch B 所有实网跑通源的本地样本黑盒回放，并同步更新台账。
 
 ### Phase 3（Batch C）：中国大陆中央政务、司法与监管公开栏目批次（9 个源）
@@ -150,8 +150,8 @@
 - [x] 在 `tests/test_source_adapters.py` 中补齐 Batch C 所有实网跑通源的本地样本黑盒回放，并同步更新台账。
 
 ### Phase 4（Batch D）：港澳台、亚太及欧美澳加最高法院与税务公报批次（12 个源）及全局快照验收
-- [ ] `dd-506`（香港司法机构法律参考资料系统 LRS）实网 `collect -> reparse` 验证与 `sources/dd-506.yaml` 落库。
-- [ ] `dd-507`（香港税务局释义及执行指引 DIPN）实网 `collect -> reparse` 验证与 `sources/dd-507.yaml` 落库。
+- [x] `dd-506`（香港司法机构法律参考资料系统 LRS）实网 `collect -> reparse` 验证与 `sources/dd-506.yaml` 落库。
+- [x] `dd-507`（香港税务局释义及执行指引 DIPN）实网 `collect -> reparse` 验证与 `sources/dd-507.yaml` 落库。
 - [ ] `dd-508`（澳门印务局公报与法例）实网 `collect -> reparse` 验证与 `sources/dd-508.yaml` 落库。
 - [ ] `dd-509`（中国台湾全国法规资料库）实网 `collect -> reparse` 验证与 `sources/dd-509.yaml` 落库。
 - [x] `dd-520`（日本国税厅法令解释通达 NTA）实网 `collect -> reparse` 验证与 `sources/dd-520.yaml` 落库。
@@ -159,9 +159,9 @@
 - [x] `dd-549`（英国税务海关总署内部手册 HMRC Internal Manuals）实网 `collect -> reparse` 验证与 `sources/dd-549.yaml` 落库。
 - [ ] `dd-552`（德国联邦财政部 BMF-Schreiben）实网 `collect -> reparse` 验证与 `sources/dd-552.yaml` 落库。
 - [ ] `dd-555`（法国公共财政官方公报税务库 BOFiP-Impôts）实网 `collect -> reparse` 验证与 `sources/dd-555.yaml` 落库。
-- [ ] `dd-562`（美国联邦最高法院官网 `supremecourt.gov`）实网 `collect -> reparse` 验证与 `sources/dd-562.yaml` 落库。
+- [x] `dd-562`（美国联邦最高法院官网 `supremecourt.gov`）实网 `collect -> reparse` 验证与 `sources/dd-562.yaml` 落库。
 - [x] `dd-563`（美国国税局 IRS Internal Revenue Bulletins）实网 `collect -> reparse` 验证与 `sources/dd-563.yaml` 落库。
-- [ ] `dd-565`（加拿大最高法院 SCC）实网 `collect -> reparse` 验证与 `sources/dd-565.yaml` 落库。
+- [x] `dd-565`（加拿大最高法院 SCC）实网 `collect -> reparse` 验证与 `sources/dd-565.yaml` 落库。
 - [x] 在 `tests/test_source_adapters.py` 中补齐 Batch D 所有实网跑通源的本地样本黑盒回放，并同步更新台账。
 - [x] 执行全局 `wlh snapshot create`、`wlh snapshot publish` 与 `GET /results?projection=canonical` 端到端核验，通过 `uv run pytest`、`uv run ruff check src tests` 与 `harness doctor`。
 

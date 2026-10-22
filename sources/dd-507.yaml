@@ -1,0 +1,26 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-507
+id: dd-507
+adapter: web
+scope: "香港税务局（IRD）释义及执行指引（DIPN No. 3 利得税费用分摊指引）目录与 PDF 原件有界采集"
+entry_urls: ["https://www.ird.gov.hk/eng/ppr/dip.htm"]
+allowed_hosts: ["www.ird.gov.hk"]
+allowed_path_prefixes: ["/eng/ppr/", "/eng/pdf/"]
+archive_approved: true
+robots: false
+delay: 0.5
+fetch: {mode: http, max_depth: 1, retries: 2, page_timeout_ms: 60000}
+budget: {requests: 10, documents: 1, seconds: 180, response_bytes: 33554432}
+metadata:
+  source_name: "香港税务局（IRD）释义及执行指引（DIPN）"
+  document_type: "税务资料"
+  language: "en"
+  jurisdiction: "HK"
+documents:
+  detail_url_patterns: ['^https://www\.ird\.gov\.hk/eng/ppr/dip\.htm$']
+  attachment_url_pattern: 'dipn03\.pdf$'
+  detail_body: auto
+  fields:
+    title: {xpath: '//tr[td/a[contains(@href, "dipn03.pdf")]]/td[2]'}
+    document_number: {value: "DIPN No. 3"}
+    issuer: {value: "Inland Revenue Department"}
+

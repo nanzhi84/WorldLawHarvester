@@ -1,0 +1,17 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-517
+id: dd-517
+adapter: structured_xml
+scope: "日本デジタル庁 e-Gov 法令 API 指定法令（行政手続法 405AC0000000088）标准 XML 全文有界采集"
+entry_urls: ["https://laws.e-gov.go.jp/api/1/lawdata/405AC0000000088"]
+allowed_hosts: ["laws.e-gov.go.jp"]
+allowed_path_prefixes: ["/api/1/lawdata/"]
+archive_approved: true
+robots: false
+delay: 0.5
+budget: {requests: 10, documents: 1, seconds: 180, response_bytes: 33554432}
+fetch: {mode: http, max_depth: 0, page_timeout_ms: 60000}
+metadata:
+  source_name: "e-Gov 法令检索 / 法令 API v2（デジタル庁）"
+  document_type: "法律法规"
+  language: "ja"
+  jurisdiction: "JP"

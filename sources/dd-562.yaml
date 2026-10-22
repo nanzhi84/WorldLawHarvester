@@ -1,0 +1,27 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-562
+id: dd-562
+adapter: web
+scope: "美国联邦最高法院判例（Caselaw Access Project 官方静态档案 500 U.S. 1）全文有界采集"
+entry_urls: ["https://static.case.law/us/500/html/0001-01.html"]
+allowed_hosts: ["static.case.law"]
+allowed_path_prefixes: ["/us/500/html/"]
+archive_approved: true
+robots: false
+delay: 0.5
+fetch: {mode: http, max_depth: 0, retries: 2, page_timeout_ms: 60000}
+budget: {requests: 10, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "美国联邦最高法院官网（supremecourt.gov）与 Caselaw Access Project (CAP)"
+  document_type: "案例"
+  language: "en"
+  jurisdiction: "US"
+documents:
+  detail_url_patterns: ['^https://static\.case\.law/us/\d+/html/\d+-\d+\.html$']
+  detail_body: always
+  content_xpath: '//section[@class="casebody"]'
+  fields:
+    title: {xpath: '//h4[@class="parties"]'}
+    document_number: {xpath: '//p[@class="docketnumber"]', regex: 'No\.\s*([0-9-]+)'}
+    issuer: {value: "Supreme Court of the United States"}
+    published_at: {xpath: '//p[@class="decisiondate"]', regex: 'Decided\s+([A-Za-z]+\s+\d+,\s+\d{4})'}
+
