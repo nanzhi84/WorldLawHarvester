@@ -936,6 +936,179 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/lrs/common/ju/ju_body.jsp?DIS=158000":
+            body = """<!DOCTYPE html><html><head>
+            <title>HCAL371/2021 RASHID WASEEM v. TORTURE CLAIMS APPEAL BOARD / NON-REFOULEMENT CLAIMS PETITION OFFICE</title>
+            </head><body>
+            <form name="search_body"><table width="100%"><tr><td>
+              <p>HCAL 371/2021</p>
+              <p>[2024] HKCFI 247</p>
+              <p>1. The applicant filed Form 86 to apply for leave to apply for judicial review of the Board Decision.</p>
+              <p>Sent to the Applicant on 6/2/2024</p>
+            </td></tr></table></form>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/eng/ppr/dip.htm":
+            body = """<!DOCTYPE html><html><head><title>IRD : Departmental Interpretation and Practice Notes</title></head><body>
+            <table>
+              <tr><td>3.</td><td>Profits tax - Apportionment of expenses</td><td>July 2008</td><td><a href="/eng/pdf/dipn03.pdf">PDF</a></td></tr>
+            </table>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/eng/pdf/dipn03.pdf":
+            body = self.sample_pdf
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/dt/luat-sua-doi-bo-sung-mot-so-dieu-cua-09-luat-ve-quan-su-quoc-phong/260805100059615084":
+            cookie_hdr = self.headers.get("Cookie", "")
+            if "D1N=" not in cookie_hdr:
+                body = b'<html><body><script>document.cookie="D1N=ok123"+"; expires=Thu, 31-Dec-37 23:55:55 GMT; path=/";window.location.reload(true);</script></body></html>'
+            else:
+                body = """<!DOCTYPE html><html><head><title>Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng</title></head><body>
+                <div class="col-lg-8 info-dt-l">
+                  Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng
+                  Cơ quan chủ trì soạn thảo: Bộ Quốc phòng
+                  Cơ quan chủ trì thẩm tra: Ủy ban Quốc phòng, An ninh và Đối ngoại
+                  Dự kiến thông qua: Khóa XVI - Kỳ họp không thường lệ thứ Nhất
+                </div>
+                <div id="nav-tabContent">Toàn văn hồ sơ dự án luật sửa đổi bổ sung một số điều về quân sự quốc phòng.</div>
+                </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/webcenter/portal/anle/chitietanle?dDocName=TAND377305":
+            body = b"""<!DOCTYPE html><html><head><script>
+            AdfLoopbackUtils.runLoopback('/webcenter/portal/anle/chitietanle', ['_afrLoop', '987654321']);
+            </script></head><body></body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/webcenter/portal/anle/chitietanle?dDocName=TAND377305&_afrLoop=987654321&_afrWindowMode=0":
+            body = """<!DOCTYPE html><html><head><title>84/2026/AL</title></head><body>
+            <div id="tabContent1">
+              <div id="thuoctinh">
+                Số án lệ 84/2026/AL Tên án lệ Về chấm dứt việc nuôi con nuôi là người chưa thành niên khi người nhận con nuôi là người độc thân chết Ngày thông qua 21/05/2026 Ngày công bố 29/05/2026 Quyết định công bố Quyết định 162/QĐ-CA Ngày áp dụng 01/07/2026
+              </div>
+              <p>Nội dung án lệ số 84/2026/AL của Hội đồng Thẩm phán Tòa án nhân dân tối cao.</p>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/hoidapcstc/home/cthoidap/166356":
+            body = """<!DOCTYPE html><html><head><title>Hỏi đáp CSTC</title></head><body>
+            <div id="login_box" style="display:none;" class="modal"><input type="password" name="pwd" /></div>
+            <div class="new-content">
+              <div>
+                <div>Kính gửi: Bộ Tài chính (Cục Thuế)</div>
+                <div>V/v: Xác định doanh nghiệp nhỏ và vừa để hưởng miễn thuế TNDN 03 năm đầu theo điểm a khoản 3 Điều 7 Nghị định số 20/2026/NĐ-CP</div>
+                <div>Tình huống của doanh nghiệp: Công ty được cấp Giấy chứng nhận đăng ký doanh nghiệp lần đầu vào năm 2024 và đề nghị Bộ Tài chính hướng dẫn chính sách miễn thuế thu nhập doanh nghiệp theo quy định pháp luật thuế hiện hành.</div>
+              </div>
+              <div>Trả lời:</div>
+              <div>Hướng dẫn áp dụng miễn thuế thu nhập doanh nghiệp đối với doanh nghiệp nhỏ và vừa.</div>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/api/1/lawdata/405AC0000000088":
+            body = """<?xml version="1.0" encoding="UTF-8"?>
+            <DataRoot><Result><Code>0</Code></Result><ApplData><LawFullText>
+            <Law Era="Heisei" Year="05" Num="088" PromulgateMonth="11" PromulgateDay="12" LawType="Act" Lang="ja">
+              <LawNum>平成五年法律第八十八号</LawNum>
+              <LawBody>
+                <LawTitle>行政手続法</LawTitle>
+                <MainProvision>
+                  <Chapter Num="1"><ChapterTitle>第一章　総則</ChapterTitle>
+                    <Article Num="1"><ArticleCaption>（目的等）</ArticleCaption><ArticleTitle>第一条</ArticleTitle>
+                      <Paragraph Num="1"><ParagraphNum/><ParagraphSentence><Sentence>この法律は、処分、行政指導及び届出に関する手続に関し、共通する事項を定めることによって、行政運営における公正の確保と透明性の向上を図り、もって国民の権利利益の保護に資することを目的とする。</Sentence></ParagraphSentence></Paragraph>
+                    </Article>
+                  </Chapter>
+                </MainProvision>
+              </LawBody>
+            </Law>
+            </LawFullText></ApplData></DataRoot>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/us/500/html/0001-01.html":
+            body = """<!DOCTYPE html><html><head><title>Stevens v. Department of the Treasury</title></head><body>
+            <section class="casebody">
+              <section class="head-matter">
+                <h4 class="parties">STEVENS v. DEPARTMENT OF THE TREASURY et al.</h4>
+                <p class="docketnumber">No. 89-1821.</p>
+                <p class="decisiondate">Decided April 24, 1991</p>
+              </section>
+              <article class="opinion"><p>Justice Blackmun delivered the opinion of the Court concerning the Age Discrimination in Employment Act of 1967.</p></article>
+            </section>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/cases-dossiers/search-recherche/40000/":
+            body = """<!DOCTYPE html><html><head><title>Supreme Court of Canada | 40000</title></head><body>
+            <main>
+              <h1>Case information</h1>
+              <h2 id="case-no">40000</h2>
+              <p id="soc">Christian Chukwuedozie Chijindu v. Law Society of Ontario</p>
+              <p>2022-05-12 Judgment of the Court on the application for leave to appeal is dismissed.</p>
+            </main>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/act/public/2024/1/en/latest/":
+            body = """<!DOCTYPE html><html><head><title>New Zealand Productivity Commission Act Repeal Act 2024</title></head><body>
+            <h1>New Zealand Productivity Commission Act Repeal Act 2024</h1>
+            <div id="legislation">
+              <p>Public Act 2024 No 1 Date of assent 5 February 2024</p>
+              <p>1 Title: This Act is the New Zealand Productivity Commission Act Repeal Act 2024.</p>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/akn/ke/act/1963/718/eng@1963-12-10":
+            body = """<!DOCTYPE html><html><head><title>Constitution of Kenya (Repealed)</title></head><body>
+            <main>
+              <h1>Constitution of Kenya (Repealed)</h1>
+              <h2>Act No. 718 of 1963</h2>
+              <dl><dt>Date</dt><dd>10 December 1963</dd></dl>
+              <div class="akn-akomaNtoso"><p>Whereas Kenya is an independent Sovereign Republic under the Constitution of Kenya.</p></div>
+            </main>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -1092,8 +1265,18 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-559", "法律法规", "1 CFR Part 1"),
             ("dd-560", "法律法规", "HB 1091"),
             ("dd-561", "案例", "25-1402"),
+            ("dd-562", "案例", "89-1821"),
             ("dd-563", "税务资料", "2026-16"),
             ("dd-564", "法律法规", "A-1"),
+            ("dd-565", "案例", "40000"),
+            ("dd-570", "法律法规", "2024 No 1"),
+            ("dd-572", "法律法规", "Act No. 718 of 1963"),
+            ("dd-506", "案例", "HCAL 371/2021"),
+            ("dd-507", "税务资料", "DIPN No. 3"),
+            ("dd-512", "法律法规", "Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng"),
+            ("dd-514", "案例", "84/2026/AL"),
+            ("dd-516", "税务资料", "20/2026/NĐ-CP"),
+            ("dd-517", "法律法规", "平成五年法律第八十八号"),
         ],
     )
     def test_adapted_production_source_configs_collect_and_reparse_against_local_samples(
