@@ -14,7 +14,7 @@ from wlh.extraction.pdf_scan import INK_THRESHOLD, PDF_CONTRACT, SCAN_INK_RATIO,
 from wlh.extraction.quality import QUALITY_CONTRACT
 from wlh.extraction.vi_tcvn3 import TCVN3_CONTRACT
 
-MANIFEST_ALGORITHM = "wlh.parser-manifest.v3"
+MANIFEST_ALGORITHM = "wlh.parser-manifest.v4"
 FINGERPRINT_ALGORITHM = "wlh.fingerprint.v2"
 ZIP_CONTRACT = "wlh.zip.v2"
 ALWAYS = ("algorithm", "adapter", "fetch", "markdown")

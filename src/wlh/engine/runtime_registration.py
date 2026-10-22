@@ -116,6 +116,18 @@ def register(self, result, parent=None, depth=0):
                 ),
             )
 
+        if self.truncated == "document_budget_exceeded":
+            c.execute(
+                """UPDATE wlh.task r SET state='skipped',error='document_budget_exceeded',
+                attempt_epoch=%s,updated_at=clock_timestamp()
+                WHERE r.run_id=%s AND r.kind='request' AND r.state='pending'
+                AND NOT EXISTS (
+                    SELECT 1 FROM wlh.task_input i JOIN wlh.task t ON t.id=i.target_id
+                    WHERE i.request_id=r.id AND t.state='pending'
+                )""",
+                (self.epoch, self.run_id),
+            )
+
     self.write(apply)
 
 

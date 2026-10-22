@@ -8,6 +8,7 @@ import threading
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import psycopg
 import pytest
@@ -77,6 +78,156 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
     </body>
   </act>
 </akomaNtoso>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/uksc/2024/1/data.xml":
+            body = """<akomaNtoso xmlns="http://docs.oasis-open.org/legaldocml/ns/akn/3.0" xmlns:html="http://www.w3.org/1999/xhtml" xmlns:uk="https://caselaw.nationalarchives.gov.uk/akn">
+  <judgment name="judgment">
+    <meta>
+      <identification source="#tna">
+        <FRBRWork>
+          <FRBRthis value="https://caselaw.nationalarchives.gov.uk/id/uksc/2024/1"/>
+          <FRBRuri value="https://caselaw.nationalarchives.gov.uk/id/uksc/2024/1"/>
+          <FRBRdate date="2024-01-11" name="judgment"/>
+          <FRBRauthor href="#uksc"/>
+          <FRBRcountry value="GB-UKM"/>
+          <FRBRnumber value="1"/>
+          <FRBRname value="Paul and another v Royal Wolverhampton NHS Trust"/>
+        </FRBRWork>
+      </identification>
+      <references source="#tna">
+        <TLCOrganization eId="uksc" href="https://www.supremecourt.uk/" showAs="The Supreme Court"/>
+      </references>
+      <proprietary source="#">
+        <uk:court>UKSC</uk:court>
+        <uk:year>2024</uk:year>
+        <uk:number>1</uk:number>
+        <uk:cite>[2024] UKSC 1</uk:cite>
+      </proprietary>
+      <presentation source="#">
+        <html:style>#judgment { font-size: 12pt; }</html:style>
+      </presentation>
+    </meta>
+    <header>
+      <p class="JudgmentReferences"><neutralCitation>[2024] UKSC 1</neutralCitation></p>
+      <p class="JudgmentTitle">JUDGMENT</p>
+    </header>
+    <judgmentBody>
+      <decision>
+        <paragraph eId="para_1"><num>1.</num><content><p>This appeal concerns secondary victim claims in clinical negligence.</p></content></paragraph>
+      </decision>
+    </judgmentBody>
+  </judgment>
+</akomaNtoso>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/gg/xml.zip":
+            import io
+            import zipfile
+
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(
+                    "BJNR000010949.xml",
+                    """<?xml version="1.0" encoding="UTF-8" ?><!DOCTYPE dokumente SYSTEM "http://www.gesetze-im-internet.de/dtd/1.01/gii-norm.dtd">
+<dokumente builddate="20260506174650" doknr="BJNR000010949">
+  <norm builddate="20260506174650" doknr="BJNR000010949">
+    <metadaten>
+      <jurabk>GG</jurabk>
+      <ausfertigung-datum manuell="ja">1949-05-23</ausfertigung-datum>
+      <fundstelle typ="amtlich"><periodikum>BGBl</periodikum><zitstelle>1949, 1</zitstelle></fundstelle>
+      <langue>Grundgesetz für die Bundesrepublik Deutschland</langue>
+    </metadaten>
+  </norm>
+  <norm builddate="20260506174650" doknr="BJNR000010949BJNE001600314">
+    <metadaten>
+      <jurabk>GG</jurabk>
+      <enbez>Art 1</enbez>
+    </metadaten>
+    <textdaten>
+      <text format="XML"><Content><P>(1) Die Würde des Menschen ist unantastbar. Sie zu achten und zu schützen ist Verpflichtung aller staatlichen Gewalt.</P></Content></text>
+    </textdaten>
+  </norm>
+</dokumente>""",
+                )
+            body = buf.getvalue()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/download/releasepoints/us/pl/119/121/xml_usc01@119-121.zip":
+            import io
+            import zipfile
+
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(
+                    "usc01.xml",
+                    """<?xml version="1.0" encoding="UTF-8"?>
+<uscDoc xml:lang="en" identifier="/us/usc/t1" xmlns="http://xml.house.gov/schemas/uslm/1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/">
+  <meta>
+    <dc:title>Title 1</dc:title>
+    <dc:type>USCTitle</dc:type>
+    <docNumber>1</docNumber>
+    <dc:publisher>OLRC</dc:publisher>
+    <dcterms:created>2026-09-09T11:00:02</dcterms:created>
+  </meta>
+  <main>
+    <title identifier="/us/usc/t1">
+      <num value="1">Title 1—</num>
+      <heading>GENERAL PROVISIONS</heading>
+      <chapter identifier="/us/usc/t1/ch1">
+        <heading>RULES OF CONSTRUCTION</heading>
+        <section identifier="/us/usc/t1/s1">
+          <heading>Words denoting number, gender, and so forth</heading>
+          <content><p>In determining the meaning of any Act of Congress, words importing the singular include and apply to several persons, parties, or things.</p></content>
+        </section>
+      </chapter>
+    </title>
+  </main>
+</uscDoc>""",
+                )
+            body = buf.getvalue()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/api/versioner/v1/full/2024-01-01/title-1.xml?part=1":
+            body = """<?xml version="1.0"?>
+<DIV5 N="1" TYPE="PART" VOLUME="1" hierarchy_metadata="{&amp;quot;path&amp;quot;:&amp;quot;/on/2024-01-01/title-1/part-1&amp;quot;,&amp;quot;citation&amp;quot;:&amp;quot;1 CFR Part 1&amp;quot;}">
+  <HEAD>PART 1—DEFINITIONS</HEAD>
+  <AUTH><HED>Authority:</HED><PSPACE>44 U.S.C. 1506; sec. 6, E.O. 10530.</PSPACE></AUTH>
+  <DIV8 N="1.1" TYPE="SECTION" hierarchy_metadata="{&quot;path&quot;:&quot;/on/2024-01-01/title-1/section-1.1&quot;,&quot;citation&quot;:&quot;1 CFR 1.1&quot;}">
+    <HEAD>§ 1.1 Definitions.</HEAD>
+    <P>As used in this chapter, unless the context requires otherwise, Administrative Committee means the Administrative Committee of the Federal Register.</P>
+  </DIV8>
+</DIV5>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/eng/XML/A-1.xml":
+            body = """<?xml version="1.0"?>
+<Statute lims:pit-date="2026-06-14" lims:lastAmendedDate="2026-06-14" lims:current-date="2026-06-14" xml:lang="en" xmlns:lims="http://justice.gc.ca/lims">
+  <Identification>
+    <LongTitle>An Act to extend the present laws of Canada that provide access to information under the control of the Government of Canada</LongTitle>
+    <ShortTitle status="official">Access to Information Act</ShortTitle>
+    <Chapter><ConsolidatedNumber official="yes">A-1</ConsolidatedNumber></Chapter>
+  </Identification>
+  <Body>
+    <Heading level="1"><TitleText>Short Title</TitleText></Heading>
+    <Section><MarginalNote>Short title</MarginalNote><Label>1</Label><Text>This Act may be cited as the Access to Information Act.</Text></Section>
+  </Body>
+</Statute>""".encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/xml; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -239,6 +390,68 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             </form>
             <div class="congbao-home">
               <a href="/van-ban/quyet-dinh-48-2026-qd-ttg.htm">Quyết định 48/2026/QĐ-TTg của Thủ tướng Chính phủ</a>
+              <a href="/chi-thi-so-37-ct-ttg-tang-cuong-phong-chong-gian-lan-119261021100102474.htm">Chỉ thị số 37/CT-TTg</a>
+              <a href="/chung-khoan/thong-tu-145-2026-tt-btc-quy-dinh-dang-ky-449607-d1.html">Thông tư 145/2026/TT-BTC</a>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/chi-thi-so-37-ct-ttg-tang-cuong-phong-chong-gian-lan-119261021100102474.htm":
+            body = """<html><head><meta charset="utf-8"><title>Chỉ thị số 37/CT-TTg</title></head><body>
+            <h1 data-role="title">Chỉ thị số 37/CT-TTg: Tăng cường phòng, chống gian lận thi cử</h1>
+            <div data-role="publishdate">21/10/2026 10:18</div>
+            <div data-role="sapo">(Chinhphu.vn) - Toàn văn Chỉ thị số 37/CT-TTg ngày 20/10/2026 của Thủ tướng Chính phủ.</div>
+            <div class="detail-content afcbc-body" data-role="content">
+              <p>Phó Thủ tướng Chính phủ vừa ký Chỉ thị số 37/CT-TTg về tăng cường chỉ đạo, phối hợp tổ chức kỳ thi.</p>
+              <a href="/cpp/files/vbpq/2026/04/105-nd.signed.pdf">37-ct-ttg.pdf</a>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/chung-khoan/thong-tu-145-2026-tt-btc-quy-dinh-dang-ky-449607-d1.html":
+            body = """<html><head><meta charset="utf-8"><title>Thông tư 145/2026/TT-BTC</title></head><body>
+            <h1>Thông tư 145/2026/TT-BTC quy định đăng ký, lưu ký, bù trừ và thanh toán chứng khoán</h1>
+            <table>
+              <tr><td>Cơ quan ban hành:</td><td>Bộ Tài chính</td></tr>
+              <tr><td>Số hiệu:</td><td>145/2026/TT-BTC</td></tr>
+              <tr><td>Ngày ban hành:</td><td>30/09/2026</td></tr>
+            </table>
+            <div class="the-document-entry">
+              <p>Điều 1. Phạm vi điều chỉnh và đối tượng áp dụng đối với hoạt động đăng ký, lưu ký chứng khoán.</p>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/ban-an/":
+            body = """<html><head><meta charset="utf-8"><title>Bản án</title></head><body>
+            <div class="ban-an-list">
+              <a href="/ban-an/ban-an-1463-2026-ds-pt-2-1460069-d11.html">Bản án số 1463/2026/DS-PT</a>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/ban-an/ban-an-1463-2026-ds-pt-2-1460069-d11.html":
+            body = """<html><head><meta charset="utf-8"><title>Bản án số 1463/2026/DS-PT</title></head><body>
+            <h1>Bản án số 1463/2026/DS-PT ngày 15/10/2026 của TAND TP. Cần Thơ về tranh chấp quyền sử dụng đất</h1>
+            <table class="table table-bordered table-thuoc-tinh">
+              <tr><th>Tòa án xét xử:</th><td>TAND TP. Cần Thơ</td></tr>
+              <tr><th>Số hiệu:</th><td>1463/2026/DS-PT</td></tr>
+              <tr><th>Ngày ban hành:</th><td>15/10/2026</td></tr>
+            </table>
+            <div id="noidung" class="tab-content art-tabs-content active">
+              <p>NHÂN DANH NƯỚC CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM. Tòa án nhân dân thành phố Cần Thơ xét xử phúc thẩm vụ án dân sự.</p>
             </div>
             </body></html>""".encode("utf-8")
             self.send_response(200)
@@ -406,6 +619,323 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/gongbao/2026/issue_13046/":
+            body = b"""<!DOCTYPE html><html><head><title>Gazette Issue</title></head><body>
+            <a href="/gongbao/2026/issue_13046/202604/content_7065845.html">State Council Gazette Document</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/gongbao/2026/issue_13046/202604/content_7065845.html":
+            body = """<!DOCTYPE html><html><head>
+            <meta name="firstpublishedtime" content="2026-04-10 08:00:00" />
+            <title>国务院办公厅关于深入推进政务服务提质增效的指导意见_国务院公报_中国政府网</title>
+            </head><body>
+            <div id="UCAP-CONTENT" class="pages_content padd-zyygwj">
+              <p>国办发〔2026〕12号</p>
+              <p>各省、自治区、直辖市人民政府，国务院各部委、各直属机构：现将有关事项通知如下。</p>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/zhengce/index.htm":
+            body = b"""<!DOCTYPE html><html><head><title>Zhengce</title></head><body>
+            <a href="/zhengce/content/202610/content_7066001.htm">Policy Detail</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/zhengce/content/202610/content_7066001.htm":
+            body = """<!DOCTYPE html><html><head>
+            <meta name="firstpublishedtime" content="2026-10-05 09:00:00" />
+            <title>生态保护补偿条例_国务院政策文件库</title>
+            </head><body>
+            <table class="xxgk-table">
+              <tr><td>标　　题：</td><td>生态保护补偿条例</td><td>发文机关：</td><td>国务院</td></tr>
+              <tr><td>发文字号：</td><td>国令第779号</td><td>来　　源：</td><td>中国政府网</td></tr>
+              <tr><td>主题分类：</td><td>城乡建设、环境保护</td><td>公文种类：</td><td>行政法规</td></tr>
+              <tr><td>成文日期：</td><td>2026年10月03日</td><td>发布日期：</td><td>2026年10月05日</td></tr>
+            </table>
+            <div id="UCAP-CONTENT"><p>第一条 为了健全生态保护补偿制度，制定本条例。</p></div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/spp/gjgb/index.shtml":
+            body = b"""<!DOCTYPE html><html><head><title>SPP Gazette</title></head><body>
+            <a href="/spp/gjgb/202603/t20260319_722354.shtml">SPP Gazette 2026 No. 1</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/spp/gjgb/202603/t20260319_722354.shtml":
+            body = """<!DOCTYPE html><html><head>
+            <meta name="firstpublishedtime" content="2026-03-19 10:00:00" />
+            <title>2026年第1号（总第309号）_最高人民检察院</title>
+            </head><body>
+            <div class="detail_tit">2026年第1号（总第309号）</div>
+            <div class="detail_extend">时间：2026-03-19　来源：最高人民检察院公报</div>
+            <div id="fontzoom" class="detail_con"><p>最高人民检察院公报2026年第1号全文内容。</p></div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/spp/jczdal/index.shtml":
+            body = b"""<!DOCTYPE html><html><head><title>SPP Guiding Cases</title></head><body>
+            <a href="/spp/jczdal/202509/t20250919_706599.shtml">SPP Guiding Case Batch 60</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/spp/jczdal/202509/t20250919_706599.shtml":
+            body = """<!DOCTYPE html><html><head>
+            <meta name="firstpublishedtime" content="2025-09-19 14:30:00" />
+            <title>最高人民检察院发布第六十批指导性案例_最高人民检察院</title>
+            </head><body>
+            <div class="detail_tit">最高人民检察院发布第六十批指导性案例</div>
+            <div class="detail_extend">时间：2025-09-19　来源：最高人民检察院</div>
+            <div id="fontzoom" class="detail_con"><p>检例第240号：某公司金融诈骗立案监督案全文。</p></div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/www/illegal?siteid=beijing":
+            body = b"""<!DOCTYPE html><html><head><title>SAFE Penalties</title></head><body>
+            <a href="/www/illegal/listQuery?saffno=8a8b8c0123456789abcdef">SAFE Penalty Record</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/www/illegal/listQuery?saffno=8a8b8c0123456789abcdef":
+            body = """<!DOCTYPE html><html><head><title>外汇行政处罚信息</title></head><body>
+            <div class="cfxx_jg">
+              <table>
+                <tr><th>违规主体名称</th><td>某跨境贸易有限公司</td></tr>
+                <tr><th>行政处罚决定书文号</th><td>京汇罚〔2026〕15号</td></tr>
+                <tr><th>违法事实</th><td>违反规定将境内外汇转移境外</td></tr>
+                <tr><th>处罚依据</th><td>《中华人民共和国外汇管理条例》第三十九条</td></tr>
+                <tr><th>处罚内容</th><td>处以罚款人民币50万元</td></tr>
+                <tr><th>处罚决定日期</th><td>2026-09-20</td></tr>
+                <tr><th>作出处罚决定的行政机关名称</th><td>国家外汇管理局北京市分局</td></tr>
+              </table>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/zhuantilanmu/dfzgl/":
+            body = b"""<!DOCTYPE html><html><head><title>Local Gov Debt</title></head><body>
+            <a href="/zhuantilanmu/dfzgl/zcfg/202111/t20211110_3764807.htm">MOF Local Gov Debt Policy</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/zhuantilanmu/dfzgl/zcfg/202111/t20211110_3764807.htm":
+            body = """<!DOCTYPE html><html><head>
+            <meta name="ArticleTitle" content="关于印发《地方政府专项债券用途调整操作指引》的通知" />
+            <meta name="ContentSource" content="财政部" />
+            <meta name="PubDate" content="2021-11-11 16:38:00" />
+            <title>关于印发《地方政府专项债券用途调整操作指引》的通知</title>
+            </head><body>
+            <div class="my_doccontent">
+              <div class="TRS_Editor"><p>财预〔2021〕110号：为规范地方政府专项债券用途调整管理，制定本指引。<o:p></o:p></p></div>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/xxgk/tjbz/gjtjbz/201905/t20190521_1758938.html":
+            body = """<!DOCTYPE html><html><head><title>国家统计局信息公开</title></head><body>
+            <div class="content_top_box">
+              <ul>
+                <li><div><span>索 引 号</span>410A03-1201-201905-0002</div><div><span>信息类别</span>国家统计标准</div></li>
+                <li><div><span>发布机构</span>国家统计局</div><div><span>成文日期</span>2019年05月20日</div></li>
+              </ul>
+            </div>
+            <div class="xxgkNbXq2"><h2 class="xxgkNbXqTitle">关于执行国民经济行业分类第1号修改单的通知</h2></div>
+            <div class="TRS_PreAppend">
+              <p>国统字〔2019〕66号</p>
+              <p>GB/T 4754-2017《国民经济行业分类》国家标准第1号修改单自2019年3月29日起实施。</p>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/xxgk/gsxx/dybalx/":
+            body = b"""<!DOCTYPE html><html><head><title>Film Filing Notices</title></head><body>
+            <a href="/xxgk/gsxx/dybalx/202610/t20261013_1012172.html">Film Filing Notice 2026-09</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/xxgk/gsxx/dybalx/202610/t20261013_1012172.html":
+            body = """<!DOCTYPE html><html><head>
+            <meta name="ArticleTitle" content="国家电影局关于2026年9月上全国电影剧本（梗概）备案、立项公示的通知" />
+            <meta name="PubDate" content="2026-10-13" />
+            <title>国家电影局关于2026年9月上全国电影剧本（梗概）备案、立项公示的通知</title>
+            </head><body>
+            <div class="m3editor m3editor2">
+              <p>本期备案立项公示统计信息如下：全国处理备案故事影片共55部。</p>
+              <div class="hmc4Table">
+                <table>
+                  <tr><th>序号</th><th>备案立项号</th><th>片名</th><th>备案结果</th><th>备案地</th></tr>
+                  <tr><td>1</td><td>影剧备字〔2026〕第1230号</td><td>摇滚吧！四郎</td><td>同意拍摄</td><td>北京市</td></tr>
+                </table>
+              </div>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/bsfw/jggs/yxspjg/":
+            body = b"""<!DOCTYPE html><html><head><title>Game Approval Results</title></head><body>
+            <a href="/bsfw/jggs/yxspjg/jkwlyxspxx/202601/t20260126_947910.html">2026 Imported Game Approvals</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/bsfw/jggs/yxspjg/jkwlyxspxx/202601/t20260126_947910.html":
+            body = """<!DOCTYPE html><html><head><title>国家新闻出版署</title></head><body>
+            <div class="m3pageCon">
+              <h2 class="m3page_t">2026年进口网络游戏审批信息</h2>
+              <div class="m3page_funs"><span>2026-09-30</span></div>
+              <div class="m3pageEdit">
+                <table>
+                  <tr><th>序号</th><th>名称</th><th>出版单位</th><th>批复文号</th><th>出版物号</th><th>批准时间</th></tr>
+                  <tr><td>1</td><td>3对3街篮</td><td>上海昊嘉信息技术有限公司</td><td>国新出审〔2026〕2424号</td><td>ISBN 978-7-498-17777-3</td><td>2026年09月29日</td></tr>
+                </table>
+              </div>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/law/tsutatsu/kihon/hojin/01.htm":
+            body = b"""<!DOCTYPE html><html><head><title>NTA Hojin</title></head><body>
+            <a href="/law/tsutatsu/kihon/hojin/01/01_01.htm">Chapter 1 Section 1</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/law/tsutatsu/kihon/hojin/01/01_01.htm":
+            body = """<!DOCTYPE html><html><head>
+            <meta http-equiv="Content-Type" content="text/html; charset=Shift_JIS">
+            <title>第1章　納税義務者｜国税庁</title>
+            </head><body>
+            <div id="bodyArea">
+              <h1>第1章　納税義務者</h1>
+              <p>（人格のない社団等の意義）1−1−1　法第2条第8号に規定する人格のない社団等とは。</p>
+            </div>
+            </body></html>""".encode("shift_jis")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/quick-links/e-tax-guides":
+            body = b"""<!DOCTYPE html><html><head><title>IRAS e-Tax Guides</title></head><body>
+            <a href="/taxes/corporate-income-tax/income-deductions-for-companies/tax-treatment-of-r-d-expenditure">R&amp;D e-Tax Guide</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/taxes/corporate-income-tax/income-deductions-for-companies/tax-treatment-of-r-d-expenditure":
+            body = """<!DOCTYPE html><html><head><title>Tax Treatment of R&amp;D Expenditure</title></head><body>
+            <main id="mainContent">
+              <h1>Tax Treatment of Research &amp; Development Expenditure</h1>
+              <p>This e-Tax Guide explains the income tax deductibility of research and development expenditure in Singapore.</p>
+            </main>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/tax-and-chancery-tribunal-decisions":
+            body = b"""<!DOCTYPE html><html><head><title>Tax and Chancery Tribunal Decisions</title></head><body>
+            <a href="/tax-and-chancery-tribunal-decisions/2026-ukut-00301-tcc-hmrc-v-acme">HMRC v Acme</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/tax-and-chancery-tribunal-decisions/2026-ukut-00301-tcc-hmrc-v-acme":
+            body = """<!DOCTYPE html><html><head><title>HMRC v Acme Ltd [2026] UKUT 301 (TCC)</title></head><body>
+            <main id="content">
+              <h1>HM Revenue &amp; Customs v Acme Ltd: [2026] UKUT 301 (TCC)</h1>
+              <dl>
+                <dt>From:</dt><dd>Upper Tribunal (Tax and Chancery Chamber)</dd>
+                <dt>Published:</dt><dd>21 October 2026</dd>
+              </dl>
+              <p>Decision of the Upper Tribunal (Tax and Chancery Chamber) on corporation tax relief.</p>
+            </main>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/irb":
+            body = b"""<!DOCTYPE html><html><head><title>Internal Revenue Bulletins</title></head><body>
+            <a href="/irb/2026-16_IRB">Internal Revenue Bulletin: 2026-16</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/irb/2026-16_IRB":
+            body = """<!DOCTYPE html><html><head><title>Internal Revenue Bulletin: 2026-16 | Internal Revenue Service</title></head><body>
+            <div id="block-pup-irs-barrio-content">
+              <h1>Internal Revenue Bulletin: 2026-16</h1>
+              <p>Revenue Ruling 2026-09: Applicable Federal Rates for April 2026 under Section 1274(d) of the Internal Revenue Code.</p>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         else:
             self.send_response(404)
             self.end_headers()
@@ -500,6 +1030,23 @@ metadata:
                         expected_substr in (projected["doc_number"] or "")
                         or expected_substr in (projected["title"] or "")
                     ), f"Expected {expected_substr} in {projected}"
+                    if source_id in {"dd-550", "dd-558"}:
+                        assert rows[0]["original_media_type"] == "application/zip"
+                        assert (projected["original_file"] or "").endswith(".zip")
+                    if source_id == "dd-548":
+                        assert projected["issuer"] == "The Supreme Court"
+                        assert projected["published_at"] == "2024-01-11"
+                    if source_id == "dd-496":
+                        assert projected["issuer"] == "TAND TP. Cần Thơ"
+                        assert projected["published_at"] == "2026-10-15"
+                    if source_id == "dd-502":
+                        assert projected["issuer"] == "国务院"
+                        assert projected["published_at"] == "2026-10-03"
+                    if source_id == "dd-520":
+                        assert projected["issuer"] == "国税庁"
+                    if source_id == "dd-549":
+                        assert projected["issuer"] == "Upper Tribunal (Tax and Chancery Chamber)"
+                        assert projected["published_at"] == "2026-10-21"
 
             server.shutdown()
             thread.join(timeout=2.0)
@@ -519,13 +1066,34 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
         ("source_id", "expected_doc_type", "expected_substr"),
         [
             ("dd-017", "案例", "指导性案例220号"),
+            ("dd-040", "政策文件", "2026年第1号"),
+            ("dd-041", "案例", "第六十批指导性案例"),
+            ("dd-102", "通知公告", "京汇罚〔2026〕15号"),
+            ("dd-183", "政策文件", "地方政府专项债券用途调整操作指引"),
+            ("dd-375", "行业标准", "国统字〔2019〕66号"),
+            ("dd-448", "通知公告", "影剧备字〔2026〕第1230号"),
+            ("dd-455", "通知公告", "国新出审〔2026〕2424号"),
             ("dd-492", "法律法规", "105/2026/NĐ-CP"),
             ("dd-493", "法律法规", "48/2026/QĐ-TTg"),
+            ("dd-501", "政策文件", "国办发〔2026〕12号"),
+            ("dd-502", "法律法规", "国令第779号"),
+            ("dd-513", "法律法规", "37/CT-TTg"),
+            ("dd-495", "法律法规", "145/2026/TT-BTC"),
+            ("dd-496", "案例", "1463/2026/DS-PT"),
             ("dd-499", "法律法规", "2026-08801"),
+            ("dd-520", "税务资料", "第1章　納税義務者"),
+            ("dd-527", "税务资料", "Tax Treatment of Research & Development Expenditure"),
+            ("dd-548", "案例", "[2024] UKSC 1"),
+            ("dd-549", "税务资料", "[2026] UKUT 301 (TCC)"),
+            ("dd-550", "法律法规", "GG"),
             ("dd-551", "案例", "VIII ZR 12/25"),
             ("dd-556", "案例", "4A_101/2026"),
+            ("dd-558", "法律法规", "1"),
+            ("dd-559", "法律法规", "1 CFR Part 1"),
             ("dd-560", "法律法规", "HB 1091"),
             ("dd-561", "案例", "25-1402"),
+            ("dd-563", "税务资料", "2026-16"),
+            ("dd-564", "法律法规", "A-1"),
         ],
     )
     def test_adapted_production_source_configs_collect_and_reparse_against_local_samples(
@@ -568,8 +1136,10 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             raw_cfg.pop("host_path_scopes", None)
             raw_cfg["delay"] = 0.0
             if "documents" in raw_cfg and "detail_url_patterns" in raw_cfg["documents"]:
+                import re
+
                 raw_cfg["documents"]["detail_url_patterns"] = [
-                    pat.replace(r"^https://www\.court\.gov\.cn", rf"^http://127\.0\.0\.1:{port}")
+                    re.sub(r"^\^https?://[^/]+", rf"^http://127\.0\.0\.1:{port}", pat)
                     for pat in raw_cfg["documents"]["detail_url_patterns"]
                 ]
 
@@ -609,6 +1179,23 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         expected_substr in (projected["doc_number"] or "")
                         or expected_substr in (projected["title"] or "")
                     ), f"Expected {expected_substr} in {projected}"
+                    if source_id in {"dd-550", "dd-558"}:
+                        assert rows[0]["original_media_type"] == "application/zip"
+                        assert (projected["original_file"] or "").endswith(".zip")
+                    if source_id == "dd-548":
+                        assert projected["issuer"] == "The Supreme Court"
+                        assert projected["published_at"] == "2024-01-11"
+                    if source_id == "dd-496":
+                        assert projected["issuer"] == "TAND TP. Cần Thơ"
+                        assert projected["published_at"] == "2026-10-15"
+                    if source_id == "dd-502":
+                        assert projected["issuer"] == "国务院"
+                        assert projected["published_at"] == "2026-10-03"
+                    if source_id == "dd-520":
+                        assert projected["issuer"] == "国税庁"
+                    if source_id == "dd-549":
+                        assert projected["issuer"] == "Upper Tribunal (Tax and Chancery Chamber)"
+                        assert projected["published_at"] == "2026-10-21"
 
             server.shutdown()
             thread.join(timeout=2.0)

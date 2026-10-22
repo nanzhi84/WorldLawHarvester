@@ -88,7 +88,8 @@ def text(value, field):
         return None
     if not isinstance(value, str):
         raise WlhError("invalid_document_" + field)
-    value = unicodedata.normalize("NFC", re.sub(r"\s+", " ", value)).strip()
+    # Preserve ideographic spaces in source metadata.
+    value = unicodedata.normalize("NFC", re.sub(r"[^\S\u3000]+", " ", value)).strip()
     if len(value) > MAX_TEXT:
         raise WlhError("invalid_document_" + field)
     return value or None
