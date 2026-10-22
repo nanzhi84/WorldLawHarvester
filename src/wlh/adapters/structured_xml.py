@@ -25,6 +25,22 @@ from wlh.extraction.markdown import normalized
 
 etree: Any
 lxml_html: Any
+HEADING_TAGS: set[str] = {
+    "heading", "longTitle", "docTitle", "LawTitle", "LawName", "法規名稱",
+    "ArticleCaption", "ChapterTitle", "titel", "enbez", "HEAD", "Heading",
+    "TitleText", "MarginalNote",
+}
+PARAGRAPH_TAGS: set[str] = {
+    "p", "paragraph", "Sentence", "LawContent", "法規內容", "條文內容",
+    "ParagraphSentence", "P", "PSPACE", "FP", "Text",
+}
+SKIP_TAGS: set[str] = {
+    "meta", "metadata", "identification", "Identification", "preface",
+    "Notes", "附註", "presentation", "style", "metadaten", "fussnoten", "toc",
+}
+ERA_OFFSETS: dict[str, int] = {
+    "Meiji": 1867, "Taisho": 1911, "Showa": 1925, "Heisei": 1988, "Reiwa": 2018,
+}
 
 
 def text(node: Any) -> str:
@@ -43,64 +59,23 @@ def select(root: Any, *names: str, attribute: str | None = None) -> str | None:
 
 def markdown(root: Any) -> str:
     parts: list[str] = []
-    headings: set[str] = {
-        "heading",
-        "longTitle",
-        "docTitle",
-        "LawTitle",
-        "LawName",
-        "法規名稱",
-        "ArticleCaption",
-        "ChapterTitle",
-        "titel",
-        "enbez",
-        "HEAD",
-        "Heading",
-        "TitleText",
-        "MarginalNote",
-    }
-    paragraphs: set[str] = {
-        "p",
-        "paragraph",
-        "Sentence",
-        "LawContent",
-        "法規內容",
-        "條文內容",
-        "ParagraphSentence",
-        "P",
-        "PSPACE",
-        "FP",
-        "Text",
-    }
 
     def walk(node: Any) -> None:
         if not isinstance(node.tag, str):
             return
         tag = etree.QName(node).localname
-        if tag in {
-            "meta",
-            "metadata",
-            "identification",
-            "Identification",
-            "preface",
-            "Notes",
-            "附註",
-            "presentation",
-            "style",
-            "metadaten",
-            "fussnoten",
-            "toc",
-        }:
+        if tag in SKIP_TAGS:
             return
-        if tag in headings or tag in paragraphs:
+        if tag in HEADING_TAGS or tag in PARAGRAPH_TAGS:
             value: str | None = text(node)
             if value:
-                parts.append(("## " if tag in headings else "") + value)
+                parts.append(("## " if tag in HEADING_TAGS else "") + value)
             return
         if tag in {"table", "Table"}:
-            rows: list[list[str]] = []
-            for row in node.xpath('.//*[local-name()="tr" or local-name()="TableRow"]'):
-                rows.append([text(c).replace("|", "\\|") for c in row])
+            rows: list[list[str]] = [
+                [text(c).replace("|", "\\|") for c in row]
+                for row in node.xpath('.//*[local-name()="tr" or local-name()="TableRow"]')
+            ]
             if rows:
                 width = max(map(len, rows))
                 rows = [r + [""] * (width - len(r)) for r in rows]
@@ -115,6 +90,43 @@ def markdown(root: Any) -> str:
 
     walk(root)
     return normalized("\n\n".join(parts))
+
+
+def _normalize_candidate_urls(
+    base: str,
+    raw_urls: Sequence[str],
+    config: Mapping[str, Any],
+    patterns: Sequence[re.Pattern[str]] = (),
+) -> list[str]:
+    base_parts = urlsplit(base)
+    urls: list[str] = []
+    seen: set[str] = set()
+    for href in raw_urls:
+        if not href or href.lower().startswith(("javascript:", "mailto:", "tel:", "data:", "#")):
+            continue
+        parts = urlsplit(urljoin(base, href))
+        if parts.scheme not in ("http", "https"):
+            continue
+        scheme = (
+            "https"
+            if parts.scheme == "http"
+            and base_parts.scheme == "https"
+            and parts.netloc == base_parts.netloc
+            else parts.scheme
+        )
+        try:
+            candidate = public_url(
+                urlunsplit((scheme, parts.netloc, parts.path or "/", parts.query, ""))
+            )
+            if patterns and not any(p.search(candidate) for p in patterns):
+                continue
+            guard(config, candidate)
+        except (WlhError, ValueError):
+            continue
+        if candidate not in seen:
+            seen.add(candidate)
+            urls.append(candidate)
+    return urls
 
 
 class Adapter(RecordAdapter):
@@ -152,7 +164,9 @@ class Adapter(RecordAdapter):
                     obj = json.loads(data)
                 except ValueError:
                     raise WlhError("legal_xml_invalid") from None
-                if isinstance(obj, dict) and isinstance(cast(dict[str, Any], obj).get("children"), list):
+                if isinstance(obj, dict) and isinstance(
+                    cast(dict[str, Any], obj).get("children"), list
+                ):
                     return []
                 raise WlhError("legal_xml_invalid")
             if re.search(br"<!DOCTYPE\s+html\b|<html(?:\s|>)", data[:2048], re.I):
@@ -194,7 +208,9 @@ class Adapter(RecordAdapter):
                 issuer = matches[0].get("showAs") if matches else None
             issuer = issuer or select(root, "courtType", "court")
             doc_type: str | None = "案例" if is_judgment else "法律法规"
-            entries: list[tuple[Any, str | None, str | None, str | None, str | None, str | None, str | None]] = [(root, title, number, key, published, issuer, doc_type)]
+            entries: list[
+                tuple[Any, str | None, str | None, str | None, str | None, str | None, str | None]
+            ] = [(root, title, number, key, published, issuer, doc_type)]
         elif "uslm" in namespace.lower() or tag in {"lawDoc", "bill", "statute", "uscDoc"}:
             title = select(root, "docTitle", "longTitle", "dcTitle", "title")
             number = select(root, "docNumber", "number", "identifier")
@@ -206,15 +222,7 @@ class Adapter(RecordAdapter):
             )[:10] or None
             issuer = select(root, "publisher", "creator")
             entries = [
-                (
-                    root,
-                    title,
-                    number,
-                    root.get("identifier") or number,
-                    published,
-                    issuer,
-                    "法律法规",
-                )
+                (root, title, number, root.get("identifier") or number, published, issuer, "法律法规")
             ]
         elif tag in {"dokumente", "norm"}:
             title = select(root, "langue", "titel", "jurabk")
@@ -228,7 +236,9 @@ class Adapter(RecordAdapter):
             title = select(root, "HEAD", "TITLE")
             number = meta.get("citation") or root.get("N") or title
             key = meta.get("path") or number
-            m_date: re.Match[str] | None = re.search(r"/(\d{4}-\d{2}-\d{2})/", acquisition.get("actual_url") or "")
+            m_date: re.Match[str] | None = re.search(
+                r"/(\d{4}-\d{2}-\d{2})/", acquisition.get("actual_url") or ""
+            )
             published = select(root, "AMDDATE", "DATE") or (m_date.group(1) if m_date else None)
             entries = [(root, title, number, key, published, None, "法律法规")]
         elif tag in {"Statute", "Regulation"}:
@@ -250,17 +260,9 @@ class Adapter(RecordAdapter):
             for law in laws:
                 title, number = select(law, "LawTitle"), select(law, "LawNum")
                 year: str | None = law.get("Year")
-                if year and law.get("Era") in {"Meiji", "Taisho", "Showa", "Heisei", "Reiwa"}:
-                    year = str(
-                        int(year)
-                        + {
-                            "Meiji": 1867,
-                            "Taisho": 1911,
-                            "Showa": 1925,
-                            "Heisei": 1988,
-                            "Reiwa": 2018,
-                        }[law.get("Era")]
-                    )
+                era = str(law.get("Era") or "")
+                if year and era in ERA_OFFSETS:
+                    year = str(int(year) + ERA_OFFSETS[era])
                 published = (
                     f"{int(year):04d}-{int(law.get('PromulgateMonth')):02d}-{int(law.get('PromulgateDay')):02d}"
                     if year and law.get("PromulgateMonth") and law.get("PromulgateDay")
@@ -290,7 +292,7 @@ class Adapter(RecordAdapter):
             if not title or not key:
                 raise WlhError("legal_xml_identity_missing")
             if published and re.fullmatch(r"\d{8}", published):
-                published = published[:4] + "-" + published[4:6] + "-" + published[6:]
+                published = f"{published[:4]}-{published[4:6]}-{published[6:]}"
             result.append(
                 {
                     "external_key": key,
@@ -317,67 +319,13 @@ class Adapter(RecordAdapter):
     def _filter_requests(
         self, base: str, raw_urls: list[str], pagination_urls: Sequence[str] = ()
     ) -> list[dict[str, Any]]:
-        base_parts = urlsplit(base)
         patterns = [
             re.compile(p)
             for p in self.config.get("documents", {}).get("detail_url_patterns", [])
         ]
-        urls: list[str] = []
-        seen: set[str] = set()
-        for href in raw_urls:
-            if not href or href.lower().startswith(
-                ("javascript:", "mailto:", "tel:", "data:", "#")
-            ):
-                continue
-            parts = urlsplit(urljoin(base, href))
-            if parts.scheme not in ("http", "https"):
-                continue
-            scheme = (
-                "https"
-                if parts.scheme == "http"
-                and base_parts.scheme == "https"
-                and parts.netloc == base_parts.netloc
-                else parts.scheme
-            )
-            try:
-                candidate = public_url(
-                    urlunsplit((scheme, parts.netloc, parts.path or "/", parts.query, ""))
-                )
-                if patterns and not any(p.search(candidate) for p in patterns):
-                    continue
-                guard(self.config, candidate)
-            except (WlhError, ValueError):
-                continue
-            if candidate not in seen:
-                seen.add(candidate)
-                urls.append(candidate)
-        next_pages: list[str] = []
-        seen_next: set[str] = set()
-        for href in pagination_urls:
-            if not href or href.lower().startswith(
-                ("javascript:", "mailto:", "tel:", "data:", "#")
-            ):
-                continue
-            parts = urlsplit(urljoin(base, href))
-            if parts.scheme not in ("http", "https"):
-                continue
-            scheme = (
-                "https"
-                if parts.scheme == "http"
-                and base_parts.scheme == "https"
-                and parts.netloc == base_parts.netloc
-                else parts.scheme
-            )
-            try:
-                candidate = public_url(
-                    urlunsplit((scheme, parts.netloc, parts.path or "/", parts.query, ""))
-                )
-                guard(self.config, candidate)
-            except (WlhError, ValueError):
-                continue
-            if candidate not in seen_next:
-                seen_next.add(candidate)
-                next_pages.append(candidate)
+        urls = _normalize_candidate_urls(base, raw_urls, self.config, patterns)
+        next_pages = _normalize_candidate_urls(base, pagination_urls, self.config)
+        seen = set(urls)
         limit: int = int(self.config["budget"]["documents"])
         if len(urls) > limit or (len(urls) == limit and bool(next_pages)):
             self.truncated = "document_budget_exceeded"
@@ -410,7 +358,7 @@ class Adapter(RecordAdapter):
                 return []
             raw_urls: list[str] = []
 
-            def walk_ecfr(nodes: list[Any]) -> None:
+            def walk_parts(nodes: list[Any]) -> None:
                 for node in nodes:
                     if not isinstance(node, dict):
                         continue
@@ -419,22 +367,17 @@ class Adapter(RecordAdapter):
                         ident = typed_node.get("identifier")
                         if ident:
                             raw_urls.append(
-                                urljoin(
-                                    base,
-                                    f"/api/versioner/v1/full/{date}/title-{title_num}.xml?part={ident}",
-                                )
+                                urljoin(base, f"../../full/{date}/title-{title_num}.xml?part={ident}")
                             )
                     children = typed_node.get("children")
                     if isinstance(children, list):
-                        walk_ecfr(cast(list[Any], children))
+                        walk_parts(cast(list[Any], children))
 
-            walk_ecfr(cast(list[Any], children_root))
+            walk_parts(cast(list[Any], children_root))
             return self._filter_requests(base, raw_urls)
         if re.search(br"<!DOCTYPE\s+html\b|<html(?:\s|>)", data[:2048], re.I):
             try:
-                doc = lxml_html.document_fromstring(
-                    data.decode("utf-8", errors="replace")
-                )
+                doc = lxml_html.document_fromstring(data.decode("utf-8", errors="replace"))
             except (etree.ParserError, ValueError):
                 return []
             raw_urls = [
@@ -447,8 +390,7 @@ class Adapter(RecordAdapter):
             return []
         try:
             root: Any = etree.fromstring(
-                data,
-                etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False),
+                data, etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
             )
         except etree.XMLSyntaxError:
             return []
@@ -466,15 +408,11 @@ class Adapter(RecordAdapter):
                 if str(h).strip().endswith("/data.xml") and str(h).strip() not in next_set
             ]
             if not links:
-                for h in root.xpath(
-                    ".//*[local-name()='entry']/*[local-name()='link']/@href"
-                ):
+                for h in root.xpath(".//*[local-name()='entry']/*[local-name()='link']/@href"):
                     href = str(h).strip()
                     if href and href not in next_set:
                         links.append(
-                            href
-                            if href.endswith(".xml")
-                            else href.rstrip("/") + "/data.xml"
+                            href if href.endswith(".xml") else href.rstrip("/") + "/data.xml"
                         )
             return self._filter_requests(base, links, next_links)
         if tag == "items":
@@ -497,7 +435,7 @@ class Adapter(RecordAdapter):
             and root.xpath(".//*[local-name()='LawId']/text()")
         ):
             links = [
-                urljoin(base, f"/api/1/lawdata/{str(law_id).strip()}")
+                urljoin(base, f"../lawdata/{str(law_id).strip()}")
                 for law_id in root.xpath(".//*[local-name()='LawId']/text()")
                 if str(law_id).strip()
             ]
