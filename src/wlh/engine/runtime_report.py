@@ -35,7 +35,12 @@ def failure_category(error: str) -> str:
         "reparse_input_unavailable",
     }:
         return "required_input_missing"
-    if code in {"inputs_unavailable", "page_limit_exceeded", "zero_targets_discovered"}:
+    if code in {
+        "inputs_unavailable",
+        "page_limit_exceeded",
+        "max_depth_exceeded",
+        "zero_targets_discovered",
+    }:
         return "enumeration_incomplete"
     return "parse_failed"
 

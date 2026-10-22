@@ -131,6 +131,7 @@ class Browser:
         context: Any = None
         session: Any = None
         errors: list[str] = []
+        subrequest_errors: list[str] = []
         facts: dict[str | None, str] = {}
         pending: set[asyncio.Task[Any]] = set()
         main_doc_done = False
@@ -166,7 +167,16 @@ class Browser:
                         if method == "POST"
                         else "browser_method_not_supported"
                     )
-                target = guard(self.config, browser_request["url"])
+                try:
+                    target = guard(self.config, browser_request["url"])
+                except WlhError:
+                    if main_doc_done:
+                        await session.send(
+                            "Fetch.failRequest",
+                            {"requestId": request_id, "errorReason": "BlockedByClient"},
+                        )
+                        return
+                    raise
                 req_headers = {
                     name: value
                     for name, value in browser_request.get("headers", {}).items()
@@ -281,6 +291,8 @@ class Browser:
                     "robots_disallowed",
                 }:
                     errors.append(exc.code)
+                elif exc.code != "request_out_of_scope":
+                    subrequest_errors.append(exc.code)
                 with contextlib.suppress(Exception):
                     await session.send(
                         "Fetch.failRequest",
@@ -292,6 +304,8 @@ class Browser:
             except Exception:
                 if rtype == "Document" and not main_doc_done:
                     errors.append("network_failed")
+                else:
+                    subrequest_errors.append("network_failed")
                 with contextlib.suppress(Exception):
                     await session.send(
                         "Fetch.failRequest", {"requestId": request_id, "errorReason": "Failed"}
@@ -343,11 +357,17 @@ class Browser:
                 page_links: list[str] = list(
                     dict.fromkeys(re.findall(r"<a\b[^>]*>.*?</a>", html, flags=re.I | re.S))
                 )
+                pagination_error: str | None = None
                 for _ in range(max_pages - 1):
                     if await page.locator(".next-page").count() <= 0:
                         break
-                    with contextlib.suppress(Exception):
+                    err_before = len(subrequest_errors)
+                    try:
                         await page.locator(".next-page").first.click(timeout=5000)
+                    except Exception:
+                        pagination_error = "network_failed"
+                        break
+                    with contextlib.suppress(Exception):
                         await page.wait_for_timeout(1500)
                         await page.wait_for_load_state("networkidle", timeout=5000)
                     while pending:
@@ -356,19 +376,39 @@ class Browser:
                     self.budget.active()
                     if errors:
                         raise WlhError(errors[0])
+                    if len(subrequest_errors) > err_before:
+                        pagination_error = subrequest_errors[err_before]
+                        break
                     cur_html = await page.content()
                     for tag in re.findall(r"<a\b[^>]*>.*?</a>", cur_html, flags=re.I | re.S):
                         if tag not in page_links:
                             page_links.append(tag)
                 html = await page.content()
-                if page_links:
-                    has_more = await page.locator(".next-page").count() > 0
-                    trunc_attr = " data-wlh-truncated='page_limit_exceeded'" if has_more else ""
-                    extra = f"<div data-wlh-pages='true'{trunc_attr}>" + "".join(page_links) + "</div>"
+                has_more = await page.locator(".next-page").count() > 0
+                trunc_reason = (
+                    pagination_error
+                    or (subrequest_errors[0] if subrequest_errors else None)
+                    or ("page_limit_exceeded" if has_more else None)
+                )
+                if page_links or trunc_reason:
+                    trunc_attr = (
+                        f" data-wlh-truncated='{trunc_reason}'" if trunc_reason else ""
+                    )
+                    extra = (
+                        f"<div data-wlh-pages='true'{trunc_attr}>"
+                        + "".join(page_links)
+                        + "</div>"
+                    )
                     if "</body>" in html:
                         html = html.replace("</body>", f"{extra}</body>", 1)
                     else:
                         html += extra
+            elif subrequest_errors:
+                extra = f"<div data-wlh-truncated='{subrequest_errors[0]}'></div>"
+                if "</body>" in html:
+                    html = html.replace("</body>", f"{extra}</body>", 1)
+                else:
+                    html += extra
             data = html.encode("utf-8")
             if len(data) > self.config["budget"]["response_bytes"]:
                 return self.recorder.finish(
