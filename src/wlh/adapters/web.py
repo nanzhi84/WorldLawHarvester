@@ -265,11 +265,15 @@ class Adapter(Base):
         nodes = tree.xpath(rule) if rule else [tree.body if tree.body is not None else tree]
         nodes = [n for n in nodes if isinstance(n, etree._Element)]
         if not nodes:
+            if blocked(etree.tostring(tree, encoding="utf-8"), self.config):
+                raise WlhError("target_content_blocked")
             raise WlhError("content_region_missing")
         for node in nodes:
             for bad in node.xpath(".//script|.//style|.//noscript|.//template"):
                 bad.drop_tree()
         fragment = "".join(etree.tostring(n, encoding="unicode", method="html") for n in nodes)
+        if blocked(fragment.encode("utf-8"), self.config):
+            raise WlhError("target_content_blocked")
         base = acquisition["actual_url"] or acquisition["request_url"]
         return html_to_markdown("<html><body>" + fragment + "</body></html>", base)
 
@@ -309,7 +313,11 @@ class Adapter(Base):
         acquisition = detail["acquisition"]
         data = ctx.read(acquisition)
         kind = detect_real_format(data, "html" if acquisition["mime_type"] == "text/html" else "")
-        if kind in TEXT_KINDS and blocked(data, self.config):
+        if (
+            kind in TEXT_KINDS
+            and not (kind == "html" and self.config["documents"]["content_xpath"])
+            and blocked(data, self.config)
+        ):
             # Challenge pages, login shells and listings never become document originals.
             raise WlhError("target_content_blocked")
         meta = dict(self.config["metadata"])

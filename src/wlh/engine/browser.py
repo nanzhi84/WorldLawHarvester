@@ -10,8 +10,10 @@ import asyncio
 import base64
 import contextlib
 import hashlib
+import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlsplit
 
 from wlh.core import WlhError
 from wlh.engine.scope import guard
@@ -39,6 +41,27 @@ class Browser:
         self.lock: asyncio.Lock = asyncio.Lock()
         self.playwright: Playwright | None = None
         self.browser: PlaywrightBrowser | None = None
+        self.loopback_cookies: set[tuple[str, str, str]] = set()
+
+    def _detect_html_loopback(self, url: str, data: bytes) -> str | None:
+        text = data.decode("utf-8", errors="replace")
+        if "_afrLoop=" not in url and "AdfLoopbackUtils.runLoopback" in text:
+            match = re.search(r"['\"]_afrLoop['\"]\s*,\s*['\"](\d+)['\"]", text)
+            if match:
+                sep = "&" if "?" in url else "?"
+                return f"{url}{sep}_afrLoop={match.group(1)}&_afrWindowMode=0"
+        if len(data) <= 2048 and "location.reload" in text:
+            match = re.search(r'document\.cookie\s*=\s*["\']([^=;"\']+)=([^;"\']+)', text)
+            if match and self.transport.session is not None:
+                from yarl import URL
+
+                name, value = match.group(1).strip(), match.group(2).strip()
+                key = (urlsplit(url).hostname or "", name, value)
+                if key not in self.loopback_cookies:
+                    self.loopback_cookies.add(key)
+                    self.transport.session.cookie_jar.update_cookies({name: value}, URL(url))
+                    return url
+        return None
 
     async def start(self) -> None:
         async with self.lock:
@@ -82,6 +105,12 @@ class Browser:
                 if browser_request["url"].startswith(("data:", "blob:", "about:")):
                     await session.send("Fetch.continueRequest", {"requestId": request_id})
                     return
+                if event.get("resourceType") != "Document":
+                    await session.send(
+                        "Fetch.failRequest",
+                        {"requestId": request_id, "errorReason": "BlockedByClient"},
+                    )
+                    return
                 method = browser_request["method"]
                 if method not in {"GET", "HEAD", "OPTIONS"}:
                     # Script actions have no Adapter declaration of query idempotence.
@@ -108,6 +137,12 @@ class Browser:
                     }
                 )
                 previous = facts.get(event.get("redirectedRequestId"))
+                req_headers = {
+                    name: value
+                    for name, value in browser_request.get("headers", {}).items()
+                    if name.lower()
+                    not in {"accept-encoding", "host", "connection", "content-length"}
+                }
                 row: dict[str, Any] = await self.transport.exchange(
                     target,
                     browser_request["method"],
@@ -120,18 +155,47 @@ class Browser:
                     },
                     previous,
                     "redirect" if previous else None,
-                    headers={
-                        name: value
-                        for name, value in browser_request.get("headers", {}).items()
-                        if name.lower()
-                        not in {"accept-encoding", "host", "connection", "content-length"}
-                    },
+                    headers=req_headers,
                 )
                 facts[request_id] = row["id"]
                 if row["state"] != "archived":
                     raise WlhError(row["error"] or "network_failed")
                 if row["outcome"] not in {"ok", "redirect"}:
                     raise WlhError(row["error"] or "network_failed")
+                raw_bytes = self.transport.objects.get(row["archive_ref"])
+                while (
+                    row["state"] == "archived"
+                    and row["outcome"] == "ok"
+                    and row.get("mime_type") == "text/html"
+                    and len(raw_bytes) <= 16384
+                    and (loopback := self._detect_html_loopback(target, raw_bytes))
+                ):
+                    target = guard(self.config, loopback)
+                    await self.transport.robots.check(target, self.transport.fetch_policy)
+                    hop_key = request_key({"url": target, "method": "GET", "role": "browser_http"})
+                    hop_headers = {
+                        k: v for k, v in req_headers.items() if k.lower() != "cookie"
+                    }
+                    row = await self.transport.exchange(
+                        target,
+                        "GET",
+                        None,
+                        hop_key,
+                        "content",
+                        {
+                            "rendered_acquisition_id": identity,
+                            "resource_type": event["resourceType"],
+                        },
+                        row["id"],
+                        "redirect",
+                        headers=hop_headers,
+                    )
+                    facts[request_id] = row["id"]
+                    if row["state"] != "archived":
+                        raise WlhError(row["error"] or "network_failed")
+                    if row["outcome"] not in {"ok", "redirect"}:
+                        raise WlhError(row["error"] or "network_failed")
+                    raw_bytes = self.transport.objects.get(row["archive_ref"])
                 # Transport archives decoded HTTP entity bytes. Chromium must not decode
                 # them again; preserve semantic headers, including redirects and cookies.
                 headers: list[dict[str, str]] = [
@@ -146,13 +210,12 @@ class Browser:
                         "requestId": request_id,
                         "responseCode": row["http_status"],
                         "responseHeaders": headers,
-                        "body": base64.b64encode(
-                            self.transport.objects.get(row["archive_ref"])
-                        ).decode("ascii"),
+                        "body": base64.b64encode(raw_bytes).decode("ascii"),
                     },
                 )
             except WlhError as exc:
-                errors.append(exc.code)
+                if not facts or event.get("redirectedRequestId") in facts:
+                    errors.append(exc.code)
                 with contextlib.suppress(Exception):
                     await session.send(
                         "Fetch.failRequest",
