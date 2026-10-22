@@ -47,6 +47,7 @@ class _IPv6ThreadingHTTPServer(ThreadingHTTPServer):
 class _BridgeFixtureHandler(BaseHTTPRequestHandler):
     sample_pdf: bytes = b""
     secondary_netloc: str = ""
+    active_source_id: str = ""
     rii_zip: bytes = _make_rii_zip_bytes(
         "JURE100055033", "VIII ZR 12/25", "ECLI:DE:BGH:2026:150426UVIIIZR12.25.0"
     )
@@ -584,6 +585,17 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             body = """<html><head><meta charset="utf-8"><title>指导案例列表</title></head><body>
             <div class="list">
               <a href="/shenpan/xiangqing/202601.html">指导性案例220号：甲公司诉乙公司数据权益纠纷案</a>
+              <a href="/shenpan/gengduo/76.html">下一页</a>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/shenpan/gengduo/76.html":
+            body = """<html><head><meta charset="utf-8"><title>指导案例列表 第2页</title></head><body>
+            <div class="list">
               <a href="/shenpan/xiangqing/202602.html">指导性案例221号：丙公司诉丁公司算法商业秘密纠纷案</a>
             </div>
             </body></html>""".encode("utf-8")
@@ -632,8 +644,36 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif self.path == "/":
-            body = """<html><head><meta charset="utf-8"></head><body>
-            <form method="post" action="/">
+            active = _BridgeFixtureHandler.active_source_id
+            if active == "dd-492":
+                inner = """<form method="post" action="/">
+              <input type="hidden" name="__VIEWSTATE" value="vs1" />
+              <table id="ctrl_grvDocument">
+                <tr><td><a href="/page/pagenew.aspx?docid=210001">Nghị định 105/2026/NĐ-CP</a></td></tr>
+                <tr><td><a href="/page/pagenew.aspx?docid=210002">Nghị định 106/2026/NĐ-CP</a></td></tr>
+                <tr><td><span>1</span></td></tr>
+              </table>
+            </form>"""
+            elif active == "dd-493":
+                inner = """<div class="congbao-home">
+              <a href="/van-ban/quyet-dinh-48-2026-qd-ttg.htm">Quyết định 48/2026/QĐ-TTg của Thủ tướng Chính phủ</a>
+              <a href="/van-ban/quyet-dinh-49-2026-qd-ttg.htm">Quyết định 49/2026/QĐ-TTg của Thủ tướng Chính phủ</a>
+            </div>"""
+            elif active == "dd-513":
+                inner = """<div class="congbao-home">
+              <a href="/chi-thi-so-37-ct-ttg-tang-cuong-phong-chong-gian-lan-119261021100102474.htm">Chỉ thị số 37/CT-TTg</a>
+            </div>"""
+            elif active == "dd-495":
+                inner = """<div class="congbao-home">
+              <a href="/chung-khoan/thong-tu-145-2026-tt-btc-quy-dinh-dang-ky-449607-d1.html">Thông tư 145/2026/TT-BTC</a>
+            </div>"""
+            elif active == "dd-512":
+                inner = """<div class="congbao-home">
+              <a href="/dt/luat-sua-doi-bo-sung-mot-so-dieu-cua-09-luat-ve-quan-su-quoc-phong/260805100059615084">Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng</a>
+              <a href="/dt/luat-hoa-giai-o-co-so-sua-doi/260522145512086084">Luật Hòa giải ở cơ sở (sửa đổi)</a>
+            </div>"""
+            else:
+                inner = """<form method="post" action="/">
               <input type="hidden" name="__VIEWSTATE" value="vs1" />
               <table id="ctrl_grvDocument">
                 <tr><td><a href="/page/pagenew.aspx?docid=210001">Nghị định 105/2026/NĐ-CP</a></td></tr>
@@ -648,8 +688,10 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
               <a href="/chung-khoan/thong-tu-145-2026-tt-btc-quy-dinh-dang-ky-449607-d1.html">Thông tư 145/2026/TT-BTC</a>
               <a href="/dt/luat-sua-doi-bo-sung-mot-so-dieu-cua-09-luat-ve-quan-su-quoc-phong/260805100059615084">Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng</a>
               <a href="/dt/luat-hoa-giai-o-co-so-sua-doi/260522145512086084">Luật Hòa giải ở cơ sở (sửa đổi)</a>
-            </div>
-            </body></html>""".encode("utf-8")
+            </div>"""
+            body = f'<html><head><meta charset="utf-8"></head><body>{inner}</body></html>'.encode(
+                "utf-8"
+            )
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -1966,6 +2008,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
         thread_v6 = threading.Thread(target=server_v6.serve_forever, daemon=True)
         thread_v6.start()
         _BridgeFixtureHandler.secondary_netloc = f"[::1]:{port_v6}"
+        _BridgeFixtureHandler.active_source_id = source_id
         stopped = False
 
         try:
@@ -2119,23 +2162,27 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                     if source_id in {"dd-512", "dd-516", "dd-565"}:
                         from wlh.engine.objects import Objects
 
-                        md_text = (
-                            Objects()
-                            .get(rows[0]["markdown_hash"])
-                            .decode("utf-8", errors="replace")
-                        )
-                        if source_id == "dd-512":
-                            assert "Toàn văn hồ sơ dự án" in md_text
-                        elif source_id == "dd-516":
-                            assert projected["doc_number"] is None
-                            assert "Trả lời:" in md_text
-                        elif source_id == "dd-565":
-                            assert (
-                                md_text.count(
-                                    "Full judgment reasons of the Supreme Court of Canada"
-                                )
-                                == 1
+                        objs = Objects()
+                        primary_rows = [r for r in rows if r["role"] == "primary"] or rows
+                        for r in primary_rows:
+                            md_text = objs.get(r["markdown_hash"]).decode(
+                                "utf-8", errors="replace"
                             )
+                            if source_id == "dd-512":
+                                assert "Toàn văn hồ sơ dự án" in md_text
+                            elif source_id == "dd-516":
+                                assert r["doc_number"] is None
+                                assert "Đề nghị hướng dẫn" in md_text
+                                assert "Trả lời:" in md_text
+                                ans_part = md_text.split("Trả lời:", 1)[1].strip()
+                                assert "Căn cứ " in ans_part and len(ans_part) >= 50
+                            elif source_id == "dd-565":
+                                assert (
+                                    md_text.count(
+                                        "Full judgment reasons of the Supreme Court of Canada"
+                                    )
+                                    == 1
+                                )
                     if source_id in {"dd-550", "dd-558"}:
                         assert rows[0]["original_media_type"] == "application/zip"
                         assert (projected["original_file"] or "").endswith(".zip")
@@ -2165,6 +2212,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             assert rp_res["report"]["external_requests"] == 0
         finally:
             _BridgeFixtureHandler.secondary_netloc = ""
+            _BridgeFixtureHandler.active_source_id = ""
             if not stopped:
                 server.shutdown()
                 server_v6.shutdown()

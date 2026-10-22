@@ -240,8 +240,16 @@ class Adapter(Base):
                     if self.details and detail:
                         text = re.sub(r"\s+", " ", anchor.text_content()).strip()
                         attachments.append({"url": link, "text": text})
-                    elif (not self.details or self.is_detail(link)) and ctx.follow_links(task):
-                        requests.append({"url": link, "role": "page", "depth": task["depth"] + 1})
+                    elif not self.details or self.is_detail(link):
+                        if ctx.follow_links(task):
+                            requests.append({"url": link, "role": "page", "depth": task["depth"] + 1})
+                        elif (
+                            ctx.runtime.mode == "collect"
+                            and not detail
+                            and link != url
+                            and link not in self.config["entry_urls"]
+                        ):
+                            truncated = truncated or "max_depth_exceeded"
                 elif ctx.follow_links(task):
                     if (
                         not self.details
@@ -249,15 +257,38 @@ class Adapter(Base):
                         or task["depth"] + 1 < self.config["fetch"]["max_depth"]
                     ):
                         requests.append({"url": link, "role": "page", "depth": task["depth"] + 1})
-            if not detail and ctx.follow_links(task):
+                    elif (
+                        not detail
+                        and link != url
+                        and link not in self.config["entry_urls"]
+                    ):
+                        truncated = truncated or "max_depth_exceeded"
+                elif (
+                    ctx.runtime.mode == "collect"
+                    and not detail
+                    and link != url
+                    and link not in self.config["entry_urls"]
+                ):
+                    truncated = truncated or "max_depth_exceeded"
+            if not detail:
                 page = cast(Mapping[str, Any], request.get("meta") or {}).get("page", 1)
-                next_req, truncated = aspnet_next_page(tree, url, page, self.max_pages, self.config)
-                if next_req is not None:
-                    requests.append(next_req)
-                if not truncated:
+                if ctx.follow_links(task):
+                    next_req, asp_trunc = aspnet_next_page(
+                        tree, url, page, self.max_pages, self.config
+                    )
+                    if next_req is not None:
+                        requests.append(next_req)
+                    truncated = truncated or asp_trunc
+                elif ctx.runtime.mode == "collect":
+                    next_req, asp_trunc = aspnet_next_page(
+                        tree, url, page, self.max_pages, self.config
+                    )
+                    if next_req is not None or asp_trunc:
+                        truncated = truncated or asp_trunc or "max_depth_exceeded"
+                if ctx.runtime.mode == "collect":
                     wlh_trunc = tree.xpath("//*[@data-wlh-truncated]/@data-wlh-truncated")
                     if wlh_trunc:
-                        truncated = str(wlh_trunc[0])
+                        truncated = truncated or str(wlh_trunc[0])
         targets: list[dict[str, Any]] = []
         if detail and (kind in TEXT_KINDS | BINARY_KINDS):
             inputs = [{"request": request, "role": "detail"}]
