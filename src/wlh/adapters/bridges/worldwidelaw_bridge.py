@@ -55,7 +55,7 @@ class Adapter(WebAdapter):
         data = ctx.read(acquisition)
         if detect_real_format(data) == "json":
             return self.json_adapter.parse(ctx, task, acquisition)
-        if detect_real_format(data) == "html":
+        if detect_real_format(data) == "html" and not self.config["documents"]["detail_url_patterns"]:
             tree, _, _ = parse_html(data, acquisition.get("charset"))
             if tree.xpath(
                 '//*[contains(@class,"doc-number")]|//td[contains(.,"Số ký hiệu")]'
@@ -70,7 +70,14 @@ class Adapter(WebAdapter):
             details: list[dict[str, Any]] = [
                 r for r in result["requests"] if self.is_detail(r["url"])
             ]
-            result["requests"] = details[:limit]
+            others: list[dict[str, Any]] = [
+                r for r in result["requests"] if not self.is_detail(r["url"])
+            ]
+            if len(details) > limit:
+                result["truncated"] = "document_budget_exceeded"
+            result["requests"] = (
+                details[:limit] if len(details) >= limit else details + others[:limit]
+            )
         return result
 
     def detail_values(

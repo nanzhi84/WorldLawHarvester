@@ -7,11 +7,13 @@ import re
 import zipfile
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import lxml.etree as _etree  # type: ignore[import-untyped]
 
 from wlh.adapters.bridges.common import RecordAdapter, day, first, html_records, items, payload
-from wlh.core import WlhError
+from wlh.core import WlhError, public_url
+from wlh.engine.scope import guard
 
 etree: Any = _etree
 
@@ -72,10 +74,14 @@ class Adapter(RecordAdapter):
                     }
                 )
             return result
-        if zipped or data.lstrip(b"\xef\xbb\xbf \t\r\n").startswith((b"<?xml", b"<dokument")):
+        if zipped or data.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(
+            (b"<?xml", b"<dokument", b"<items")
+        ):
             tree: Any = etree.fromstring(
                 data, etree.XMLParser(resolve_entities=False, no_network=True)
             )
+            if not zipped and etree.QName(tree).localname == "items":
+                return []
             key: str | None = first(tree, ".//ecli/text()") or first(tree, ".//doknr/text()")
             number: str | None = first(tree, ".//aktenzeichen/text()") or first(
                 tree, ".//az/text()"
@@ -127,6 +133,58 @@ class Adapter(RecordAdapter):
                 "doc_type": 'string("案例")',
             },
         )
+
+    def next_requests(
+        self, data: bytes, acquisition: Mapping[str, Any]
+    ) -> list[dict[str, Any]]:
+        if not data.startswith(b"PK\x03\x04") and data.lstrip(
+            b"\xef\xbb\xbf \t\r\n"
+        ).startswith((b"<?xml", b"<items")):
+            try:
+                tree: Any = etree.fromstring(
+                    data, etree.XMLParser(resolve_entities=False, no_network=True)
+                )
+            except etree.XMLSyntaxError:
+                return []
+            if etree.QName(tree).localname == "items":
+                base = str(
+                    acquisition.get("actual_url") or acquisition.get("request_url") or ""
+                )
+                base_parts = urlsplit(base)
+                urls: list[str] = []
+                seen: set[str] = set()
+                for raw in tree.xpath(".//*[local-name()='link']/text()"):
+                    href = str(raw).strip()
+                    if not href:
+                        continue
+                    parts = urlsplit(urljoin(base, href))
+                    scheme = (
+                        "https"
+                        if parts.scheme == "http"
+                        and base_parts.scheme == "https"
+                        and parts.netloc == base_parts.netloc
+                        else parts.scheme
+                    )
+                    try:
+                        candidate = public_url(
+                            urlunsplit(
+                                (scheme, parts.netloc, parts.path or "/", parts.query, "")
+                            )
+                        )
+                        guard(self.config, candidate)
+                    except (WlhError, ValueError):
+                        continue
+                    if candidate not in seen:
+                        seen.add(candidate)
+                        urls.append(candidate)
+                limit: int = int(self.config["budget"]["documents"])
+                if len(urls) > limit:
+                    self.truncated = "document_budget_exceeded"
+                return [
+                    {"url": u, "role": "page"}
+                    for u in urls[:limit]
+                ]
+        return []
 
 
 OldpProviderBridge = Adapter

@@ -2,7 +2,7 @@
 id: dd-494
 adapter: web
 entry_urls:
-- https://vbpl.vn/TW/Pages/vbpq-toanvan.aspx?ItemID=142881
+- https://vbpl.vn/tw/Pages/vanban.aspx
 allowed_hosts:
 - vbpl.vn
 allowed_path_prefixes:
@@ -11,8 +11,8 @@ archive_approved: true
 scope: 越南国家法律数据库公开法律详情、原生正文与文件附件的有界采集。
 robots: true
 budget:
-  requests: 40
-  documents: 5
+  requests: 50
+  documents: 10
   seconds: 600
   response_bytes: 134217728
 metadata:
@@ -20,6 +20,9 @@ metadata:
   document_type: 法律法规
   language: vi
   jurisdiction: VN
+documents:
+  detail_url_patterns:
+  - '^https://vbpl\.vn/tw/Pages/vbpq-toanvan\.aspx\?ItemID=\d+$'
 fetch:
   mode: http
   max_depth: 2

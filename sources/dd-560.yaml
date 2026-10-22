@@ -2,7 +2,7 @@
 id: dd-560
 adapter: openstates_bridge
 entry_urls:
-- https://v3.openstates.org/bills?jurisdiction=wa&updated_since=2026-10-01&per_page=1&include=versions&include=abstracts&include=sources
+- https://v3.openstates.org/bills?jurisdiction=wa&updated_since=2026-10-01&per_page=10&include=versions&include=abstracts&include=sources
 allowed_hosts:
 - v3.openstates.org
 - lawfilesext.leg.wa.gov
@@ -13,10 +13,10 @@ archive_approved: true
 scope: Open States v3 美国各州立法聚合 API 与华盛顿州议会（leg.wa.gov）法案多版本 PDF 原件有界采集。
 robots: false
 budget:
-  requests: 20
-  documents: 1
+  requests: 100
+  documents: 10
   seconds: 300
-  response_bytes: 52428800
+  response_bytes: 134217728
 metadata:
   source_name: Open States 美国 50 州立法与法案聚合
   document_type: 法律法规

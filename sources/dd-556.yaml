@@ -2,7 +2,7 @@
 id: dd-556
 adapter: opencaselaw_bridge
 entry_urls:
-- https://mcp.opencaselaw.ch/api/decisions?court=bger&limit=1
+- https://mcp.opencaselaw.ch/api/decisions?court=bger&limit=10
 allowed_hosts:
 - mcp.opencaselaw.ch
 allowed_path_prefixes:
@@ -12,8 +12,8 @@ archive_approved: true
 scope: 瑞士联邦最高法院（Bundesgericht - BGer）公开判例列表与裁判全文有界采集。
 robots: false
 budget:
-  requests: 20
-  documents: 1
+  requests: 50
+  documents: 10
   seconds: 300
   response_bytes: 52428800
 metadata:

@@ -9,8 +9,8 @@ scope: 越南政府门户政策与法规建设专栏公开文书及附件的有�
 robots: true
 delay: 0.5
 budget:
-  requests: 40
-  documents: 1
+  requests: 50
+  documents: 10
   seconds: 600
   response_bytes: 134217728
 fetch:

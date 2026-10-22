@@ -2,17 +2,17 @@
 id: dd-551
 adapter: oldp_bridge
 entry_urls:
-- https://www.rechtsprechung-im-internet.de/jportal/docs/bsjrs/jb-JURE100055033.zip
+- https://www.rechtsprechung-im-internet.de/jportal/docs/bsjrs/bsjrs-toc.xml
 allowed_hosts:
 - www.rechtsprechung-im-internet.de
 allowed_path_prefixes:
 - /jportal/docs/bsjrs/
 archive_approved: true
-scope: 德国联邦最高法院（BGH / Rechtsprechung im Internet）官方公开裁判文书 XML ZIP 有界采集。
+scope: 德国联邦最高法院（BGH / Rechtsprechung im Internet）官方公开目录与裁判文书 XML ZIP 有界采集。
 robots: false
 budget:
-  requests: 20
-  documents: 1
+  requests: 50
+  documents: 10
   seconds: 300
   response_bytes: 52428800
 metadata:

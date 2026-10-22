@@ -1,27 +1,28 @@
 # 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-565
 id: dd-565
 adapter: web
-scope: "加拿大最高法院（Supreme Court of Canada）官方案件卷宗与裁判摘要（Case No. 40000）有界采集"
-entry_urls: ["https://www.scc-csc.ca/cases-dossiers/search-recherche/40000/"]
-allowed_hosts: ["www.scc-csc.ca"]
-allowed_path_prefixes: ["/cases-dossiers/"]
+scope: "加拿大最高法院（Supreme Court of Canada）Decisia 裁判文书列表发现与判决全文有界采集"
+entry_urls: ["https://decisions.scc-csc.ca/scc-csc/scc-csc/en/2026/nav_date.do?iframe=true"]
+allowed_hosts: ["decisions.scc-csc.ca"]
+allowed_path_prefixes: ["/scc-csc/scc-csc/en/"]
 archive_approved: true
 robots: true
 delay: 0.5
-fetch: {mode: http, max_depth: 0, retries: 2, page_timeout_ms: 60000}
-budget: {requests: 10, documents: 1, seconds: 120, response_bytes: 33554432}
+user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+fetch: {mode: http, max_depth: 1, retries: 2, page_timeout_ms: 60000}
+budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "加拿大最高法院（SCC / Lexum）、联邦法院与 CanLII"
   document_type: "案例"
   language: "en"
   jurisdiction: "CA"
 documents:
-  detail_url_patterns: ['^https://www\.scc-csc\.ca/cases-dossiers/search-recherche/\d+/$']
-  attachment_url_pattern: '^\b$'
+  detail_url_patterns: ['^https://decisions\.scc-csc\.ca/scc-csc/scc-csc/en/item/\d+/index\.do\?iframe=true$']
+  attachment_url_pattern: '^https://decisions\.scc-csc\.ca/scc-csc/scc-csc/en/item/\d+/.*\.(?:pdf|docx?)$'
   detail_body: always
-  content_xpath: '//main'
+  content_xpath: '//div[contains(@class, "documentcontent")] | //div[@id="decisia-main-content"]'
   fields:
-    title: {xpath: '//p[@id="soc"]'}
-    document_number: {xpath: '//h2[@id="case-no"]'}
+    title: {xpath: '(//h3[contains(@class, "title")])[1] | //title'}
+    document_number: {xpath: '//div[contains(@class, "metadata")]', regex: 'Neutral citation\s*(20\d{2}\s+SCC\s+\d+)'}
     issuer: {value: "Supreme Court of Canada"}
-    published_at: {xpath: '//main', regex: '(\d{4}-\d{2}-\d{2})\s+Judgment of the Court'}
+    published_at: {xpath: '//div[contains(@class, "metadata")]', regex: 'Date\s*(\d{4}-\d{2}-\d{2})'}

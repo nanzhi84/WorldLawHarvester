@@ -78,14 +78,20 @@ def safe_name(title: str) -> str:
 
 
 def file_names(
-    title: str, markdown_hash: str, original_hash: str | None,
-    extension: str | None, volume_order: int | None,
+    title: str,
+    record_hash: str,
+    markdown_hash: str,
+    original_hash: str | None,
+    extension: str | None,
+    volume_order: int | None,
 ) -> tuple[str, str | None]:
     suffix = "_%02d" % volume_order if volume_order else ""
     base = safe_name(title)
-    markdown_file = f"{base}_{markdown_hash[:8]}{suffix}.md"
+    markdown_file = f"{base}_{record_hash[:8]}_{markdown_hash[:8]}{suffix}.md"
     original_file: str | None = (
-        f"{base}_{original_hash[:8]}{suffix}.{extension}" if original_hash and extension else None
+        f"{base}_{record_hash[:8]}_{original_hash[:8]}{suffix}.{extension}"
+        if original_hash and extension
+        else None
     )
     return markdown_file, original_file
 
@@ -249,7 +255,7 @@ def build(
         original_hash = original["ref"] if original else None
         extension, media_type = EXTENSIONS[original["kind"]] if original else (None, None)
         markdown_file, original_file = file_names(
-            title, markdown_ref, original_hash, extension, item.get("volume_order")
+            title, record, markdown_ref, original_hash, extension, item.get("volume_order")
         )
         if markdown_file in names:
             raise WlhError("duplicate_deliverable_file")

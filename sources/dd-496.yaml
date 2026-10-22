@@ -9,8 +9,8 @@ scope: LuatVietnam 判决库 /ban-an/ 路径下公开裁判文书及附件的有
 robots: true
 delay: 0.5
 budget:
-  requests: 40
-  documents: 1
+  requests: 50
+  documents: 10
   seconds: 600
   response_bytes: 52428800
 fetch:

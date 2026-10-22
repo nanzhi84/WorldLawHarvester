@@ -5,7 +5,7 @@ entry_urls:
 allowed_hosts:
 - www.court.gov.cn
 allowed_path_prefixes:
-- /shenpan/gengduo/77.html
+- /shenpan/gengduo/
 - /shenpan/xiangqing/
 archive_approved: true
 scope: 指导案例栏目及可发现详情的有界采集；不承诺全站覆盖。
@@ -17,7 +17,7 @@ budget:
   requests: 100
   seconds: 600
   response_bytes: 52428800
-  documents: 5
+  documents: 10
 fetch:
   mode: http
   max_depth: 20

@@ -10,7 +10,7 @@ user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 
 robots: false
 delay: 0.5
 fetch: {max_depth: 1, retries: 2}
-budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "电影备案公示"
   document_type: "通知公告"

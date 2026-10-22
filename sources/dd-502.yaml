@@ -1,27 +1,29 @@
 # 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-502
 id: dd-502
 adapter: web
-scope: "中国政府网国务院政策文件库首页最新行政法规与政策文件最小切片"
-entry_urls: ["https://www.gov.cn/zhengce/index.htm"]
-allowed_hosts: ["www.gov.cn"]
-allowed_path_prefixes: ["/zhengce/"]
+scope: "中国政府网国家规章库（gjgzk）部门规章列表发现与规章全文有界采集"
+entry_urls: ["https://www.gov.cn/zhengce/xxgk/gjgzk/index.htm"]
+allowed_hosts: ["www.gov.cn", "sousuoht.www.gov.cn"]
+allowed_path_prefixes: ["/zhengce/", "/athena/forward/"]
+host_path_scopes:
+  www.gov.cn: ["/zhengce/"]
+  sousuoht.www.gov.cn: ["/athena/forward/"]
 archive_approved: true
-robots: true
+robots: false
 delay: 0.5
-fetch: {max_depth: 1, retries: 2}
-budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+fetch: {mode: rendered_dom, wait_until: domcontentloaded, max_depth: 1, retries: 2, page_timeout_ms: 60000}
+budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "国家规章库"
   document_type: "法律法规"
   language: "zh"
   jurisdiction: "CN"
-  # priority: P1
 documents:
-  detail_url_patterns: ['^https://www\.gov\.cn/zhengce/content/\d{6}/content_\d+\.htm$']
+  detail_url_patterns: ['^https://www\.gov\.cn/zhengce/(?:content/)?(?:\d{6}|\d{4}-\d{2}/\d{2})/content_\d+\.htm$']
   detail_body: always
   content_xpath: '//div[@id="UCAP-CONTENT"]|//table[contains(@class,"xxgk-table")]'
   fields:
-    title: {xpath: '//tr[td[contains(.,"标") and contains(.,"题：")]]/td[2]|//title[not(//td[contains(.,"标") and contains(.,"题：")])]'}
-    document_number: {xpath: '//tr[td[contains(.,"发文字号：")]]/td[2]'}
-    issuer: {xpath: '//td[contains(.,"发文机关：")]/following-sibling::td[1]'}
-    published_at: {xpath: '//td[contains(.,"成文日期：")]/following-sibling::td[1]|//meta[@name="firstpublishedtime" and not(//td[contains(.,"成文日期：")])]/@content'}
+    title: {xpath: '//tr[td[contains(.,"标") and contains(.,"题：")]]/td[2] | (//title)[1]', regex: '^([^_]+)'}
+    document_number: {xpath: '//tr[td[contains(.,"发文字号：")]]/td[2] | //meta[@name="description"]/@content | //div[@id="UCAP-CONTENT"]', regex: '([^\s（(，,；;。日]+令(?:20\d{2}年)?第\d+号|国[^\s]{1,10}〔\d{4}〕\d+号|中华人民共和国国务院令第\d+号)'}
+    issuer: {xpath: '//td[contains(.,"发文机关：")]/following-sibling::td[1] | (//title)[1]', regex: '^(?:[^_]+_)?([^_]+?)(?:_中国政府网)?$'}
+    published_at: {xpath: '//td[contains(.,"成文日期：")]/following-sibling::td[1] | //meta[@name="firstpublishedtime"]/@content', regex: '(\d{4}[-年]\d{1,2}[-月]\d{1,2})'}

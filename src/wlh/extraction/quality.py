@@ -92,13 +92,16 @@ def quality_check(
         value = block.get("page_idx")
         if isinstance(value, int):
             by_page.setdefault(value + 1 if zero_based else value, []).append(block)
+    has_native_pages = any(not p.get("suspected_scan") for p in analysis.get("pages", []))
     garbled = sum(char in LEGACY_GARBLED for char in markdown) if vietnamese else 0
     garbled_ratio = garbled / max(len(markdown), 1)
     document_reasons: list[str] = []
     expected = len(analysis.get("pages", []))
     if raw_indices and expected and (min(raw_indices) not in {0, 1} or max(by_page) > expected):
         document_reasons.append("page_number_mapping_unreliable")
-    if garbled >= 8 and garbled_ratio >= 0.002:
+    if (has_native_pages and garbled >= 8 and garbled_ratio >= 0.002) or (
+        not has_native_pages and garbled >= 16 and garbled_ratio >= 0.03
+    ):
         document_reasons.append("legacy_vietnamese_font_encoding_suspect")
     pages: list[dict[str, Any]] = []
     for page in analysis.get("pages", []):
@@ -130,7 +133,11 @@ def quality_check(
             reasons.append("isolated_replacement_character")
         if vietnamese:
             cjk = len(re.findall(r"[\u3400-\u9fff\uf900-\ufaff]", local_text))
-            if sum(char in LEGACY_GARBLED for char in local_text) >= 4:
+            garbled_page = sum(char in LEGACY_GARBLED for char in local_text)
+            if page.get("suspected_scan"):
+                if garbled_page >= 8 and garbled_page / max(ocr_chars, 1) >= 0.03:
+                    reasons.append("legacy_vietnamese_font_garbled")
+            elif garbled_page >= 4 and garbled_page / max(ocr_chars, 1) >= 0.005:
                 reasons.append("legacy_vietnamese_font_garbled")
             if cjk >= 12 and cjk / max(ocr_chars, 1) >= 0.02:
                 reasons.append("non_vietnamese_garbage")

@@ -263,3 +263,127 @@ allowed_path_prefixes:
         assert verified_in_csv.issubset(configured_ids), (
             f"Matrix [x] sources missing YAML files: {verified_in_csv - configured_ids}"
         )
+
+    def test_collection_sources_prohibit_single_document_reward_hacking_shortcuts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """All multi-document collection sources in `sources/dd-*.yaml` (except single-standard `dd-375`) enforce multi-document discovery invariants."""
+        import re
+        from urllib.parse import urlsplit
+
+        from wlh.config import load_file
+
+        monkeypatch.setenv("WLH_ALLOW_LOOPBACK", "0")
+        repo_root = Path(__file__).resolve().parents[1]
+        sources_dir = repo_root / "sources"
+        forbidden_prefix_exts = (
+            ".html",
+            ".htm",
+            ".shtml",
+            ".jsp",
+            ".aspx",
+            ".pdf",
+            ".doc",
+            ".docx",
+            ".zip",
+            ".xml",
+        )
+        forbidden_entry_exts = (
+            ".pdf",
+            ".doc",
+            ".docx",
+            ".rtf",
+            ".xls",
+            ".xlsx",
+            ".zip",
+        )
+        single_item_markers = (
+            "ItemID=",
+            "docid=",
+            "dDocName=",
+            "/lawdata/",
+            "/data.xml",
+            "/item/",
+        )
+
+        for yaml_path in sorted(sources_dir.glob("dd-*.yaml")):
+            cfg = load_file(yaml_path)
+            if cfg.id == "dd-375":
+                continue
+
+            # a) max_depth >= 1
+            assert cfg.fetch.max_depth >= 1, (
+                f"{cfg.id} must have fetch.max_depth >= 1 (single-page max_depth=0 forbidden)"
+            )
+
+            # b) budget.documents >= 10
+            assert cfg.budget.documents >= 10, (
+                f"{cfg.id} must have budget.documents >= 10 (lowering default budget to 1 is forbidden)"
+            )
+
+            # c) attachment_url_pattern must match multiple distinct attachment filenames under allowed scope
+            att_pat = cfg.documents.attachment_url_pattern or ""
+            att_re = re.compile(att_pat, re.I)
+            candidate_pairs: list[tuple[str, str]] = []
+            for host in cfg.allowed_hosts:
+                prefixes = cfg.host_path_scopes.get(host) or cfg.allowed_path_prefixes
+                for prefix in prefixes:
+                    base = f"https://{host}{prefix.rstrip('/')}"
+                    candidate_pairs.append(
+                        (f"{base}/doc_alpha_01.pdf", f"{base}/doc_beta_02.pdf")
+                    )
+                    candidate_pairs.append(
+                        (f"{base}/item/100/doc_alpha_01.pdf", f"{base}/item/100/doc_beta_02.pdf")
+                    )
+            assert any(
+                bool(att_re.search(u1)) and bool(att_re.search(u2))
+                for u1, u2 in candidate_pairs
+            ), (
+                f"{cfg.id} attachment_url_pattern {att_pat!r} must match multiple distinct filenames "
+                "(disabling attachments or locking onto a single filename is forbidden)"
+            )
+
+            # d) entry_urls and detail_url_patterns invariants
+            for entry_url in cfg.entry_urls:
+                entry_path = urlsplit(entry_url).path.lower()
+                assert not entry_path.endswith(forbidden_entry_exts), (
+                    f"{cfg.id} entry_url {entry_url!r} must not point directly to a binary/document file"
+                )
+                assert not any(marker in entry_url for marker in single_item_markers), (
+                    f"{cfg.id} entry_url {entry_url!r} contains a single-item marker"
+                )
+                if cfg.adapter in {"web", "worldwidelaw_bridge"}:
+                    assert not att_re.search(entry_url), (
+                        f"{cfg.id} entry_url {entry_url!r} must not match attachment_url_pattern"
+                    )
+
+            if cfg.adapter in {"web", "worldwidelaw_bridge"}:
+                assert (
+                    bool(cfg.documents.detail_url_patterns)
+                    or cfg.documents.detail_body == "never"
+                ), (
+                    f"{cfg.id} ({cfg.adapter}) must declare detail_url_patterns unless detail_body == 'never'"
+                )
+
+            if cfg.documents.detail_url_patterns:
+                for entry_url in cfg.entry_urls:
+                    for pat in cfg.documents.detail_url_patterns:
+                        assert not re.search(pat, entry_url), (
+                            f"{cfg.id} entry_url {entry_url!r} matches detail_url_pattern {pat!r} "
+                            "(Entry-is-Detail shortcut is forbidden)"
+                        )
+
+            # e) No prefix in allowed_path_prefixes or host_path_scopes may lock onto a single file extension
+            all_prefixes = list(cfg.allowed_path_prefixes)
+            for scoped_prefixes in cfg.host_path_scopes.values():
+                all_prefixes.extend(scoped_prefixes)
+            for prefix in all_prefixes:
+                assert not prefix.lower().endswith(forbidden_prefix_exts), (
+                    f"{cfg.id} path prefix {prefix!r} locks onto a single file path"
+                )
+
+            # f) For any adapter where "max_pages" in adapter_options, assert max_pages >= 2
+            if "max_pages" in cfg.adapter_options:
+                assert int(cfg.adapter_options["max_pages"]) >= 2, (
+                    f"{cfg.id} adapter_options.max_pages must be >= 2"
+                )

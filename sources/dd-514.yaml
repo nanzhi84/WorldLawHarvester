@@ -1,24 +1,23 @@
 # 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-514
 id: dd-514
 adapter: web
-scope: "越南最高人民法院判例门户（Án lệ TANDTC）指定判例（Án lệ số 84/2026/AL）全文与属性有界采集"
-entry_urls: ["https://anle.toaan.gov.vn/webcenter/portal/anle/chitietanle?dDocName=TAND377305"]
+scope: "越南最高人民法院判例门户（Án lệ TANDTC）判例列表发现与全文属性有界采集"
+entry_urls: ["https://anle.toaan.gov.vn/webcenter/portal/anle/anle"]
 allowed_hosts: ["anle.toaan.gov.vn"]
 allowed_path_prefixes: ["/webcenter/portal/anle/"]
 archive_approved: true
 robots: false
 delay: 0.5
 user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-fetch: {mode: rendered_dom, wait_until: domcontentloaded, max_depth: 0, retries: 2, page_timeout_ms: 60000}
-budget: {requests: 10, documents: 1, seconds: 180, response_bytes: 33554432}
+fetch: {mode: rendered_dom, wait_until: domcontentloaded, max_depth: 1, retries: 2, page_timeout_ms: 60000}
+budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "越南最高人民法院判例门户（Án lệ TANDTC）"
   document_type: "案例"
   language: "vi"
   jurisdiction: "VN"
 documents:
-  detail_url_patterns: ['^https://anle\.toaan\.gov\.vn/webcenter/portal/anle/chitietanle\?dDocName=TAND\d+']
-  attachment_url_pattern: '^\b$'
+  detail_url_patterns: ['^https://anle\.toaan\.gov\.vn/webcenter/portal/anle/chitietanle\?dDocName=TAND\d+$']
   detail_body: always
   content_xpath: '//div[@id="tabContent1"]'
   fields:

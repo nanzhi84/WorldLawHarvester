@@ -9,8 +9,8 @@ scope: LuatVietnam 法规库公开法律法规正文及附件的有界采集；�
 robots: true
 delay: 0.5
 budget:
-  requests: 40
-  documents: 1
+  requests: 50
+  documents: 10
   seconds: 600
   response_bytes: 52428800
 fetch:

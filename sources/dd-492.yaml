@@ -2,7 +2,7 @@
 id: dd-492
 adapter: web
 adapter_options:
-  max_pages: 1
+  max_pages: 3
 entry_urls:
 - https://vanban.chinhphu.vn/
 allowed_hosts:
@@ -24,7 +24,7 @@ budget:
   requests: 100
   seconds: 600
   response_bytes: 134217728
-  documents: 5
+  documents: 10
 fetch:
   mode: http
   max_depth: 1
@@ -56,5 +56,5 @@ documents:
       xpath: //tr[count(td)=2 and normalize-space(td[1])="Tình trạng hiệu lực"]/td[2]
 ocr:
   languages: vie
-  dpi: 96
+  dpi: 144
   engine: br-ocr-v1

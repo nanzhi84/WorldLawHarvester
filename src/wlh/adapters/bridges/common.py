@@ -82,6 +82,10 @@ def items(value: Any, names: Sequence[str]) -> list[dict[str, Any]]:
 class RecordAdapter(Base):
     NAMESPACE: str = "record"
 
+    def __init__(self, config: dict[str, Any]) -> None:
+        super().__init__(config)
+        self.truncated: str | None = None
+
     def records(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
         raise NotImplementedError
 
@@ -126,9 +130,12 @@ class RecordAdapter(Base):
                     "inputs": inputs,
                 }
             )
+        self.truncated = None
+        requests = self.next_requests(data, acquisition) if ctx.follow_links(task) else []
         return {
-            "requests": self.next_requests(data, acquisition) if ctx.follow_links(task) else [],
+            "requests": requests,
             "targets": targets,
+            **({"truncated": self.truncated} if self.truncated else {}),
         }
 
     def plan_recheck(

@@ -159,12 +159,12 @@ erDiagram
 | 序号 | 下游中文语义标签 (`examples/field_mapping.yaml`) | `canonical` 英文规范键名 (`DOCUMENT_ROW` / `GET /results`) | 类型与规则说明 |
 | :---: | :--- | :--- | :--- |
 | 1 | `资料名称` | `title` | 非空字符串（NFC 归一化标题） |
-| 2 | `解析后文件` | `markdown_file` | `{safe_title}_{markdown_hash[:8]}[_{volume_order:02d}].md` |
+| 2 | `解析后文件` | `markdown_file` | `{safe_title}_{source_record_hash[:8]}_{markdown_hash[:8]}[_{volume_order:02d}].md` |
 | 3 | `资料类型` | `doc_type` | `法律法规` / `政策文件` / `案例` / `行业标准` / `通知公告` / `财务报告` / `会计准则` / `税务资料` / `其他` |
 | 4 | `采集时间` | `acquired_at` | 权威采集时间，投影格式化为 UTC `YYYY-MM-DD HH:MM:SS` |
-| 5 | `原始文件` | `original_file` | 原件规范文件名（如 PDF/DOCX）；仅网页正文无独立附件时为 `null` |
+| 5 | `原始文件` | `original_file` | `{safe_title}_{source_record_hash[:8]}_{original_hash[:8]}[_{volume_order:02d}].{ext}`；无独立附件时为 `null` |
 | 6 | `文件顺序` | `volume_order` | 仅多卷本（分卷附件）为 `1, 2, ...`，其余为 `null` |
-| 7 | `文号/案号` | `document_number` | 官方发文字号或法院案号，可空字符串 |
+| 7 | `文号/案号` | `doc_number` | 官方发文字号或法院案号，可空字符串 |
 | 8 | `发布机构` | `issuer` | 发文机关或审理法院名称字符串（多机构以 `"; "` 拼接），可空 |
 | 9 | `发布日期` | `published_at` | `YYYY-MM-DD` 或 `null` |
 | 10 | `生效日期` | `effective_at` | `YYYY-MM-DD` 或 `null` |
@@ -173,7 +173,7 @@ erDiagram
 | 13 | `来源名称` | `source_name` | 官方来源名称（默认从 Source YAML `metadata.source_name` 继承） |
 | 14 | `来源详情页` | `detail_url` | 公开详情页 URL |
 | 15 | `来源记录号` | `source_record_hash` | 由 `(source_id, namespace, external_key)` 计算的 64 位小写 hex SHA-256 |
-| 16 | 附加文件寻址字段 | `original_hash`, `markdown_hash`, `source_id`, `resource_id`, `version_id`, `row_index` | 供客户端通过 `GET /files/{sha256}` 下载原件与 `.md` |
+| 16 | `文件哈希` | `markdown_hash`, `original_hash` | 供客户端通过 `GET /files/{sha256}` 下载 `.md` 与原件（原件存在时取 `original_hash`，否则取 `markdown_hash`） |
 
 ---
 

@@ -152,7 +152,7 @@ class Adapter(Base):
                 isinstance(v, str) and len(v) <= 200 for v in values
             ):
                 raise ValueError("invalid_conditions")
-        per_page: Any = options.get("per_page", 20)
+        per_page: Any = options.get("per_page", 10)
         pages: Any = options.get("max_pages", 1)
         if type(per_page) is not int or not 1 <= per_page <= 100:
             raise ValueError("invalid_per_page")
@@ -187,7 +187,7 @@ class Adapter(Base):
         )
 
     def plan(self, state: dict[str, Any]) -> dict[str, Any]:
-        params = [("per_page", str(self.options.get("per_page", 20))), ("order", "newest")]
+        params = [("per_page", str(self.options.get("per_page", 10))), ("order", "newest")]
         for key, value in sorted(self.options.get("conditions", {}).items()):
             name, _, rest = key.partition("[")
             param = "conditions[" + name + "]" + ("[" + rest if rest else "")

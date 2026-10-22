@@ -10,6 +10,7 @@ import asyncio
 import base64
 import contextlib
 import hashlib
+import json
 import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
@@ -80,6 +81,43 @@ class Browser:
         if self.playwright is not None:
             await self.playwright.stop()
 
+    async def _exchange_with_retry(
+        self,
+        url: str,
+        method: str,
+        body: bytes | None,
+        key: str,
+        role: str,
+        meta: Mapping[str, Any],
+        parent: str | None,
+        relation: str | None,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        row: dict[str, Any] = {}
+        cur_parent, cur_rel = parent, relation
+        retries: int = int(self.config["fetch"]["retries"])
+        for attempt in range(retries + 1):
+            row = await self.transport.exchange(
+                url,
+                method,
+                body,
+                key,
+                role,
+                meta,
+                cur_parent,
+                cur_rel,
+                headers=headers,
+            )
+            retry = (row["state"] == "failed" and row["error"] == "network_failed") or (
+                row["state"] == "archived" and int(row.get("http_status") or 0) >= 500
+            )
+            if not retry or attempt == retries:
+                return row
+            cur_parent, cur_rel = row["id"], "retry"
+            await asyncio.sleep(self.config["fetch"]["retry_backoff_seconds"] * 2**attempt)
+        return row
+
     async def acquire(self, request: Mapping[str, Any]) -> dict[str, Any]:
         await self.start()
         assert self.browser is not None
@@ -143,7 +181,7 @@ class Browser:
                     if name.lower()
                     not in {"accept-encoding", "host", "connection", "content-length"}
                 }
-                row: dict[str, Any] = await self.transport.exchange(
+                row: dict[str, Any] = await self._exchange_with_retry(
                     target,
                     browser_request["method"],
                     body,
@@ -176,7 +214,7 @@ class Browser:
                     hop_headers = {
                         k: v for k, v in req_headers.items() if k.lower() != "cookie"
                     }
-                    row = await self.transport.exchange(
+                    row = await self._exchange_with_retry(
                         target,
                         "GET",
                         None,
@@ -266,6 +304,210 @@ class Browser:
             html = await page.content()
             status = response.status if response else None
             actual = page.url
+            if "handlerToanVanDuThao" in html and (
+                m_lan := re.search(r"let\s+lanDuThaoId\s*=\s*['\"]([^'\"]+)['\"]", html)
+            ):
+                lan_id = m_lan.group(1)
+                m_tt = re.search(r"let\s+TrangThaiThongQua\s*=\s*(\d+)", html)
+                tt = m_tt.group(1) if m_tt else "0"
+                sub_urls = [
+                    f"{actual}?handler=ToanVanDuThao&lanDuThaoId={lan_id}&trangThaiThongQua={tt}",
+                    f"{actual}?handler=Files&FileAttachmentType=DuThaoLuat_LanDuThaoLuat&LtsEntityIds={lan_id}",
+                ]
+                parts: list[str] = []
+                for raw_sub_url in sub_urls:
+                    try:
+                        sub_url = guard(self.config, raw_sub_url)
+                        await self.transport.robots.check(sub_url, self.transport.fetch_policy)
+                        sub_key = request_key(
+                            {"url": sub_url, "method": "GET", "role": "browser_http"}
+                        )
+                        sub_row = await self._exchange_with_retry(
+                            sub_url,
+                            "GET",
+                            None,
+                            sub_key,
+                            "content",
+                            {
+                                "rendered_acquisition_id": identity,
+                                "resource_type": "Fetch",
+                            },
+                            None,
+                            None,
+                        )
+                        if sub_row["state"] == "archived" and sub_row["outcome"] == "ok":
+                            sub_bytes = self.transport.objects.get(sub_row["archive_ref"])
+                            while (
+                                sub_row["state"] == "archived"
+                                and sub_row["outcome"] == "ok"
+                                and sub_row.get("mime_type") == "text/html"
+                                and len(sub_bytes) <= 16384
+                                and (loopback := self._detect_html_loopback(sub_url, sub_bytes))
+                            ):
+                                sub_url = guard(self.config, loopback)
+                                await self.transport.robots.check(
+                                    sub_url, self.transport.fetch_policy
+                                )
+                                hop_key = request_key(
+                                    {"url": sub_url, "method": "GET", "role": "browser_http"}
+                                )
+                                sub_row = await self._exchange_with_retry(
+                                    sub_url,
+                                    "GET",
+                                    None,
+                                    hop_key,
+                                    "content",
+                                    {
+                                        "rendered_acquisition_id": identity,
+                                        "resource_type": "Fetch",
+                                    },
+                                    sub_row["id"],
+                                    "redirect",
+                                )
+                                if sub_row["state"] != "archived" or sub_row["outcome"] != "ok":
+                                    break
+                                sub_bytes = self.transport.objects.get(sub_row["archive_ref"])
+                            if sub_row["state"] == "archived" and sub_row["outcome"] == "ok":
+                                parts.append(sub_bytes.decode("utf-8", errors="replace"))
+                    except WlhError as exc:
+                        if exc.code in {"stale_attempt", "inactive_attempt", "run_not_started"}:
+                            raise
+                if parts:
+                    extra_html = "\n".join(parts)
+                    if re.search(r'<div\b[^>]*\bid=["\']nav-home["\'][^>]*>', html, re.I):
+                        html = re.sub(
+                            r'(<div\b[^>]*\bid=["\']nav-home["\'][^>]*>)',
+                            lambda m: m.group(1) + "\n" + extra_html,
+                            html,
+                            count=1,
+                            flags=re.I,
+                        )
+                    elif "</body>" in html:
+                        html = html.replace(
+                            "</body>", f'<div id="nav-home">{extra_html}</div></body>', 1
+                        )
+                    else:
+                        html += f'<div id="nav-home">{extra_html}</div>'
+            if "/zhengce/xxgk/gjgzk/" in actual:
+                try:
+                    api_url = guard(
+                        self.config,
+                        "https://sousuoht.www.gov.cn/athena/forward/BD8730CDDA12515E2D9E1B21AA11C0D6",
+                    )
+                    await self.transport.robots.check(api_url, self.transport.fetch_policy)
+                    api_body = json.dumps(
+                        {
+                            "code": "18258ab0ac9",
+                            "preference": None,
+                            "searchFields": [
+                                {
+                                    "fieldName": "f_202321807875",
+                                    "searchWord": "部门规章",
+                                    "searchType": "TERM",
+                                    "withHighLight": True,
+                                },
+                                {"fieldName": "f_202321360426", "searchWord": "", "withHighLight": True},
+                                {"fieldName": "f_202321758948", "searchWord": "", "withHighLight": True},
+                                {"fieldName": "f_202321423473", "searchType": "TERM", "withHighLight": True},
+                                {"fieldName": "f_202321159816", "searchWord": "", "searchType": "TERM"},
+                                {"fieldName": "f_20232380533", "searchType": "TERM", "withHighLight": True},
+                                {"fieldName": "f_202328191239", "withHighLight": True, "searchType": "TERM"},
+                                {"fieldName": "f_20221110222856", "withHighLight": True, "searchType": "TERM"},
+                            ],
+                            "sorts": [{}, {"sortField": "f_202321915922", "sortOrder": "DESC"}],
+                            "resultFields": [
+                                "f_202355832506",
+                                "f_20232124962",
+                                "f_202321124775",
+                                "f_202321159816",
+                                "f_202321360426",
+                                "f_202321423473",
+                                "f_202321758948",
+                                "f_202321807875",
+                                "f_202321864401",
+                                "f_202321915922",
+                                "f_202323394765",
+                                "f_202328191239",
+                                "f_202344311304",
+                                "f_2023425676953",
+                                "f_2023425808265",
+                                "f_202321136868",
+                                "f_20232380533",
+                                "f_20232151076",
+                                "doc_pub_url",
+                            ],
+                            "trackTotalHits": "true",
+                            "tableName": "t_1860c735d31",
+                            "pageSize": 15,
+                            "pageNo": 1,
+                            "granularity": "ALL",
+                        },
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    api_key = request_key(
+                        {
+                            "url": api_url,
+                            "method": "POST",
+                            "role": "browser_http",
+                            "form": {"body_hash": hashlib.sha256(api_body).hexdigest()},
+                        }
+                    )
+                    api_headers = {
+                        "Referer": "https://www.gov.cn/",
+                        "athenaappname": "%E8%A7%84%E7%AB%A0%E5%BA%93",
+                        "athenaappkey": (
+                            "E%2FQRus35opRkACauSyCo2t37RrSeSLi6meog4HmvjhLtUuXR%2BkVXD59MNLxT681E"
+                            "IZh7vCOScxRJlO%2BJHQQBpdkZxuR%2FzsW8r%2FDMc9ze4Gwehp9oDvQMpwnS53QbtYPl"
+                            "%2B5lpYi5wEFSef0uGt%2F4hXfxiw1dIvlqAc7ioMJeSM6o%3D"
+                        ),
+                        "Content-Type": "application/json;charset=UTF-8",
+                    }
+                    api_row = await self._exchange_with_retry(
+                        api_url,
+                        "POST",
+                        api_body,
+                        api_key,
+                        "content",
+                        {
+                            "rendered_acquisition_id": identity,
+                            "resource_type": "XHR",
+                        },
+                        None,
+                        None,
+                        headers=api_headers,
+                    )
+                    if api_row["state"] == "archived" and api_row["outcome"] == "ok":
+                        api_bytes = self.transport.objects.get(api_row["archive_ref"])
+                        api_json = json.loads(api_bytes.decode("utf-8", errors="replace"))
+                        if isinstance(api_json, dict):
+                            res_obj = cast(dict[str, Any], api_json).get("result")
+                            data_obj = (
+                                cast(dict[str, Any], res_obj).get("data")
+                                if isinstance(res_obj, dict)
+                                else None
+                            )
+                            items_list = (
+                                cast(dict[str, Any], data_obj).get("list")
+                                if isinstance(data_obj, dict)
+                                else None
+                            )
+                            if isinstance(items_list, list):
+                                injected = "".join(
+                                    f'<div class="depart_m"><a href="{cast(dict[str, Any], it)["doc_pub_url"]}">{cast(dict[str, Any], it).get("f_202321360426", "")}</a></div>'
+                                    for it in cast(list[Any], items_list)
+                                    if isinstance(it, dict)
+                                    and cast(dict[str, Any], it).get("doc_pub_url")
+                                )
+                                if injected:
+                                    if "</body>" in html:
+                                        html = html.replace("</body>", f"{injected}</body>", 1)
+                                    else:
+                                        html += injected
+                except WlhError as exc:
+                    if exc.code in {"stale_attempt", "inactive_attempt", "run_not_started"}:
+                        raise
+                except (ValueError, KeyError, TypeError):
+                    pass
             data = html.encode("utf-8")
             if len(data) > self.config["budget"]["response_bytes"]:
                 return self.recorder.finish(

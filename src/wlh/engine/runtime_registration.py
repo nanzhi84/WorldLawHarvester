@@ -33,7 +33,8 @@ def register(
                 """SELECT count(DISTINCT (
                     COALESCE(payload #>> '{identity,namespace}', key),
                     COALESCE(payload #>> '{identity,external_key}', key)
-                )) AS n FROM wlh.task WHERE run_id=%s AND kind='target'""",
+                )) AS n FROM wlh.task WHERE run_id=%s AND kind='target'
+                AND state NOT IN ('failed', 'skipped')""",
                 (self.run_id,),
             ).fetchone())["n"]
             exists: dict[str, Any] | None = c.execute(
@@ -89,6 +90,7 @@ def register(
             )
             if state == "skipped":
                 self.truncated = "document_budget_exceeded"
+                self.checkpoint["truncated"] = self.truncated
                 continue
             for position, item in enumerate(target["inputs"]):
                 request_id: str = self.insert_request(
@@ -110,6 +112,9 @@ def register(
                 "schema": ADAPTER_STATE_SCHEMA,
                 **(result["state"] or {}),
             }
+        if "state" in result or result.get("truncated") or self.truncated:
+            if self.truncated:
+                self.checkpoint["truncated"] = self.truncated
             c.execute(
                 """UPDATE wlh.frontier SET checkpoint=checkpoint || %s,updated_at=now()
                 WHERE source_id=%s AND run_id=%s""",
@@ -127,16 +132,28 @@ def register(
             )
 
         if self.truncated == "document_budget_exceeded":
-            c.execute(
-                """UPDATE wlh.task r SET state='skipped',error='document_budget_exceeded',
-                attempt_epoch=%s,updated_at=clock_timestamp()
-                WHERE r.run_id=%s AND r.kind='request' AND r.state='pending'
-                AND NOT EXISTS (
-                    SELECT 1 FROM wlh.task_input i JOIN wlh.task t ON t.id=i.target_id
-                    WHERE i.request_id=r.id AND t.state='pending'
-                )""",
-                (self.epoch, self.run_id),
-            )
+            active_targets: int = cast(
+                dict[str, Any],
+                c.execute(
+                    """SELECT count(DISTINCT (
+                        COALESCE(payload #>> '{identity,namespace}', key),
+                        COALESCE(payload #>> '{identity,external_key}', key)
+                    )) AS n FROM wlh.task WHERE run_id=%s AND kind='target'
+                    AND state NOT IN ('failed', 'skipped')""",
+                    (self.run_id,),
+                ).fetchone(),
+            )["n"]
+            if active_targets >= self.config["budget"]["documents"]:
+                c.execute(
+                    """UPDATE wlh.task r SET state='skipped',error='document_budget_exceeded',
+                    attempt_epoch=%s,updated_at=clock_timestamp()
+                    WHERE r.run_id=%s AND r.kind='request' AND r.state='pending'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM wlh.task_input i JOIN wlh.task t ON t.id=i.target_id
+                        WHERE i.request_id=r.id AND t.state='pending'
+                    )""",
+                    (self.epoch, self.run_id),
+                )
 
     self.write(apply)
 

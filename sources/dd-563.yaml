@@ -9,7 +9,7 @@ archive_approved: true
 robots: true
 delay: 0.5
 fetch: {max_depth: 1, retries: 2}
-budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "美国国税局（IRS Internal Revenue Bulletins / Written Determinations）与美国税务法院（DAWSON）"
   document_type: "税务资料"

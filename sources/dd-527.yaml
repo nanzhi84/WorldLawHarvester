@@ -9,7 +9,7 @@ archive_approved: true
 robots: true
 delay: 0.5
 fetch: {max_depth: 1, retries: 2}
-budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "新加坡国内税务局（IRAS）e-Tax Guides"
   document_type: "税务资料"
@@ -17,7 +17,7 @@ metadata:
   jurisdiction: "SG"
   # priority: P1
 documents:
-  detail_url_patterns: ['^https://www\.iras\.gov\.sg/taxes/corporate-income-tax/income-deductions-for-companies/[^/?#]+$']
+  detail_url_patterns: ['^https://www\.iras\.gov\.sg/taxes/corporate-income-tax/[^/?#]+/[^/?#]+$']
   detail_body: always
   content_xpath: '//main[@id="mainContent"]|//div[@id="mainContent"]'
   fields:
