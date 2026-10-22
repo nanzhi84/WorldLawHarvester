@@ -1,11 +1,14 @@
 """Shared boundary primitives; never include untrusted values in error messages."""
 
+from __future__ import annotations
+
 import hashlib
 import ipaddress
 import json
 import os
 import re
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote_plus, urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -13,22 +16,22 @@ MAX_ORIGINAL_BYTES = 128 * 1024 * 1024
 
 
 class WlhError(Exception):
-    def __init__(self, code):
+    def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
 
 
-def uid():
+def uid() -> str:
     return str(uuid4())
 
 
-def canonical(value):
+def canonical(value: Any) -> bytes:
     return json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
     ).encode()
 
 
-def digest(value):
+def digest(value: Any) -> str:
     return hashlib.sha256(value if isinstance(value, bytes) else canonical(value)).hexdigest()
 
 
@@ -37,7 +40,7 @@ SENSITIVE = re.compile(
 )
 
 
-def safe_url(url):
+def safe_url(url: str) -> str:
     try:
         parts = urlsplit(url)
         if parts.scheme not in ("http", "https") or not parts.hostname:
@@ -61,7 +64,7 @@ def safe_url(url):
         raise WlhError("invalid_url") from None
 
 
-def public_url(url):
+def public_url(url: str) -> str:
     parts = urlsplit(url)
     if (
         parts.username
@@ -75,8 +78,10 @@ def public_url(url):
     return safe_url(url)
 
 
-def check_address(host):
+def check_address(host: str | None) -> None:
     """Basic address boundary; explicit loopback opt-in is for isolated acceptance."""
+    if not host:
+        raise WlhError("invalid_url")
     if host.rstrip(".").lower() == "localhost" or host.lower().endswith(
         (".localhost", ".local", ".internal")
     ):
@@ -91,7 +96,7 @@ def check_address(host):
         raise WlhError("non_public_address")
 
 
-def atomic_write(path, data):
+def atomic_write(path: str | os.PathLike[str], data: bytes) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(path.name + "." + uid() + ".tmp")

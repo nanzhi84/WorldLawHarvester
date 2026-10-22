@@ -1,11 +1,16 @@
 """Run subprocess entrypoint and ownership watchdog."""
 
+from __future__ import annotations
+
 import asyncio
 import os
 import signal
 import sys
 import threading
 import time
+from collections.abc import Mapping
+from types import FrameType
+from typing import Any, NoReturn
 
 from wlh.core import WlhError
 from wlh.db import connect, record_error
@@ -14,14 +19,14 @@ from wlh.engine.runtime import Runtime
 from wlh.extraction.manifest import require_runtime
 
 
-def watch_parent(parent):
+def watch_parent(parent: int) -> NoReturn:
     while True:
         if os.getppid() != parent:
             os.killpg(os.getpgrp(), signal.SIGKILL)
         time.sleep(0.2)
 
 
-async def run(context):
+async def run(context: Mapping[str, Any]) -> None:
     try:
         require_runtime(context["config"], context["parser_manifest"])
     except WlhError as exc:
@@ -36,7 +41,7 @@ async def run(context):
     runtime = Runtime(context)
     task = asyncio.current_task()
 
-    def cancel(signum, frame):
+    def cancel(signum: int, frame: FrameType | None) -> None:
         runtime.budget.cancelled = True
         if task is not None:
             task.cancel()
@@ -46,7 +51,7 @@ async def run(context):
     await runtime.execute()
 
 
-def main():
+def main() -> None:
     run_id, epoch, parent = sys.argv[1:]
     threading.Thread(target=watch_parent, args=(int(parent),), daemon=True).start()
     asyncio.run(run(run_context(run_id, int(epoch))))

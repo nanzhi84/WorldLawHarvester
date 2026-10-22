@@ -1,10 +1,14 @@
 """Finalize the operational Run; each valid resource response commits independently."""
 
+from __future__ import annotations
+
+from typing import Any
+
 from wlh.db import connect, fenced, locked_run
 from wlh.engine.run_state import TERMINAL_STATES
 
 
-def finish_run(run_id, epoch):
+def finish_run(run_id: str, epoch: int) -> dict[str, Any]:
     from wlh.engine.runs import end_run, receipt
 
     with connect() as c:

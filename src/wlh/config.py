@@ -1,9 +1,13 @@
 """Closed Source configuration; historical Recipe YAML requires explicit migration."""
 
+from __future__ import annotations
+
+import os
 import re
+from typing import Any, overload
 from urllib.parse import urlsplit
 
-import lxml.etree as etree
+import lxml.etree as etree  # type: ignore[import-untyped]
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -53,20 +57,20 @@ class UniqueLoader(yaml.SafeLoader):
     pass
 
 
-def unique_mapping(loader, node, deep=False):
-    data = {}
+def unique_mapping(loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+    data: dict[Any, Any] = {}
     for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
+        key = loader.construct_object(key_node, deep=deep)  # type: ignore[no-untyped-call]
         if key in data:
             raise WlhError("duplicate_config_key")
-        data[key] = loader.construct_object(value_node, deep=deep)
+        data[key] = loader.construct_object(value_node, deep=deep)  # type: ignore[no-untyped-call]
     return data
 
 
 UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, unique_mapping)
 
 
-def load_file(path):
+def load_file(path: str | os.PathLike[str]) -> SourceConfig:
     try:
         with open(path) as file:
             value = yaml.load(file, Loader=UniqueLoader)
@@ -79,7 +83,15 @@ def load_file(path):
         raise WlhError("invalid_source_config") from None
 
 
-def regex(value):
+@overload
+def regex(value: str) -> str: ...
+
+
+@overload
+def regex(value: None) -> None: ...
+
+
+def regex(value: str | None) -> str | None:
     if value is None:
         return value
     try:
@@ -89,12 +101,20 @@ def regex(value):
     return value
 
 
-def xpath(value):
+@overload
+def xpath(value: str) -> str: ...
+
+
+@overload
+def xpath(value: None) -> None: ...
+
+
+def xpath(value: str | None) -> str | None:
     if value is None:
         return value
     try:
-        etree.XPath(value)
-    except etree.XPathError:
+        etree.XPath(value)  # type: ignore[attr-defined]
+    except etree.XPathError:  # type: ignore[attr-defined]
         raise ValueError("invalid_xpath") from None
     return value
 
@@ -129,16 +149,16 @@ class FieldRule(Strict):
 
     @field_validator("xpath")
     @classmethod
-    def valid_xpath(cls, value):
+    def valid_xpath(cls, value: str | None) -> str | None:
         return xpath(value)
 
     @field_validator("regex")
     @classmethod
-    def valid_regex(cls, value):
+    def valid_regex(cls, value: str | None) -> str | None:
         return regex(value)
 
     @model_validator(mode="after")
-    def one_source(self):
+    def one_source(self) -> FieldRule:
         if self.value is not None and (self.xpath or self.regex):
             raise ValueError("constant_field_rule_is_exclusive")
         if self.value is None and not (self.xpath or self.regex):
@@ -160,22 +180,22 @@ class DocumentRules(Strict):
 
     @field_validator("detail_url_patterns")
     @classmethod
-    def valid_patterns(cls, values):
+    def valid_patterns(cls, values: list[str]) -> list[str]:
         return [regex(v) for v in values]
 
     @field_validator("attachment_url_pattern", "volume_pattern")
     @classmethod
-    def valid_pattern(cls, value):
+    def valid_pattern(cls, value: str | None) -> str | None:
         return regex(value)
 
     @field_validator("content_xpath")
     @classmethod
-    def valid_content(cls, value):
+    def valid_content(cls, value: str | None) -> str | None:
         return xpath(value)
 
     @field_validator("fields")
     @classmethod
-    def known_fields(cls, value):
+    def known_fields(cls, value: dict[str, FieldRule]) -> dict[str, FieldRule]:
         if set(value) - set(FIELD_NAMES):
             raise ValueError("unknown_document_field")
         return value
@@ -189,7 +209,7 @@ class MetadataDefaults(Strict):
 
     @field_validator("document_type")
     @classmethod
-    def controlled(cls, value):
+    def controlled(cls, value: str) -> str:
         if value not in DOCUMENT_TYPES:
             raise ValueError("invalid_document_type")
         return value
@@ -218,7 +238,7 @@ class ParserConfig(Strict):
 
     @field_validator("quality_accept_routes")
     @classmethod
-    def routes(cls, values):
+    def routes(cls, values: list[str]) -> list[str]:
         if set(values) - set(QUALITY_ROUTES) or len(set(values)) != len(values):
             raise ValueError("invalid_quality_route")
         return sorted(values)
@@ -227,7 +247,7 @@ class ParserConfig(Strict):
 class SourceConfig(Strict):
     id: str = Field(pattern=r"^dd-[0-9]{3,}$")
     adapter: str = Field(default="web")
-    adapter_options: dict = Field(default_factory=dict)
+    adapter_options: dict[str, Any] = Field(default_factory=dict)
     entry_urls: list[str] = Field(min_length=1, max_length=1000)
     allowed_hosts: list[str] = Field(min_length=1)
     allowed_path_prefixes: list[str] = Field(default_factory=lambda: ["/"], min_length=1)
@@ -250,19 +270,19 @@ class SourceConfig(Strict):
 
     @field_validator("adapter")
     @classmethod
-    def known_adapter(cls, value):
+    def known_adapter(cls, value: str) -> str:
         if value not in ADAPTERS:
             raise ValueError("unknown_adapter")
         return value
 
     @field_validator("entry_urls")
     @classmethod
-    def urls(cls, values):
+    def urls(cls, values: list[str]) -> list[str]:
         return list(dict.fromkeys(public_url(url) for url in values))
 
     @field_validator("robots_redirect_urls")
     @classmethod
-    def policy_urls(cls, values):
+    def policy_urls(cls, values: list[str]) -> list[str]:
         urls = list(dict.fromkeys(public_url(url) for url in values))
         for url in urls:
             check_address(urlsplit(url).hostname)
@@ -270,11 +290,11 @@ class SourceConfig(Strict):
 
     @field_validator("blocked_patterns")
     @classmethod
-    def blockers(cls, values):
+    def blockers(cls, values: list[str]) -> list[str]:
         return [regex(v) for v in values]
 
     @model_validator(mode="after")
-    def boundaries(self):
+    def boundaries(self) -> SourceConfig:
         if not self.archive_approved:
             raise WlhError("source_archive_approval_required")
         if any(not valid_prefix(p) for p in self.allowed_path_prefixes):

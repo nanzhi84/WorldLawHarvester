@@ -6,11 +6,15 @@ delivery (target ``done``/``failed``). Follow-up requests and targets are regist
 the same transaction that completes their parent request, before any watermark moves.
 """
 
-import asyncio
+from __future__ import annotations
 
-from wlh.adapters import CasSessionProxy, RawRecord, load
+import asyncio
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, cast
+
+from wlh.adapters import Base, CasSessionProxy, RawRecord, load
 from wlh.core import WlhError, uid
-from wlh.db import connect, fenced, j, locked_run, one, record_error
+from wlh.db import DbConn, connect, fenced, j, locked_run, one, record_error
 from wlh.domain.document import build
 from wlh.domain.resources import commit, fail, save_checkpoint
 from wlh.engine.adapter_context import Context, adapter_error
@@ -19,75 +23,81 @@ from wlh.engine.runtime_registration import register
 from wlh.engine.runtime_report import build_report
 from wlh.engine.transport import Budget, Recorder, Transport, request_key
 
+if TYPE_CHECKING:
+    from wlh.engine.browser import Browser
+
 CHECKPOINT_SCHEMA = "wlh.checkpoint.v1"
 # A document target cap skips extra targets without starving accepted targets of inputs.
 STOPPING = {"request_budget_exceeded", "crawl_time_budget_exceeded"}
 
 
 class Runtime:
-    def __init__(self, context):
-        self.run = context
-        self.run_id = context["id"]
-        self.epoch = context["attempt_epoch"]
-        self.config = context["config"]
-        self.mode = context["mode"]
-        self.checkpoint = context["checkpoint"] or {}
+    def __init__(self, context: Mapping[str, Any]) -> None:
+        self.run: Mapping[str, Any] = context
+        self.run_id: str = context["id"]
+        self.epoch: int = context["attempt_epoch"]
+        self.config: dict[str, Any] = context["config"]
+        self.mode: str = context["mode"]
+        self.checkpoint: dict[str, Any] = context["checkpoint"] or {}
         with connect() as c:
-            used = one(
+            used: int = one(
                 c,
                 "SELECT count(*) AS n FROM wlh.acquisition WHERE run_id=%s AND acquisition_kind='http'",
                 (self.run_id,),
             )["n"]
-            capped = c.execute(
+            capped: dict[str, Any] | None = c.execute(
                 "SELECT 1 FROM wlh.task WHERE run_id=%s AND error='document_budget_exceeded' LIMIT 1",
                 (self.run_id,),
             ).fetchone()
-        self.budget = Budget(self.config, used, context["deadline"])
-        self.recorder = Recorder(self.run_id, self.epoch, context["source_id"])
-        self.transport = Transport(self.config, self.budget, self.recorder)
-        self.session = CasSessionProxy(self.transport, self.mode)
-        self.browser = None
+        self.budget: Budget = Budget(self.config, used, context["deadline"])
+        self.recorder: Recorder = Recorder(self.run_id, self.epoch, context["source_id"])
+        self.transport: Transport = Transport(self.config, self.budget, self.recorder)
+        self.session: CasSessionProxy = CasSessionProxy(self.transport, self.mode)
+        self.browser: Browser | None = None
         if self.config["fetch"]["mode"] == "rendered_dom":
             from wlh.engine.browser import Browser
 
             self.browser = Browser(self.config, self.budget, self.recorder, self.transport)
-        self.adapter = load(self.config["adapter"])(self.config)
-        self.ocr_cache = {}
-        self.derived_ocr = {}
-        self.ctx = Context(self)
-        plan = context.get("recheck_plan") or context.get("reparse_plan") or {}
-        self.truncated = self.checkpoint.get("truncated") or (
+        self.adapter: Base = load(self.config["adapter"])(self.config)
+        self.ocr_cache: dict[str, str] = {}
+        self.derived_ocr: dict[str, dict[str, str]] = {}
+        self.ctx: Context = Context(self)
+        plan: Mapping[str, Any] = context.get("recheck_plan") or context.get("reparse_plan") or {}
+        self.truncated: str | None = self.checkpoint.get("truncated") or (
             "document_budget_exceeded" if capped or plan.get("truncated") else None
         )
 
     # ---- persistence -------------------------------------------------------------------
 
-    def write(self, function):
+    def write[T](self, function: Callable[[DbConn], T]) -> T:
         with connect() as c:
             source, run = locked_run(c, self.run_id)
             fenced(source, run, self.epoch)
             return function(c)
 
-    def insert_request(self, c, request, depth):
+    def insert_request(self, c: DbConn, request: Mapping[str, Any], depth: int) -> str:
         key = request_key(request)
-        payload = {
+        payload: dict[str, Any] = {
             k: request[k]
             for k in ("url", "method", "form", "role", "idempotent", "meta")
             if k in request
         }
-        row = c.execute(
+        row: dict[str, Any] | None = c.execute(
             """INSERT INTO wlh.task(id,run_id,kind,key,payload,depth) VALUES(%s,%s,'request',
             %s,%s,%s) ON CONFLICT(run_id,kind,key) DO NOTHING RETURNING id""",
             (uid(), self.run_id, key, j(payload), depth),
         ).fetchone()
         if row:
             return row["id"]
-        return c.execute(
+        return cast(dict[str, Any], c.execute(
             "SELECT id FROM wlh.task WHERE run_id=%s AND kind='request' AND key=%s",
             (self.run_id, key),
-        ).fetchone()["id"]
+        ).fetchone())["id"]
 
-    def mark_request(self, task_id, state, acquisition_id=None, error=None):
+    def mark_request(
+        self, task_id: str, state: str, acquisition_id: str | None = None,
+        error: str | None = None,
+    ) -> None:
         self.write(
             lambda c: c.execute(
                 """UPDATE wlh.task SET state=%s,acquisition_id=%s,error=%s,attempt_epoch=%s,
@@ -96,20 +106,22 @@ class Runtime:
             )
         )
 
-    def save(self, **values):
+    def save(self, **values: Any) -> None:
         self.checkpoint.update(values)
         self.checkpoint["schema"] = CHECKPOINT_SCHEMA
         save_checkpoint(self.run_id, self.epoch, self.checkpoint)
 
-    def rows(self, query, params=()):
+    def rows(
+        self, query: Any, params: Sequence[Any] | Mapping[str, Any] = ()
+    ) -> list[dict[str, Any]]:
         with connect() as c:
             return c.execute(query, params).fetchall()
 
-    def acquisition(self, identity):
+    def acquisition(self, identity: str | None) -> dict[str, Any] | None:
         with connect() as c:
             return c.execute("SELECT * FROM wlh.acquisition WHERE id=%s", (identity,)).fetchone()
 
-    def reuse(self, key):
+    def reuse(self, key: str) -> dict[str, Any] | None:
         """An archived final response from an earlier attempt is re-read, never refetched."""
         with connect() as c:
             return c.execute(
@@ -121,13 +133,15 @@ class Runtime:
 
     # ---- phases ------------------------------------------------------------------------
 
-    def plan(self):
+    def plan(self) -> None:
         if self.checkpoint.get("planned"):
             return
-        state = (self.checkpoint.get("adapter_state") or {}).copy()
+        state = cast(dict[str, Any], self.checkpoint.get("adapter_state") or {}).copy()
         state.pop("schema", None)
         if self.mode == "recheck":
-            resources = (self.run.get("recheck_plan") or {}).get("resources", [])
+            resources: list[dict[str, Any]] = cast(
+                dict[str, Any], self.run.get("recheck_plan") or {}
+            ).get("resources", [])
             result = self.adapter.plan_recheck(resources, state)
         elif self.mode == "reparse":
             result = {"requests": [], "targets": self.frozen_targets(), "state": state}
@@ -136,13 +150,18 @@ class Runtime:
         register(self, result)
         self.save(planned=True)
 
-    def frozen_targets(self):
+    def frozen_targets(self) -> list[dict[str, Any]]:
         """Offline reparse: each current Version's archived adapter inputs, verified in CAS."""
-        objects, targets = Objects(), []
-        for resource in (self.run.get("reparse_plan") or {}).get("resources", []):
+        objects = Objects()
+        targets: list[dict[str, Any]] = []
+        plan: Mapping[str, Any] = self.run.get("reparse_plan") or {}
+        resources: list[dict[str, Any]] = plan.get("resources", [])
+        for resource in resources:
             manifest = objects.json(resource["inputs_ref"])
             for entry in manifest.get("inputs", []):
-                cache_key = (entry.get("context") or {}).get("ocr_cache_key")
+                cache_key: str | None = cast(
+                    dict[str, Any], entry.get("context") or {}
+                ).get("ocr_cache_key")
                 if entry.get("role") == "derived" and cache_key:
                     self.ocr_cache[cache_key] = entry["archive_ref"]
             frozen = manifest.get("adapter_inputs")
@@ -170,7 +189,7 @@ class Runtime:
             )
         return targets
 
-    async def fetch(self, task):
+    async def fetch(self, task: Mapping[str, Any]) -> Mapping[str, Any]:
         if self.mode == "reparse":
             raise WlhError("network_disabled_in_reparse")
         request = task["payload"]
@@ -185,8 +204,8 @@ class Runtime:
             return await self.browser.acquire(request)
         return await self.session.acquire(request)
 
-    async def fetch_batch(self):
-        tasks = self.rows(
+    async def fetch_batch(self) -> bool:
+        tasks: list[dict[str, Any]] = self.rows(
             """SELECT * FROM wlh.task WHERE run_id=%s AND kind='request' AND state='pending'
             ORDER BY seq LIMIT %s""",
             (self.run_id, self.config["concurrency"]),
@@ -222,8 +241,8 @@ class Runtime:
                 record_error(self.run_id, self.epoch, result["error"] or "request_failed")
         return True
 
-    def parse_archived(self):
-        tasks = self.rows(
+    def parse_archived(self) -> bool:
+        tasks: list[dict[str, Any]] = self.rows(
             """SELECT * FROM wlh.task WHERE run_id=%s AND kind='request' AND state='archived'
             ORDER BY seq""",
             (self.run_id,),
@@ -232,7 +251,7 @@ class Runtime:
             self.budget.active()
             acquisition = self.acquisition(task["acquisition_id"])
             try:
-                result = self.adapter.parse(self.ctx, task, acquisition)
+                result = self.adapter.parse(self.ctx, task, cast(Mapping[str, Any], acquisition))
             except (WlhError, Exception) as exc:
                 code = adapter_error(exc, "adapter_parse_failed")
                 self.write(
@@ -247,7 +266,7 @@ class Runtime:
             register(self, result, parent=task["id"], depth=task["depth"] + 1)
         return bool(tasks)
 
-    def ready_targets(self):
+    def ready_targets(self) -> list[dict[str, Any]]:
         return self.rows(
             """SELECT t.* FROM wlh.task t WHERE t.run_id=%s AND t.kind='target'
             AND t.state='pending' AND NOT EXISTS (
@@ -257,16 +276,17 @@ class Runtime:
             (self.run_id,),
         )
 
-    def target_inputs(self, target):
+    def target_inputs(self, target: Mapping[str, Any]) -> list[dict[str, Any]]:
         return self.rows(
             """SELECT r.*, i.position FROM wlh.task_input i JOIN wlh.task r ON r.id=i.request_id
             WHERE i.target_id=%s ORDER BY i.position""",
             (target["id"],),
         )
 
-    def deliver(self, target):
+    def deliver(self, target: Mapping[str, Any]) -> dict[str, Any] | str | None:
         identity = target["payload"].get("identity")
-        inputs, acquisitions = [], {}
+        inputs: list[dict[str, Any]] = []
+        acquisitions: dict[str, dict[str, Any]] = {}
         frozen = target["payload"].get("frozen")
         if frozen:
             for item in frozen["inputs"]:
@@ -287,7 +307,7 @@ class Runtime:
                 meta = {k: v for k, v in item.items() if k != "acquisition_id"}
                 inputs.append({**meta, "task": None, "acquisition": acquisition})
         rows = {row["key"]: row for row in self.target_inputs(target)}
-        for meta in [] if frozen else target["payload"]["inputs"]:
+        for meta in cast(list[dict[str, Any]], [] if frozen else target["payload"]["inputs"]):
             row = rows[meta["request_key"]]
             acquisition = self.acquisition(row["acquisition_id"]) if row["acquisition_id"] else None
             if (
@@ -317,7 +337,7 @@ class Runtime:
                 for c in candidates
             ]
             for original_ref, entry in self.derived_ocr.items():
-                original = next(
+                original: dict[str, Any] | None = next(
                     (a for a in acquisitions.values() if a["archive_ref"] == original_ref), None
                 )
                 if original is None:
@@ -345,7 +365,7 @@ class Runtime:
                     "frozen_inputs_ref": frozen["inputs_ref"],
                     "previous_version_id": frozen["version_id"],
                 }
-            built = build(
+            built: dict[str, Any] = build(
                 Objects(),
                 source_id=self.run["source_id"],
                 run_id=self.run_id,
@@ -373,19 +393,19 @@ class Runtime:
                 target_id=target["id"],
             )
         self.budget.active()
-        result = commit(
+        result: dict[str, Any] = commit(
             self.run_id, self.epoch, built, target_id=target["id"], check_active=self.budget.active
         )
         return result
 
-    def deliver_ready(self):
+    def deliver_ready(self) -> bool:
         targets = self.ready_targets()
         for target in targets:
             self.budget.active()
             self.deliver(target)
         return bool(targets)
 
-    def close_unfinished(self):
+    def close_unfinished(self) -> None:
         """Targets that can no longer complete are reported, not invented as failures."""
         reason = self.truncated if self.truncated in STOPPING else "inputs_unavailable"
         self.write(
@@ -396,7 +416,7 @@ class Runtime:
             )
         )
 
-    async def execute(self):
+    async def execute(self) -> None:
         finish_reason = "finished"
         try:
             self.plan()
@@ -441,7 +461,7 @@ class Runtime:
             await self.transport.close()
             if self.browser is not None:
                 await self.browser.close()
-        report = build_report(
+        report: dict[str, Any] = build_report(
             self.run_id, self.config["adapter"], self.checkpoint, self.truncated, finish_reason
         )
         if self.truncated and self.truncated != "document_budget_exceeded":
@@ -455,9 +475,9 @@ class Runtime:
                 (j(report), self.run_id, self.epoch),
             )
 
-    def watermark(self):
+    def watermark(self) -> int:
         with connect() as c:
-            row = one(
+            row: dict[str, Any] = one(
                 c,
                 """SELECT max(seq) AS seq FROM wlh.task WHERE run_id=%s
                 AND state IN ('done','failed','skipped')""",

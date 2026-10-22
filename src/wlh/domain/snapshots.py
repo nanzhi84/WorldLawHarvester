@@ -1,11 +1,15 @@
 """Explicit immutable global captures and serialized operator publication."""
 
+from __future__ import annotations
+
 import json
 import time
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 from uuid import UUID
 
 from wlh.core import WlhError, uid
-from wlh.db import connect, j, one
+from wlh.db import DbConn, connect, j, one
 from wlh.domain.document import verify_document
 from wlh.domain.snapshot_overrides import normalize
 from wlh.engine.objects import Objects
@@ -14,7 +18,7 @@ OUTPUT_MAX_BYTES = 8 * 1024 * 1024
 MARKDOWN_MEDIA_TYPE = "text/markdown; charset=utf-8"
 
 
-def identity(value):
+def identity(value: str) -> str:
     try:
         if str(UUID(value)) != value:
             raise ValueError
@@ -23,14 +27,14 @@ def identity(value):
     return value
 
 
-def bounded(value):
+def bounded[T](value: T) -> T:
     if len(json.dumps(value, ensure_ascii=False, default=str).encode()) > OUTPUT_MAX_BYTES:
         raise WlhError("snapshot_output_too_large")
     return value
 
 
-def header(c, snapshot_id):
-    value = c.execute(
+def header(c: DbConn, snapshot_id: str) -> dict[str, Any]:
+    value: dict[str, Any] | None = c.execute(
         "SELECT * FROM wlh.snapshot WHERE id=%s AND sealed", (identity(snapshot_id),)
     ).fetchone()
     if value is None:
@@ -38,27 +42,27 @@ def header(c, snapshot_id):
     return value
 
 
-def published(c):
+def published(c: DbConn) -> str | None:
     return one(c, "SELECT published_snapshot_id FROM wlh.publication WHERE singleton")[
         "published_snapshot_id"
     ]
 
 
-def coverage(c, source_id):
+def coverage(c: DbConn, source_id: str) -> dict[str, Any]:
     """Frozen coverage description; an unknown denominator is reported as UNKNOWN."""
-    run = c.execute(
+    run: dict[str, Any] | None = c.execute(
         """SELECT id,mode,status,report,completed_at FROM wlh.run WHERE source_id=%s
         AND status IN ('complete','failed') ORDER BY completed_at DESC NULLS LAST LIMIT 1""",
         (source_id,),
     ).fetchone()
     if run is None:
         return {"latest_run_id": None, "site_population": "UNKNOWN", "known_gaps": ["never_run"]}
-    report = run["report"] or {}
-    counts = report.get("counts") or {}
-    gaps = sorted(
+    report: Mapping[str, Any] = run["report"] or {}
+    counts: Mapping[str, Any] = report.get("counts") or {}
+    gaps: list[str] = sorted(
         {
             *(report.get("errors") or []),
-            *((report.get("coverage") or {}).get("known_gaps") or []),
+            *(cast(dict[str, Any], report.get("coverage") or {}).get("known_gaps") or []),
             *([report["truncated"]] if report.get("truncated") else []),
         }
     )
@@ -67,7 +71,7 @@ def coverage(c, source_id):
         "mode": run["mode"],
         "status": run["status"],
         "completed_at": run["completed_at"].isoformat() if run["completed_at"] else None,
-        "selected_scope_enumeration": (report.get("coverage") or {}).get(
+        "selected_scope_enumeration": cast(dict[str, Any], report.get("coverage") or {}).get(
             "selected_scope_enumeration", "incomplete"
         ),
         "site_population": "UNKNOWN",
@@ -77,11 +81,13 @@ def coverage(c, source_id):
     }
 
 
-def capture(overrides):
+def capture(
+    overrides: Sequence[Mapping[str, str]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Freeze relational IDs in one MVCC view, then release the transaction for CAS I/O."""
     with connect() as c:
         c.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        sources = c.execute(
+        sources: list[dict[str, Any]] = c.execute(
             "SELECT s.id,f.id AS frontier_id FROM wlh.source s JOIN wlh.frontier f ON f.source_id=s.id"
         ).fetchall()
         for source in sources:
@@ -92,7 +98,7 @@ def capture(overrides):
                 (item["version_id"], item["resource_id"]),
             ).fetchone():
                 raise WlhError("invalid_override_version")
-        selected = c.execute(
+        selected: list[dict[str, Any]] = c.execute(
             """SELECT f.source_id,f.id AS frontier_id,r.id AS resource_id,v.id AS version_id,v.result_ref
             FROM wlh.frontier f JOIN wlh.resource r ON r.frontier_id=f.id
             LEFT JOIN jsonb_to_recordset(%s::jsonb) AS o(resource_id text,version_id text) ON o.resource_id=r.id
@@ -100,18 +106,19 @@ def capture(overrides):
             AND v.resource_id=r.id""",
             (j(overrides),),
         ).fetchall()
-        rows = c.execute(
+        rows: list[dict[str, Any]] = c.execute(
             "SELECT * FROM wlh.document_row WHERE version_id=ANY(%s)",
             ([i["version_id"] for i in selected],),
         ).fetchall()
     return sources, selected, rows
 
 
-def create(overrides=None):
+def create(overrides: Any = None) -> dict[str, Any]:
     overrides = normalize([] if overrides is None else overrides)
     snapshot_id, objects = uid(), Objects()
     sources, selected, rows = capture(overrides)
-    sizes, entries = {}, {}
+    sizes: dict[str, int] = {}
+    entries: dict[tuple[str, str, str], tuple[str, str]] = {}
     deadline = time.monotonic() + 300
     for item in selected:
         verify_document(objects, item["result_ref"], deadline=deadline, sizes=sizes)
@@ -152,7 +159,7 @@ def create(overrides=None):
                       VALUES(%s,%s,%s,%s,%s,%s,%s)""",
                 (snapshot_id, source_id, sha, kind, media_type, name, sizes[sha]),
             )
-        row = one(
+        row: dict[str, Any] = one(
             c,
             """UPDATE wlh.snapshot SET sealed=true,source_count=%s,resource_count=%s,
                    version_count=%s,row_count=%s,file_count=%s WHERE id=%s RETURNING *""",
@@ -162,16 +169,16 @@ def create(overrides=None):
     return dict(row, snapshot_id=snapshot_id, published_snapshot_id=pointer)
 
 
-def pagination(limit, after):
+def pagination(limit: int, after: str) -> None:
     if not 1 <= limit <= 100 or len(after) > 1000:
         raise WlhError("invalid_arguments")
 
 
-def listing(limit=20, after=""):
+def listing(limit: int = 20, after: str = "") -> dict[str, Any]:
     pagination(limit, after)
     with connect() as c:
         c.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        rows = c.execute(
+        rows: list[dict[str, Any]] = c.execute(
             """SELECT * FROM wlh.snapshot WHERE sealed AND id COLLATE "C">%s COLLATE "C"
             ORDER BY id COLLATE "C" LIMIT %s""",
             (after, limit + 1),
@@ -186,19 +193,21 @@ def listing(limit=20, after=""):
     )
 
 
-def inspect(snapshot_id, limit=20, after="", source_after=""):
+def inspect(
+    snapshot_id: str, limit: int = 20, after: str = "", source_after: str = ""
+) -> dict[str, Any]:
     pagination(limit, after)
     pagination(limit, source_after)
     with connect() as c:
         c.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         row = header(c, snapshot_id)
-        items = c.execute(
+        items: list[dict[str, Any]] = c.execute(
             """SELECT source_id,resource_id,version_id FROM wlh.snapshot_item
             WHERE snapshot_id=%s AND resource_id COLLATE "C">%s COLLATE "C"
             ORDER BY resource_id COLLATE "C" LIMIT %s""",
             (snapshot_id, after, limit + 1),
         ).fetchall()
-        sources = c.execute(
+        sources: list[dict[str, Any]] = c.execute(
             """SELECT source_id,coverage FROM wlh.snapshot_source
             WHERE snapshot_id=%s AND source_id COLLATE "C">%s COLLATE "C"
             ORDER BY source_id COLLATE "C" LIMIT %s""",
@@ -218,17 +227,18 @@ def inspect(snapshot_id, limit=20, after="", source_after=""):
     )
 
 
-def verify(snapshot_id):
+def verify(snapshot_id: str) -> None:
     """Read sealed immutable references, release SQL, then verify their complete CAS closure."""
-    objects, sizes = Objects(), {}
+    objects = Objects()
+    sizes: dict[str, int] = {}
     with connect() as c:
         header(c, snapshot_id)
-        documents = c.execute(
+        documents: list[dict[str, Any]] = c.execute(
             """SELECT v.result_ref FROM wlh.snapshot_item i JOIN wlh.version v ON v.id=i.version_id
             WHERE i.snapshot_id=%s""",
             (snapshot_id,),
         ).fetchall()
-        files = c.execute(
+        files: list[dict[str, Any]] = c.execute(
             "SELECT DISTINCT sha256 FROM wlh.snapshot_file WHERE snapshot_id=%s", (snapshot_id,)
         ).fetchall()
     for row in documents:
@@ -238,7 +248,7 @@ def verify(snapshot_id):
             objects.get(row["sha256"], deadline=time.monotonic() + 120)
 
 
-def publish(snapshot_id):
+def publish(snapshot_id: str) -> dict[str, Any]:
     verify(identity(snapshot_id))
     with connect() as c:
         pointer = one(c, "SELECT * FROM wlh.publication WHERE singleton FOR UPDATE")
@@ -249,7 +259,7 @@ def publish(snapshot_id):
                 "UPDATE wlh.publication SET published_snapshot_id=%s WHERE singleton",
                 (snapshot_id,),
             )
-            record = one(
+            record: dict[str, Any] = one(
                 c,
                 """INSERT INTO wlh.snapshot_publication(before_snapshot_id,after_snapshot_id)
                 VALUES(%s,%s) RETURNING sequence,published_at""",

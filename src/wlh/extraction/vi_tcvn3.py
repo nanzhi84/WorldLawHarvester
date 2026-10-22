@@ -1,5 +1,7 @@
 """Deterministic RTF text extraction and mixed Vietnamese legacy-font recovery."""
 
+from __future__ import annotations
+
 import re
 
 from wlh.core import WlhError
@@ -29,7 +31,7 @@ LEGACY_TCVN3_FONT = re.compile(r"(?:^|[.\s])(vn(?:time|arial|helvet|book|courier
 TCVN3_STRONG_GLYPHS = frozenset("µ¸¶·¹¨»¾¼½Æ©ÇÊÈÉË®ÌÐÎÏÑªÒÕÓÔÖ×ÝØÜÞß«åæ¬ëîïñö÷ûüþ¡¢§£¤¥¦")
 
 
-def tcvn3_to_unicode(value):
+def tcvn3_to_unicode(value: str) -> str:
     return value.translate(TCVN3_TRANSLATION)
 
 
@@ -40,7 +42,7 @@ UNICODE_VIETNAMESE = re.compile(
 TCVN3_CHARS = frozenset(TCVN3_SOURCE) | {"\u00ad"}
 
 
-def normalize_detected_tcvn3(value, font_evidence=False):
+def normalize_detected_tcvn3(value: str, font_evidence: bool = False) -> tuple[str, bool]:
     """Line-level recovery of a mixed Unicode/TCVN3 export.
 
     A line that already contains Unicode-only Vietnamese letters (headers, dates) is never
@@ -53,7 +55,7 @@ def normalize_detected_tcvn3(value, font_evidence=False):
     # still need recovery even though they contain no strong glyph themselves.
     marker = TCVN3_CHARS
     changed = False
-    lines = []
+    lines: list[str] = []
     for line in value.splitlines(keepends=True):
         if not UNICODE_VIETNAMESE.search(line) and any(char in marker for char in line):
             converted = tcvn3_to_unicode(line)
@@ -64,7 +66,7 @@ def normalize_detected_tcvn3(value, font_evidence=False):
     return "".join(lines), changed
 
 
-def rtf_font_names(raw):
+def rtf_font_names(raw: bytes) -> list[str]:
     text = raw.decode("latin-1", errors="ignore")
     return [
         item.strip()
@@ -73,7 +75,7 @@ def rtf_font_names(raw):
     ]
 
 
-def rtf_uses_tcvn3(raw):
+def rtf_uses_tcvn3(raw: bytes) -> tuple[bool, list[str]]:
     matches = [font for font in rtf_font_names(raw) if LEGACY_TCVN3_FONT.search(font)]
     return bool(matches), sorted(set(matches))[:20]
 
@@ -86,12 +88,15 @@ LEGAL_TITLE = re.compile(
 )
 
 
-def legal_markdown(value):
+def legal_markdown(value: str) -> str:
     """Restore Vietnamese legal hierarchy: Phần/Chương #, Mục/Tiểu mục ##, Điều ###."""
     # RTF source line wraps are dropped by the RTF state machine (they are not content),
     # so every remaining line break is a real paragraph boundary.
-    paragraphs = [compact(item) for item in re.split(r"\n{2,}|\n(?=\S)", value) if compact(item)]
-    result, title_budget = [], 2
+    paragraphs: list[str] = [
+        compact(item) for item in re.split(r"\n{2,}|\n(?=\S)", value) if compact(item)
+    ]
+    result: list[str] = []
+    title_budget = 2
     for plain in paragraphs:
         if LEGAL_TOP_HEADING.match(plain):
             result.append("# " + plain)
@@ -155,10 +160,11 @@ RTF_TOKEN = re.compile(
 )
 
 
-def rtf_bytes_to_tcvn3_raw(raw):
+def rtf_bytes_to_tcvn3_raw(raw: bytes) -> str:
     """Deterministic pure-Python RTF state machine; no GUI application is launched."""
     text = raw.decode("latin-1", errors="replace")
-    output, stack = [], [False]
+    output: list[str] = []
+    stack = [False]
     unicode_skip, pending_skip = 1, 0
     for match in RTF_TOKEN.finditer(text):
         word, number, hex_byte, symbol, brace, chunk = match.groups()
@@ -215,12 +221,14 @@ def rtf_bytes_to_tcvn3_raw(raw):
                 pending_skip -= consumed
             if not stack[-1]:
                 output.append(chunk)
-    cleaned = ["\ufffd" if len(c) == 1 and 0xD800 <= ord(c) <= 0xDFFF else c for c in output]
+    cleaned: list[str] = [
+        "\ufffd" if len(c) == 1 and 0xD800 <= ord(c) <= 0xDFFF else c for c in output
+    ]
     value = compact("".join(cleaned))
     if len(value) < 8:
         raise WlhError("rtf_direct_text_unusable")
     return value + "\n"
 
 
-def looks_like_tcvn3(value):
+def looks_like_tcvn3(value: str) -> bool:
     return sum(value.count(char) for char in TCVN3_STRONG_GLYPHS) >= 3

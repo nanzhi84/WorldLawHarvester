@@ -1,5 +1,7 @@
 """Run-owned, cancellable extraction processes with bounded output and group cleanup."""
 
+from __future__ import annotations
+
 import json
 import os
 import shutil
@@ -8,7 +10,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 from wlh.core import WlhError
 from wlh.engine.objects import work_directory
@@ -17,7 +21,7 @@ from wlh.extraction.slots import PDFSlots
 MAX_OUTPUT_BYTES = 80 * 1024 * 1024
 
 
-def stop_group(process):
+def stop_group(process: subprocess.Popen[bytes]) -> None:
     for sig, seconds in ((signal.SIGTERM, 0.5), (signal.SIGKILL, 2.0)):
         try:
             os.killpg(process.pid, sig)
@@ -34,10 +38,19 @@ def stop_group(process):
     raise WlhError("extraction_cleanup_failed")
 
 
-def run_extraction(data, kind, config, *, active=None, cached_ocr=None):
+def run_extraction(
+    data: bytes,
+    kind: str,
+    config: Mapping[str, Any],
+    *,
+    active: Callable[[], None] | None = None,
+    cached_ocr: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Materialized CAS bytes in, (result, member files) out. ``active`` raises to cancel."""
-    profile = "vi" if str(config["metadata"].get("language") or "").startswith("vi") else "generic"
-    job = {
+    profile: str = (
+        "vi" if str(config["metadata"].get("language") or "").startswith("vi") else "generic"
+    )
+    job: dict[str, Any] = {
         "kind": kind,
         "ocr_cache": cached_ocr,
         "parser": config["parser"],
@@ -45,7 +58,9 @@ def run_extraction(data, kind, config, *, active=None, cached_ocr=None):
         "profile": profile,
         "max_bytes": config["budget"]["response_bytes"],
     }
-    timeout = config["ocr"]["timeout_seconds"] + config["parser"]["libreoffice_timeout_seconds"] * 2
+    timeout: float = (
+        config["ocr"]["timeout_seconds"] + config["parser"]["libreoffice_timeout_seconds"] * 2
+    )
     slots = PDFSlots()
     slot = slots.acquire_blocking(active)
     folder = Path(tempfile.mkdtemp(prefix="wlh-extract-", dir=work_directory()))
@@ -53,7 +68,7 @@ def run_extraction(data, kind, config, *, active=None, cached_ocr=None):
     try:
         job["path"] = str(folder / "input")
         (folder / "input").write_bytes(data)
-        env = {
+        env: dict[str, str] = {
             k: os.environ[k]
             for k in (
                 "PATH",
@@ -97,7 +112,9 @@ def run_extraction(data, kind, config, *, active=None, cached_ocr=None):
         if output_path.stat().st_size > MAX_OUTPUT_BYTES:
             raise WlhError("extraction_output_too_large")
         try:
-            value = json.loads(output_path.read_bytes())
+            value: dict[str, Any] | list[Any] | str | int | float | None = json.loads(
+                output_path.read_bytes()
+            )
         except (ValueError, UnicodeError):
             raise WlhError("extraction_output_invalid") from None
         if not isinstance(value, dict):
@@ -109,7 +126,7 @@ def run_extraction(data, kind, config, *, active=None, cached_ocr=None):
             )
         if not isinstance(value.get("markdown"), str) or not isinstance(value.get("members"), list):
             raise WlhError("extraction_output_invalid")
-        members = []
+        members: list[dict[str, Any]] = []
         for member in value["members"]:
             path = Path(member["file"]).resolve()
             if folder.resolve() not in path.parents:

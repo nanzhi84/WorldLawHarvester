@@ -1,9 +1,14 @@
 """Read-only run outcomes, request counts, failure causes and coverage conclusions."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
 from wlh.db import connect, one
 
 
-def failure_category(error):
+def failure_category(error: str) -> str:
     """Separately reported causes: never folded into one generic failure count."""
     code = error.removeprefix("required_input_failed:")
     if code in {"interrupted", "attempt_superseded"}:
@@ -35,32 +40,35 @@ def failure_category(error):
     return "parse_failed"
 
 
-def build_report(run_id, adapter, checkpoint, truncated, finish_reason):
+def build_report(
+    run_id: str, adapter: str, checkpoint: Mapping[str, Any],
+    truncated: str | None, finish_reason: str,
+) -> dict[str, Any]:
     with connect() as c:
         mode = one(c, "SELECT mode FROM wlh.run WHERE id=%s", (run_id,))["mode"]
-        tasks = c.execute(
+        tasks: list[dict[str, Any]] = c.execute(
             """SELECT kind,state,count(*) AS n FROM wlh.task WHERE run_id=%s
             GROUP BY kind,state""",
             (run_id,),
         ).fetchall()
-        outcomes = c.execute(
+        outcomes: list[dict[str, Any]] = c.execute(
             "SELECT outcome,count(*) AS n FROM wlh.observation WHERE run_id=%s GROUP BY outcome",
             (run_id,),
         ).fetchall()
-        requests = one(
+        requests: int = one(
             c,
             "SELECT count(*) AS n FROM wlh.acquisition WHERE run_id=%s AND acquisition_kind='http'",
             (run_id,),
         )["n"]
-        errors = c.execute(
+        errors: list[dict[str, Any]] = c.execute(
             """SELECT kind,error,count(*) AS n FROM wlh.task WHERE run_id=%s
             AND error IS NOT NULL GROUP BY kind,error""",
             (run_id,),
         ).fetchall()
-    counts = {"request": {}, "target": {}}
+    counts: dict[str, dict[str, int]] = {"request": {}, "target": {}}
     for row in tasks:
         counts[row["kind"]][row["state"]] = row["n"]
-    failures = {}
+    failures: dict[str, int] = {}
     for row in errors:
         category = failure_category(row["error"])
         failures[category] = failures.get(category, 0) + row["n"]
@@ -71,7 +79,7 @@ def build_report(run_id, adapter, checkpoint, truncated, finish_reason):
         failures[category] = max(1, failures.get(category, 0))
     pending = counts["request"].get("pending", 0)
     failed_requests = counts["request"].get("failed", 0)
-    zero_targets = (
+    zero_targets: bool = (
         mode in {"collect", "reparse"}
         and finish_reason == "finished"
         and not truncated
@@ -82,7 +90,7 @@ def build_report(run_id, adapter, checkpoint, truncated, finish_reason):
     if zero_targets:
         category = failure_category("zero_targets_discovered")
         failures[category] = failures.get(category, 0) + 1
-    complete = (
+    complete: bool = (
         finish_reason == "finished"
         and not truncated
         and not pending

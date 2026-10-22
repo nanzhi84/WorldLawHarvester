@@ -1,20 +1,23 @@
 """Read-only published-snapshot queries behind GET /results and GET /files/{sha256}."""
 
+from __future__ import annotations
+
 import json
 import re
 import time
+from typing import Any
 from urllib.parse import urlencode
 
-from wlh.api.security import ApiError, Cursor
+from wlh.api.security import ApiError, Caller, Cursor, Settings, Tokens
 from wlh.core import WlhError, canonical
-from wlh.db import connect
+from wlh.db import DbConn, connect
 from wlh.domain.snapshot_queries import file_entry, snapshot_rows
 from wlh.engine.objects import Objects
 from wlh.projections import PROJECTORS
 
 
-def published(c):
-    pointer = c.execute(
+def published(c: DbConn) -> str:
+    pointer: dict[str, Any] | None = c.execute(
         "SELECT published_snapshot_id FROM wlh.publication WHERE singleton"
     ).fetchone()
     if pointer is None or pointer["published_snapshot_id"] is None:
@@ -22,7 +25,15 @@ def published(c):
     return pointer["published_snapshot_id"]
 
 
-def results(settings, tokens, caller, source_id, limit, cursor_value, projection="canonical"):
+def results(
+    settings: Settings,
+    tokens: Tokens,
+    caller: Caller,
+    source_id: str | None,
+    limit: int,
+    cursor_value: str | None,
+    projection: str = "canonical",
+) -> tuple[bytes, str | None]:
     project = PROJECTORS[projection]
     if source_id is not None:
         caller.authorize(source_id)
@@ -49,7 +60,8 @@ def results(settings, tokens, caller, source_id, limit, cursor_value, projection
                 raise ApiError(400, "invalid_cursor")
             after = (parts[0], parts[1], int(parts[2]))
         rows = snapshot_rows(c, snapshot, sources, after, limit + 1)
-    items, size = [], 2
+    items: list[dict[str, Any]] = []
+    size = 2
     for row in rows[:limit]:
         item = project(row)
         size += len(canonical(item)) + 1
@@ -74,7 +86,7 @@ def results(settings, tokens, caller, source_id, limit, cursor_value, projection
             query = {"source_id": source_id, **query}
         link = settings.public_base_url + "/results?" + urlencode(query)
     # Template column order is preserved (canonical JSON would sort the keys).
-    body = json.dumps(
+    body: bytes = json.dumps(
         {"snapshot_id": snapshot, "items": items, "next_cursor": next_cursor},
         ensure_ascii=False,
         separators=(",", ":"),
@@ -84,7 +96,9 @@ def results(settings, tokens, caller, source_id, limit, cursor_value, projection
     return body, link
 
 
-def file(settings, caller, sha256, deadline):
+def file(
+    settings: Settings, caller: Caller, sha256: str, deadline: float
+) -> tuple[dict[str, Any], bytes]:
     if not re.fullmatch(r"[0-9a-f]{64}", sha256 or ""):
         raise ApiError(404, "file_not_found")
     with connect() as c:
@@ -95,5 +109,6 @@ def file(settings, caller, sha256, deadline):
         raise ApiError(404, "file_not_found")
     if entry["byte_size"] > settings.file_max_bytes:
         raise WlhError("archive_too_large")
-    body = Objects().get(sha256, max_bytes=settings.file_max_bytes, deadline=deadline)
+    objects = Objects()
+    body = objects.get(sha256, max_bytes=settings.file_max_bytes, deadline=deadline)
     return entry, body

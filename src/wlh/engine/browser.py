@@ -4,29 +4,43 @@ Raw main responses, redirects and subresources have independent HTTP Acquisition
 The rendered UTF-8 DOM is an additional representation, not an extra network request.
 """
 
+from __future__ import annotations
+
 import asyncio
 import base64
 import contextlib
 import hashlib
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, cast
 
 from wlh.core import WlhError
 from wlh.engine.scope import guard
-from wlh.engine.transport import REDIRECTS, request_key
+from wlh.engine.transport import REDIRECTS, Budget, Recorder, Transport, request_key
+
+if TYPE_CHECKING:
+    from playwright.async_api import Browser as PlaywrightBrowser
+    from playwright.async_api import Playwright, Response
 
 
 class Browser:
-    def __init__(self, config, budget, recorder, transport):
+    def __init__(
+        self, config: Mapping[str, Any], budget: Budget, recorder: Recorder, transport: Transport
+    ) -> None:
+        self.config: Mapping[str, Any]
+        self.budget: Budget
+        self.recorder: Recorder
+        self.transport: Transport
         self.config, self.budget, self.recorder, self.transport = (
             config,
             budget,
             recorder,
             transport,
         )
-        self.lock = asyncio.Lock()
-        self.playwright = None
-        self.browser = None
+        self.lock: asyncio.Lock = asyncio.Lock()
+        self.playwright: Playwright | None = None
+        self.browser: PlaywrightBrowser | None = None
 
-    async def start(self):
+    async def start(self) -> None:
         async with self.lock:
             if self.browser is None:
                 from playwright.async_api import async_playwright
@@ -37,27 +51,30 @@ class Browser:
                     args=["--host-resolver-rules=MAP * ~NOTFOUND"],
                 )
 
-    async def close(self):
+    async def close(self) -> None:
         if self.browser is not None:
             await self.browser.close()
         if self.playwright is not None:
             await self.playwright.stop()
 
-    async def acquire(self, request):
+    async def acquire(self, request: Mapping[str, Any]) -> dict[str, Any]:
         await self.start()
         assert self.browser is not None
         await self.transport.start()
         url = guard(self.config, request["url"])
         self.budget.active()
         key = request_key(request)
-        identity = self.recorder.start(
+        identity: str = self.recorder.start(
             key, "rendered_dom", "content", "GET", url, {"role": request.get("role", "page")}
         )
-        context = None
-        errors, facts, pending = [], {}, set()
+        context: Any = None
+        session: Any = None
+        errors: list[str] = []
+        facts: dict[str | None, str] = {}
+        pending: set[asyncio.Task[Any]] = set()
 
-        async def route_input(event):
-            current = asyncio.current_task()
+        async def route_input(event: dict[str, Any]) -> None:
+            current = cast(asyncio.Task[Any], asyncio.current_task())
             pending.add(current)
             request_id = event["requestId"]
             browser_request = event["request"]
@@ -77,12 +94,12 @@ class Browser:
                 target = guard(self.config, browser_request["url"])
                 await self.transport.robots.check(target, self.transport.fetch_policy)
                 entries = browser_request.get("postDataEntries")
-                body = (
+                body: bytes | None = (
                     b"".join(base64.b64decode(entry["bytes"]) for entry in entries)
                     if entries
                     else browser_request.get("postData", "").encode("utf-8") or None
                 )
-                raw_key = request_key(
+                raw_key: str = request_key(
                     {
                         "url": target,
                         "method": browser_request["method"],
@@ -91,7 +108,7 @@ class Browser:
                     }
                 )
                 previous = facts.get(event.get("redirectedRequestId"))
-                row = await self.transport.exchange(
+                row: dict[str, Any] = await self.transport.exchange(
                     target,
                     browser_request["method"],
                     body,
@@ -117,7 +134,7 @@ class Browser:
                     raise WlhError(row["error"] or "network_failed")
                 # Transport archives decoded HTTP entity bytes. Chromium must not decode
                 # them again; preserve semantic headers, including redirects and cookies.
-                headers = [
+                headers: list[dict[str, str]] = [
                     {"name": name, "value": value}
                     for name, value in row["headers"]
                     if name.lower()
@@ -165,13 +182,14 @@ class Browser:
             # Fetch.requestPaused reports every redirect hop. Playwright route handlers
             # only see the first hop, allowing later scripts to escape acquisition.
             # https://github.com/ChromeDevTools/devtools-protocol/blob/master/json/browser_protocol.json
-            session.on(
-                "Fetch.requestPaused", lambda event: asyncio.ensure_future(route_input(event))
-            )
+            def callback(event: dict[str, Any]) -> asyncio.Task[None]:
+                return asyncio.ensure_future(route_input(event))
+
+            session.on("Fetch.requestPaused", callback)
             await session.send(
                 "Fetch.enable", {"patterns": [{"urlPattern": "*", "requestStage": "Request"}]}
             )
-            response = await page.goto(
+            response: Response | None = await page.goto(
                 url,
                 wait_until=self.config["fetch"]["wait_until"],
                 timeout=self.config["fetch"]["page_timeout_ms"],
@@ -198,7 +216,7 @@ class Browser:
             self.recorder.finish(identity, "cancelled", outcome="cancelled", error="interrupted")
             raise
         except Exception as exc:
-            code = (
+            code: str = (
                 exc.code
                 if isinstance(exc, WlhError)
                 else (errors[0] if errors else "network_failed")

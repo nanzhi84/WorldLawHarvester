@@ -4,9 +4,15 @@ Only source field mapping varies. Request planning, identity selectors, bounded
 extraction and the core RawRecord contract stay the same for JSON, XML and HTML.
 """
 
+from __future__ import annotations
+
 import json
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime
+from typing import Any, Literal, cast
 from urllib.parse import urljoin
+
+import lxml.etree as etree
 
 from wlh.adapters import Base, RawRecord, RawUnitSource
 from wlh.adapters.web import parse_html
@@ -15,16 +21,19 @@ from wlh.engine.scope import guard
 from wlh.extraction.markdown import html_to_markdown, normalized
 from wlh.extraction.office import detect_real_format
 
+etree: Any
 
-def scalar(value):
+
+def scalar(value: Any) -> str | None:
     if isinstance(value, dict):
-        return str(value.get("name") or value.get("title") or value.get("id") or "")
+        mapping = cast(Mapping[str, Any], value)
+        return str(mapping.get("name") or mapping.get("title") or mapping.get("id") or "")
     if isinstance(value, list):
-        return "; ".join(scalar(v) or "" for v in value)
+        return "; ".join(scalar(v) or "" for v in cast(Sequence[Any], value))
     return str(value).strip() if value is not None else None
 
 
-def day(value):
+def day(value: Any) -> str | None:
     text = scalar(value)
     if not text:
         return None
@@ -39,8 +48,8 @@ def day(value):
         raise WlhError("document_date_unparseable") from None
 
 
-def first(node, xpath):
-    values = node.xpath(xpath)
+def first(node: Any, xpath: str) -> str | None:
+    values: Any = node.xpath(xpath)
     if isinstance(values, str):
         return values.strip() or None
     return (
@@ -51,39 +60,42 @@ def first(node, xpath):
     )
 
 
-def payload(data):
+def payload(data: bytes) -> Any:
     try:
         return json.loads(data)
     except ValueError:
         raise WlhError("bridge_json_invalid") from None
 
 
-def items(value, names):
+def items(value: Any, names: Sequence[str]) -> list[dict[str, Any]]:
     if isinstance(value, list):
-        return value
+        return cast(list[dict[str, Any]], value)
     if not isinstance(value, dict):
         raise WlhError("bridge_records_invalid")
+    mapping = cast(dict[str, Any], value)
     for name in names:
-        if isinstance(value.get(name), list):
-            return value[name]
-    return [value]
+        if isinstance(mapping.get(name), list):
+            return cast(list[dict[str, Any]], mapping[name])
+    return [mapping]
 
 
 class RecordAdapter(Base):
-    NAMESPACE = "record"
+    NAMESPACE: str = "record"
 
-    def records(self, data, acquisition):
+    def records(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
         raise NotImplementedError
 
-    def next_requests(self, data, acquisition):
+    def next_requests(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
         return []
 
-    def parse(self, ctx, task, acquisition):
+    def parse(
+        self, ctx: Any, task: Mapping[str, Any], acquisition: Mapping[str, Any]
+    ) -> dict[str, Any]:
         if task["payload"].get("role") == "attachment":
             return {"requests": [], "targets": []}
-        data = ctx.read(acquisition)
+        data: bytes = ctx.read(acquisition)
         records = self.records(data, acquisition)
-        targets = []
+        targets: list[dict[str, Any]] = []
         for index, record in enumerate(records):
             key = str(record["external_key"])
             url = public_url(
@@ -91,7 +103,7 @@ class RecordAdapter(Base):
                     acquisition["actual_url"], record.get("detail_url") or acquisition["actual_url"]
                 )
             )
-            inputs = [
+            inputs: list[dict[str, Any]] = [
                 {"request": task["payload"], "role": "record", "selector": key, "position": index}
             ]
             for unit in record.get("downloads", []):
@@ -119,23 +131,27 @@ class RecordAdapter(Base):
             "targets": targets,
         }
 
-    def plan_recheck(self, resources, state):
+    def plan_recheck(
+        self, resources: Sequence[Mapping[str, Any]], state: dict[str, Any]
+    ) -> dict[str, Any]:
         return {
             "requests": [{"url": r["recheck_locator"]["url"], "role": "page"} for r in resources],
             "targets": [],
             "state": state,
         }
 
-    def build(self, ctx, target, inputs):
-        acquisition = inputs[0]["acquisition"]
+    def build(
+        self, ctx: Any, target: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]
+    ) -> list[RawRecord]:
+        acquisition: Mapping[str, Any] = inputs[0]["acquisition"]
         records = self.records(ctx.read(acquisition), acquisition)
-        key = inputs[0].get("selector") or target["identity"]["external_key"]
+        key: str = inputs[0].get("selector") or target["identity"]["external_key"]
         matches = [(i, r) for i, r in enumerate(records) if str(r["external_key"]) == key]
         if len(matches) != 1:
             raise WlhError("bridge_record_identity_ambiguous")
         index, record = matches[0]
-        url = target["identity"]["public_url"]
-        lineage = [
+        url: str = target["identity"]["public_url"]
+        lineage: list[dict[str, Any]] = [
             {
                 "acquisition_id": acquisition["id"],
                 "archive_ref": acquisition["archive_ref"],
@@ -145,14 +161,14 @@ class RecordAdapter(Base):
                 "slice_hash": digest(record),
             }
         ]
-        units = []
+        units: list[RawUnitSource] = []
         for item in inputs[1:]:
-            acq = item["acquisition"]
-            data = ctx.read(acq)
+            acq: Mapping[str, Any] = item["acquisition"]
+            data: bytes = ctx.read(acq)
             kind = detect_real_format(data)
             if kind == "html":
                 markdown = html_to_markdown(data, acq["actual_url"])
-                result = {
+                result: dict[str, Any] = {
                     "quality": ctx.text_quality(markdown),
                     "info": {"kind": kind},
                     "parsers": ["markdown", "quality"],
@@ -160,8 +176,11 @@ class RecordAdapter(Base):
             else:
                 result = ctx.extract(data, kind)
                 markdown = result["markdown"]
-            unit = item.get("unit") or {}
-            role = unit.get("role", "primary" if not units else "independent_attachment")
+            unit: dict[str, Any] = item.get("unit") or {}
+            role = cast(
+                Literal["primary", "volume", "independent_attachment"],
+                unit.get("role", "primary" if not units else "independent_attachment"),
+            )
             lineage.append(
                 {
                     "acquisition_id": acq["id"],
@@ -202,12 +221,12 @@ class RecordAdapter(Base):
                     original=record.get("original"),
                 )
             ]
-        for unit in units:
+        for unit_obj in units:
             if (
-                unit.quality["recommended_route"]
+                unit_obj.quality["recommended_route"]
                 not in self.config["parser"]["quality_accept_routes"]
             ):
-                raise WlhError("quality_check_failed:" + unit.quality["recommended_route"])
+                raise WlhError("quality_check_failed:" + unit_obj.quality["recommended_route"])
         return [
             RawRecord(
                 namespace=self.NAMESPACE,
@@ -229,24 +248,29 @@ class RecordAdapter(Base):
         ]
 
 
-def html_records(data, acquisition, *, containers, fields, namespace):
+def html_records(
+    data: bytes,
+    acquisition: Mapping[str, Any],
+    *,
+    containers: str,
+    fields: Mapping[str, str],
+    namespace: str,
+) -> list[dict[str, Any]]:
     tree, _, _ = parse_html(data, acquisition.get("charset"))
-    nodes = tree.xpath(containers) or [tree]
-    records = []
-    for index, node in enumerate(nodes):
-        values = {key: first(node, xpath) for key, xpath in fields.items()}
+    nodes: list[Any] = tree.xpath(containers) or [tree]
+    records: list[dict[str, Any]] = []
+    for _index, node in enumerate(nodes):
+        values: dict[str, Any] = {key: first(node, xpath) for key, xpath in fields.items()}
         title = values.get("title")
         if not title:
             raise WlhError("bridge_title_missing")
         identity = values.pop("external_key", None) or values.get("doc_number")
         if not identity:
             raise WlhError("bridge_identity_missing")
-        body = node.xpath(
+        body: list[Any] = node.xpath(
             './/*[contains(concat(" ",normalize-space(@class)," ")," tenor ") or contains(concat(" ",normalize-space(@class)," ")," body ")]'
         )
-        import lxml.etree as etree
-
-        fragment = etree.tostring(body[0] if body else node, encoding="unicode", method="html")
+        fragment: str = etree.tostring(body[0] if body else node, encoding="unicode", method="html")
         records.append(
             {
                 **values,

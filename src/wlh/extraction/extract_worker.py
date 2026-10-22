@@ -4,13 +4,17 @@ stdin carries a JSON job, stdout a single bounded JSON result. stderr is discard
 parent because third-party tools can echo document text or local paths.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import signal
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, NoReturn
 
 from wlh.core import WlhError
 from wlh.extraction.markdown import html_to_markdown, text_to_markdown
@@ -27,11 +31,13 @@ ROUTE_ORDER = (
 )
 
 
-def worst(routes):
+def worst(routes: Sequence[str]) -> str:
     return max(routes, key=ROUTE_ORDER.index)
 
 
-def extract(path, kind, job, depth=0):
+def extract(
+    path: Path, kind: str, job: dict[str, Any], depth: int = 0
+) -> tuple[str, dict[str, Any], dict[str, Any], list[str], list[dict[str, Any]]]:
     if kind in {"txt", "html"}:
         try:
             text = path.read_text(encoding="utf-8-sig")
@@ -62,7 +68,11 @@ def extract(path, kind, job, depth=0):
         folder = Path(path).with_name(Path(path).name + "-members")
         folder.mkdir()
         members = unpack_zip(path, folder, job["max_bytes"])
-        parts, infos, reports, parsers, lineage = [], [], [], {"zip"}, []
+        parts: list[str] = []
+        infos: list[dict[str, Any]] = []
+        reports: list[dict[str, Any]] = []
+        parsers = {"zip"}
+        lineage: list[dict[str, Any]] = []
         for member in members:
             inner = extract(member["file"], member["kind"], job, depth + 1)
             markdown, info, report, used, nested = inner
@@ -89,7 +99,7 @@ def extract(path, kind, job, depth=0):
     raise WlhError("unsupported_document_type")
 
 
-def watch_parent(parent_pid):
+def watch_parent(parent_pid: int) -> None:
     while True:
         if os.getppid() != parent_pid:
             try:
@@ -100,15 +110,18 @@ def watch_parent(parent_pid):
         time.sleep(0.1)
 
 
-def main():
-    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(SystemExit(143)))
+def main() -> None:
+    def terminate(*_: Any) -> NoReturn:
+        return (_ for _ in ()).throw(SystemExit(143))
+
+    signal.signal(signal.SIGTERM, terminate)
     threading.Thread(target=watch_parent, args=(os.getppid(),), daemon=True).start()
     job = json.loads(sys.stdin.read())
     try:
         markdown, info, report, parsers, members = extract(Path(job["path"]), job["kind"], job)
         if not markdown.strip():
             raise WlhError("extracted_text_empty")
-        value = {
+        value: dict[str, Any] = {
             "markdown": markdown,
             "info": info,
             "quality": report,

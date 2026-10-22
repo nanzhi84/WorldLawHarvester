@@ -1,8 +1,15 @@
 """Freeze an explicit offline reparse input set: current Versions' archived inputs only."""
 
+from __future__ import annotations
 
-def plan_reparse(c, source, config):
-    rows = c.execute(
+from collections.abc import Mapping
+from typing import Any
+
+from wlh.db import DbConn
+
+
+def plan_reparse(c: DbConn, source: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = c.execute(
         """SELECT r.id AS resource_id,r.identity_namespace AS namespace,r.external_key,
         r.public_url,r.recheck_locator,v.id AS version_id,v.inputs_ref,v.parser_fingerprint
         FROM wlh.resource r JOIN wlh.frontier f ON f.id=r.frontier_id

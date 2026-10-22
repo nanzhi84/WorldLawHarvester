@@ -1,12 +1,16 @@
 """Shared URL boundary for SDK traversal, HTTP redirects and browser subrequests."""
 
+from __future__ import annotations
+
 import posixpath
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from wlh.core import WlhError, check_address, public_url
 
 
-def valid_prefix(path):
+def valid_prefix(path: Any) -> bool:
     return (
         isinstance(path, str)
         and path.startswith("/")
@@ -18,8 +22,8 @@ def valid_prefix(path):
     )
 
 
-def paths_for(config, host, path):
-    if host not in config["allowed_hosts"]:
+def paths_for(config: Mapping[str, Any], host: str | None, path: str) -> bool:
+    if not host or host not in config["allowed_hosts"]:
         return False
     scopes = config.get("host_path_scopes", {})
     prefixes = scopes.get(host, []) if scopes else config["allowed_path_prefixes"]
@@ -27,7 +31,7 @@ def paths_for(config, host, path):
     return any(path == p.rstrip("/") or path.startswith(p.rstrip("/") + "/") for p in prefixes)
 
 
-def guard(config, url, *, policy=False):
+def guard(config: Mapping[str, Any], url: str, *, policy: bool = False) -> str:
     url = public_url(url)
     parsed = urlsplit(url)
     check_address(parsed.hostname)

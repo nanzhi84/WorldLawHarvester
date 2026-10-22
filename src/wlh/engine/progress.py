@@ -1,7 +1,11 @@
 """Read-only current-attempt progress; URLs, HTTP responses and documents differ."""
 
+from __future__ import annotations
+
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any, Self, cast
 
 from rich.console import Console
 from rich.live import Live
@@ -9,7 +13,7 @@ from rich.table import Table
 from rich.text import Text
 
 from wlh.core import safe_url
-from wlh.db import connect, one
+from wlh.db import DbConn, connect, one
 
 
 @dataclass(frozen=True)
@@ -19,12 +23,12 @@ class ProgressSnapshot:
     mode: str
     status: str
     started_at: str
-    counts: dict
+    counts: dict[str, int]
     current_url: str | None
 
 
-def snapshot(c, run):
-    tasks = c.execute(
+def snapshot(c: DbConn, run: Mapping[str, Any]) -> ProgressSnapshot:
+    tasks: dict[str, Any] = cast(dict[str, Any], c.execute(
         """SELECT count(*) FILTER(WHERE kind='request') AS discovered,
         count(*) FILTER(WHERE kind='request' AND state IN ('archived','done')) AS fetched,
         count(*) FILTER(WHERE kind='request' AND state='pending') AS pending,
@@ -34,20 +38,20 @@ def snapshot(c, run):
         count(*) FILTER(WHERE kind='target' AND state='skipped') AS skipped
         FROM wlh.task WHERE run_id=%s""",
         (run["id"],),
-    ).fetchone()
-    outcomes = c.execute(
+    ).fetchone())
+    outcomes: dict[str, Any] = cast(dict[str, Any], c.execute(
         """SELECT count(*) FILTER(WHERE version_id IS NOT NULL) AS resources,
         count(*) FILTER(WHERE outcome='failed') AS failed,
         count(*) FILTER(WHERE outcome='unchanged') AS unchanged,
         count(*) FILTER(WHERE outcome IN ('created','changed')) AS updated
         FROM wlh.observation WHERE run_id=%s""",
         (run["id"],),
-    ).fetchone()
-    requests = c.execute(
+    ).fetchone())
+    requests: int = cast(dict[str, Any], c.execute(
         "SELECT count(*) AS n FROM wlh.acquisition WHERE run_id=%s AND acquisition_kind='http'",
         (run["id"],),
-    ).fetchone()["n"]
-    current = c.execute(
+    ).fetchone())["n"]
+    current: dict[str, Any] | None = c.execute(
         """SELECT payload->>'url' AS url FROM wlh.task WHERE run_id=%s AND kind='request'
         AND state='pending' ORDER BY seq LIMIT 1""",
         (run["id"],),
@@ -64,7 +68,9 @@ def snapshot(c, run):
     )
 
 
-def terminal_report(c, run, status, reason):
+def terminal_report(
+    c: DbConn, run: Mapping[str, Any], status: str, reason: str | None
+) -> dict[str, Any]:
     errors = sorted(set(run["errors"]) | ({reason} if reason else set()))
     report = dict(run["report"], errors=errors, counts=snapshot(c, run).counts)
     report.setdefault(
@@ -80,14 +86,14 @@ def terminal_report(c, run, status, reason):
 
 
 class ProgressPanel:
-    def __init__(self, enabled):
-        self.console = Console(stderr=True)
-        self.enabled = enabled and self.console.is_terminal
-        self.live = None
-        self.started = time.monotonic()
-        self.sampled = 0.0
+    def __init__(self, enabled: bool) -> None:
+        self.console: Console = Console(stderr=True)
+        self.enabled: bool = enabled and self.console.is_terminal
+        self.live: Live | None = None
+        self.started: float = time.monotonic()
+        self.sampled: float = 0.0
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         if self.enabled:
             try:
                 self.live = Live(
@@ -101,10 +107,10 @@ class ProgressPanel:
                 self.live = None
         return self
 
-    def update(self, run_id, *, final=False):
+    def update(self, run_id: str, *, final: bool = False) -> None:
         if not self.live or (not final and time.monotonic() - self.sampled < 1):
             return
-        self.sampled = time.monotonic()
+        self.sampled: float = time.monotonic()
         try:
             with connect() as c:
                 state = snapshot(c, one(c, "SELECT * FROM wlh.run WHERE id=%s", (run_id,)))
@@ -114,7 +120,7 @@ class ProgressPanel:
             self.stop()
             self.live = None
 
-    def render(self, state):
+    def render(self, state: ProgressSnapshot) -> Table:
         table = Table.grid(padding=(0, 2))
         elapsed = int(time.monotonic() - self.started)
         table.add_row(
@@ -149,10 +155,10 @@ class ProgressPanel:
             table.add_row(Text("Current"), Text(state.current_url, overflow="ellipsis"))
         return table
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: Any) -> None:
         self.stop()
 
-    def stop(self):
+    def stop(self) -> None:
         if self.live:
             try:
                 self.live.stop()

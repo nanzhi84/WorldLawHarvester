@@ -1,36 +1,44 @@
 """Deterministic legal HTML conversion; no browser, network or implicit caches."""
 
+from __future__ import annotations
+
 import re
 import unicodedata
+from typing import Any
 from urllib.parse import urljoin, urlsplit
 
-import lxml.etree as etree
-from lxml import html as dom
+import lxml.etree as _etree  # type: ignore[import-untyped]
+from lxml import html as _dom  # type: ignore[import-untyped]
 
 from wlh.core import WlhError
+
+etree: Any = _etree
+dom: Any = _dom
 
 MARKDOWN_CONTRACT = "wlh.markdown.v1"
 
 
-def compact(value):
+def compact(value: str) -> str:
     value = unicodedata.normalize("NFC", value).replace("\r\n", "\n").replace("\r", "\n")
     return re.sub(r"[ \t\u00a0]+", " ", value).strip()
 
 
-def normalized(value):
+def normalized(value: str) -> str:
     value = unicodedata.normalize("NFC", value).replace("\r\n", "\n").replace("\r", "\n")
     lines = [line.rstrip() for line in value.splitlines()]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip() + "\n"
 
 
-def text_to_markdown(value):
+def text_to_markdown(value: str) -> str:
     return normalized(value)
 
 
-def html_to_markdown(html, base_url=None, content_xpath=None):
+def html_to_markdown(
+    html: str | bytes, base_url: str | None = None, content_xpath: str | None = None
+) -> str:
     try:
         tree = dom.document_fromstring(html)
-        nodes = (
+        nodes: list[Any] = (
             tree.xpath(content_xpath)
             if content_xpath
             else [tree.body if tree.body is not None else tree]
@@ -40,16 +48,16 @@ def html_to_markdown(html, base_url=None, content_xpath=None):
     if not nodes or any(not isinstance(n, etree._Element) for n in nodes):
         raise WlhError("content_region_missing")
 
-    def inline(text):
+    def inline(text: str | None) -> str:
         return re.sub(r"\s+", " ", text or "")
 
-    def children(node):
+    def children(node: Any) -> str:
         return inline(node.text) + "".join(render(c) + inline(c.tail) for c in node)
 
-    def table(node):
-        rows = []
+    def table(node: Any) -> str:
+        rows: list[list[str]] = []
         for tr in node.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr"):
-            cells = [
+            cells: list[str] = [
                 re.sub(r"\s+", " ", children(c)).strip().replace("|", "\\|")
                 for c in tr.xpath("./th|./td")
             ]
@@ -62,7 +70,7 @@ def html_to_markdown(html, base_url=None, content_xpath=None):
         rows.insert(1, ["---"] * width)
         return "\n\n" + "\n".join("| " + " | ".join(row) + " |" for row in rows) + "\n\n"
 
-    def render(node):
+    def render(node: Any) -> str:
         if not isinstance(node.tag, str):
             return ""
         tag = node.tag.split("}")[-1].split(":")[-1].lower()
@@ -92,7 +100,7 @@ def html_to_markdown(html, base_url=None, content_xpath=None):
             return "\n\n" + "#" * int(tag[1]) + " " + value.strip() + "\n\n"
         if tag == "li":
             parent = node.getparent()
-            marker = (
+            marker: str = (
                 f"{parent.index(node) + 1}. " if parent is not None and parent.tag == "ol" else "- "
             )
             return "\n" + marker + value.strip().replace("\n", "\n  ") + "\n"

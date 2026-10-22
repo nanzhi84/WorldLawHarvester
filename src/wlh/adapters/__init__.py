@@ -4,13 +4,17 @@ Adapters never perform I/O or write the database. They describe requests and doc
 targets, read already archived inputs through the Runtime context and return candidates.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from importlib import import_module
+from typing import Any
 
 from wlh.adapters.records import RawRecord, RawUnitSource, RequestSpec
 from wlh.adapters.session import CasSessionProxy
 from wlh.core import WlhError
 
-MODULES = {
+MODULES: dict[str, str] = {
     "structured_xml": "wlh.adapters.structured_xml",
     **{
         name: "wlh.adapters.bridges." + name
@@ -27,7 +31,7 @@ MODULES = {
 }
 
 
-def load(name):
+def load(name: str) -> Any:
     if name not in MODULES:
         raise WlhError("unknown_adapter")
     try:
@@ -36,17 +40,17 @@ def load(name):
         raise WlhError("adapter_not_implemented") from None
 
 
-def contract(name):
-    return load(name).CONTRACT
+def contract(name: str) -> str:
+    return str(load(name).CONTRACT)
 
 
-def semantic_options(name, options):
+def semantic_options(name: str, options: Mapping[str, Any]) -> dict[str, Any]:
     """Only parsing semantics enter the parser fingerprint; pagination selects scope."""
     planning = load(name).PLANNING_OPTIONS
     return {key: value for key, value in options.items() if key not in planning}
 
 
-def validate_options(name, options):
+def validate_options(name: str, options: Mapping[str, Any]) -> None:
     adapter = load(name)
     try:
         adapter.validate_options(options)
@@ -57,35 +61,42 @@ def validate_options(name, options):
 class Base:
     """Shared defaults; subclasses define CONTRACT and the parsing rules."""
 
-    CONTRACT = "wlh.adapter.base.v1"
-    PLANNING_OPTIONS = ()
+    CONTRACT: str = "wlh.adapter.base.v1"
+    PLANNING_OPTIONS: tuple[str, ...] = ()
 
-    def __init__(self, config):
-        self.config = config
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.config: dict[str, Any] = config
 
     @staticmethod
-    def validate_options(options):
+    def validate_options(options: Mapping[str, Any]) -> None:
         if options:
             raise ValueError("unexpected_adapter_options")
 
-    def plan(self, state):
+    def plan(self, state: dict[str, Any]) -> dict[str, Any]:
         """Initial requests and targets for a collect Run; ``state`` is adapter_state."""
+        entry_urls = self.config["entry_urls"]
         return {
             "requests": [
-                {"url": url, "role": "page", "depth": 0} for url in self.config["entry_urls"]
+                {"url": url, "role": "page", "depth": 0} for url in entry_urls
             ],
             "targets": [],
             "state": state,
         }
 
-    def plan_recheck(self, resources, state):
+    def plan_recheck(
+        self, resources: Sequence[Mapping[str, Any]], state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Due Resources (stable identity, public_url, recheck_locator, current Version)."""
-        targets = []
+        targets: list[dict[str, Any]] = []
         for resource in resources:
             locator = resource["recheck_locator"]
             if not locator.get("url"):
                 raise WlhError("recheck_locator_unsupported")
-            request = {"url": locator["url"], "role": locator.get("role", "page"), "depth": 0}
+            request: dict[str, Any] = {
+                "url": locator["url"],
+                "role": locator.get("role", "page"),
+                "depth": 0,
+            }
             # The known identity is registered up front, so a failed recheck is still
             # recorded as a failed delivery for that Resource.
             targets.append(
@@ -101,10 +112,14 @@ class Base:
             )
         return {"requests": [], "targets": targets, "state": state}
 
-    def parse(self, ctx, task, acquisition):
+    def parse(
+        self, ctx: Any, task: Mapping[str, Any], acquisition: Mapping[str, Any]
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
-    def build(self, ctx, target, inputs):
+    def build(
+        self, ctx: Any, target: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]
+    ) -> Any:
         raise NotImplementedError
 
 

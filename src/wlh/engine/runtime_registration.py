@@ -1,17 +1,27 @@
 """Atomic task expansion, replay candidates and bounded Adapter state."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, cast
+
 from wlh.core import digest, uid
-from wlh.db import j
+from wlh.db import DbConn, j
 from wlh.engine.adapter_context import target_key
 from wlh.engine.transport import request_key
+
+if TYPE_CHECKING:
+    from wlh.engine.runtime import Runtime
 
 ADAPTER_STATE_SCHEMA = 1
 
 
-def register(self, result, parent=None, depth=0):
+def register(
+    self: Runtime, result: Mapping[str, Any], parent: str | None = None, depth: int = 0
+) -> None:
     """Persist follow-up requests/targets and complete the parent in one transaction."""
 
-    def apply(c):
+    def apply(c: DbConn) -> None:
         if result.get("truncated"):
             self.truncated = result["truncated"]
             self.checkpoint["truncated"] = self.truncated
@@ -19,19 +29,19 @@ def register(self, result, parent=None, depth=0):
             self.insert_request(c, request, request.get("depth", depth))
         for target in result.get("targets", []):
             key = target_key(target)
-            count = c.execute(
+            count: int = cast(dict[str, Any], c.execute(
                 """SELECT count(DISTINCT (
                     COALESCE(payload #>> '{identity,namespace}', key),
                     COALESCE(payload #>> '{identity,external_key}', key)
                 )) AS n FROM wlh.task WHERE run_id=%s AND kind='target'""",
                 (self.run_id,),
-            ).fetchone()["n"]
-            exists = c.execute(
+            ).fetchone())["n"]
+            exists: dict[str, Any] | None = c.execute(
                 """SELECT * FROM wlh.task WHERE run_id=%s AND kind='target' AND key=%s
                 FOR UPDATE""",
                 (self.run_id, key),
             ).fetchone()
-            payload = {
+            payload: dict[str, Any] = {
                 "identity": target.get("identity"),
                 "context": target.get("context") or {},
                 "frozen": target.get("frozen"),
@@ -81,7 +91,7 @@ def register(self, result, parent=None, depth=0):
                 self.truncated = "document_budget_exceeded"
                 continue
             for position, item in enumerate(target["inputs"]):
-                request_id = self.insert_request(
+                request_id: str = self.insert_request(
                     c, item["request"], item["request"].get("depth", depth)
                 )
                 c.execute(
@@ -131,11 +141,13 @@ def register(self, result, parent=None, depth=0):
     self.write(apply)
 
 
-def amend(self, c, row, target, depth):
+def amend(
+    self: Runtime, c: DbConn, row: Mapping[str, Any], target: Mapping[str, Any], depth: int
+) -> None:
     """A not-yet-delivered target gains newly discovered required inputs."""
     payload = row["payload"]
     known = {item["request_key"] for item in payload["inputs"]}
-    added = payload.get("identity") != target.get("identity") or payload.get("context") != (
+    added: bool = payload.get("identity") != target.get("identity") or payload.get("context") != (
         target.get("context") or {}
     )
     payload["identity"] = target.get("identity")

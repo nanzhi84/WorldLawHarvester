@@ -1,5 +1,10 @@
 """Open States v3 / scraper Bill dictionaries, including versions and attachments."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
 from wlh.adapters.bridges.common import RecordAdapter, items, payload, scalar
 from wlh.core import WlhError
 
@@ -8,15 +13,16 @@ class Adapter(RecordAdapter):
     CONTRACT = "wlh.adapter.openstates.v1"
     NAMESPACE = "openstates/bill"
 
-    def records(self, data, acquisition):
-        records = []
+    def records(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
         for item in items(payload(data), ("bills", "results")):
             if not item.get("title") or not item.get("identifier"):
                 raise WlhError("openstates_bill_invalid")
-            downloads = []
+            downloads: list[dict[str, Any]] = []
             for group in ("versions", "documents"):
-                for document in item.get(group) or []:
-                    links = document.get("links") or []
+                documents: list[dict[str, Any]] = item.get(group) or []
+                for document in documents:
+                    links: list[dict[str, Any]] = document.get("links") or []
                     preferred = next(
                         (v for v in links if v.get("media_type") == "application/pdf"),
                         links[0] if links else None,
@@ -29,17 +35,17 @@ class Adapter(RecordAdapter):
                                 "role": "primary" if not downloads else "independent_attachment",
                             }
                         )
-            sources = item.get("sources") or []
+            sources: list[dict[str, Any]] = item.get("sources") or []
             detail = (
                 item.get("url")
                 or (sources[0].get("url") if sources else None)
                 or item.get("openstates_url")
             )
-            abstracts = item.get("abstracts") or []
-            body = (
+            abstracts: list[dict[str, Any]] = item.get("abstracts") or []
+            body: str = (
                 item.get("text")
                 or item.get("abstract")
-                or "\n\n".join(a.get("abstract", "") for a in abstracts)
+                or "\n\n".join(str(a.get("abstract", "")) for a in abstracts)
             )
             records.append(
                 {

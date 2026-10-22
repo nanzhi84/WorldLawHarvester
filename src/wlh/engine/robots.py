@@ -1,20 +1,26 @@
 """Robots policy is fetched through the same bounded transport, before content."""
 
+from __future__ import annotations
+
 import asyncio
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from protego import Protego
+from protego import Protego  # type: ignore[import-untyped]
 
 from wlh.core import WlhError
 
 
 class Robots:
-    def __init__(self, config):
-        self.config = config
-        self.cache = {}
-        self.lock = asyncio.Lock()
+    def __init__(self, config: Mapping[str, Any]) -> None:
+        self.config: Mapping[str, Any] = config
+        self.cache: dict[str, Any] = {}
+        self.lock: asyncio.Lock = asyncio.Lock()
 
-    async def check(self, url, fetch):
+    async def check(
+        self, url: str, fetch: Callable[[str], Awaitable[tuple[int, bytes]]]
+    ) -> None:
         if not self.config["robots"]:
             return
         p = urlsplit(url)

@@ -5,14 +5,18 @@ Acquisition committed in a short fenced transaction; bytes are archived and read
 before the terminal state (with archive_ref) is committed.
 """
 
+from __future__ import annotations
+
 import asyncio
 import os
 import re
 import ssl
 import time
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from email.message import Message
 from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import aiohttp
@@ -103,7 +107,7 @@ vouXsXgxT7PntgMTzlSdriVZzH81Xwj3QEUxeCp6
 -----END CERTIFICATE-----"""
 
 
-def request_key(request):
+def request_key(request: Mapping[str, Any]) -> str:
     form = request.get("form")
     return digest(
         {
@@ -116,13 +120,13 @@ def request_key(request):
     )
 
 
-def media(headers):
+def media(headers: Mapping[str, str]) -> tuple[str, str | tuple[str | None, str | None, str] | None]:
     message = Message()
     message["content-type"] = headers.get("Content-Type", "application/octet-stream")
     return message.get_content_type(), message.get_param("charset")
 
 
-def blocked(body, config):
+def blocked(body: bytes, config: Mapping[str, Any]) -> bool:
     text = body[:262144].decode("utf-8", errors="replace")
     return any(re.search(p, text, re.I) for p in (*BLOCKERS, *config["blocked_patterns"]))
 
@@ -130,15 +134,17 @@ def blocked(body, config):
 class Budget:
     """Frozen request/time budget shared by every real external request of one attempt."""
 
-    def __init__(self, config, used, deadline):
-        self.config = config
-        self.used = used
-        self.started = time.monotonic()
-        self.deadline = datetime.fromisoformat(deadline) if isinstance(deadline, str) else deadline
-        self.cancelled = False
-        self.parent_pid = os.getppid()
+    def __init__(
+        self, config: Mapping[str, Any], used: int, deadline: str | datetime | None
+    ) -> None:
+        self.config: Mapping[str, Any] = config
+        self.used: int = used
+        self.started: float = time.monotonic()
+        self.deadline: datetime | None = datetime.fromisoformat(deadline) if isinstance(deadline, str) else deadline
+        self.cancelled: bool = False
+        self.parent_pid: int = os.getppid()
 
-    def active(self):
+    def active(self) -> None:
         if os.getppid() != self.parent_pid:
             raise WlhError("interrupted")
         if self.cancelled:
@@ -148,7 +154,7 @@ class Budget:
         if self.deadline is not None and datetime.now(timezone.utc) > self.deadline:
             raise WlhError("deadline_exceeded")
 
-    def request(self):
+    def request(self) -> None:
         self.active()
         if self.used >= self.config["budget"]["requests"]:
             raise WlhError("request_budget_exceeded")
@@ -158,10 +164,16 @@ class Budget:
 class Recorder:
     """Short fenced transactions for Acquisition state; failure never claims an archive."""
 
-    def __init__(self, run_id, epoch, source_id):
+    def __init__(self, run_id: str, epoch: int, source_id: str) -> None:
+        self.run_id: str
+        self.epoch: int
+        self.source_id: str
         self.run_id, self.epoch, self.source_id = run_id, epoch, source_id
 
-    def start(self, key, kind, role, method, url, meta, parent=None, relation=None):
+    def start(
+        self, key: str, kind: str, role: str, method: str, url: str, meta: Mapping[str, Any],
+        parent: str | None = None, relation: str | None = None,
+    ) -> str:
         identity = uid()
         with connect() as c:
             source, run = locked_run(c, self.run_id)
@@ -194,8 +206,8 @@ class Recorder:
             )
         return identity
 
-    def finish(self, identity, state, **values):
-        fields = {
+    def finish(self, identity: str, state: str, **values: Any) -> dict[str, Any]:
+        fields: dict[str, Any] = {
             "http_status": values.get("status"),
             "outcome": values.get("outcome"),
             "error": values.get("error"),
@@ -210,7 +222,7 @@ class Recorder:
         with connect() as c:
             source, run = locked_run(c, self.run_id)
             fenced(source, run, self.epoch)
-            row = c.execute(
+            row: dict[str, Any] | None = c.execute(
                 """UPDATE wlh.acquisition SET state=%s,acquired_at=clock_timestamp(),
                 http_status=%s,outcome=%s,error=%s,actual_url=%s,mime_type=%s,charset=%s,
                 representation=%s,byte_size=%s,body_hash=%s,archive_ref=%s
@@ -223,16 +235,19 @@ class Recorder:
 
 
 class Transport:
-    def __init__(self, config, budget, recorder):
+    def __init__(self, config: Mapping[str, Any], budget: Budget, recorder: Recorder) -> None:
+        self.config: Mapping[str, Any]
+        self.budget: Budget
+        self.recorder: Recorder
         self.config, self.budget, self.recorder = config, budget, recorder
-        self.robots = Robots(config)
-        self.session = None
-        self.slots = asyncio.Semaphore(config["concurrency"])
-        self.pace = asyncio.Lock()
-        self.last = 0.0
-        self.objects = Objects()
+        self.robots: Robots = Robots(config)
+        self.session: aiohttp.ClientSession | None = None
+        self.slots: asyncio.Semaphore = asyncio.Semaphore(config["concurrency"])
+        self.pace: asyncio.Lock = asyncio.Lock()
+        self.last: float = 0.0
+        self.objects: Objects = Objects()
 
-    async def start(self):
+    async def start(self) -> None:
         if self.session is None:
             for env_file in (Path.cwd() / ".env", Path(__file__).resolve().parents[3] / ".env"):
                 if env_file.is_file():
@@ -241,7 +256,7 @@ class Transport:
                         if line and not line.startswith("#") and "=" in line:
                             k, _, v = line.partition("=")
                             os.environ.setdefault(k.strip(), v.strip().strip("\"'"))
-            ssl_ctx = (
+            ssl_ctx: ssl.SSLContext = (
                 ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
                 if os.environ.get("SSL_CERT_FILE")
                 else ssl.create_default_context()
@@ -260,18 +275,18 @@ class Transport:
                 auto_decompress=True,
             )
 
-    async def close(self):
+    async def close(self) -> None:
         if self.session is not None:
             await self.session.close()
 
-    async def paced(self):
+    async def paced(self) -> None:
         async with self.pace:
             wait = self.last + self.config["delay"] - time.monotonic()
             if wait > 0:
                 await asyncio.sleep(wait)
-            self.last = time.monotonic()
+            self.last: float = time.monotonic()
 
-    async def fetch_policy(self, url):
+    async def fetch_policy(self, url: str) -> tuple[int, bytes]:
         key = request_key({"url": url, "role": "policy"})
         acquisition = await self.exchange(url, "GET", None, key, "policy", {}, None, None)
         location = acquisition.get("location")
@@ -295,7 +310,11 @@ class Transport:
             raise WlhError("robots_unavailable")
         return acquisition["http_status"], self.objects.get(acquisition["archive_ref"])
 
-    async def exchange(self, url, method, form, key, role, meta, parent, relation, *, headers=None):
+    async def exchange(
+        self, url: str, method: str, form: Mapping[str, Any] | bytes | None,
+        key: str, role: str, meta: Mapping[str, Any], parent: str | None, relation: str | None,
+        *, headers: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
         """Exactly one real HTTP request and one Acquisition fact."""
         if self.session is None:
             raise WlhError("transport_not_started")
@@ -344,10 +363,10 @@ class Transport:
                 identity, "failed", outcome="network_failed", error="network_failed"
             )
         mime_type, charset = media(headers)
-        outcome = (
+        outcome: str = (
             "ok" if 200 <= status < 300 else "redirect" if status in REDIRECTS else "http_error"
         )
-        row = self.recorder.finish(
+        row: dict[str, Any] = self.recorder.finish(
             identity,
             "archived",
             status=status,
@@ -365,7 +384,7 @@ class Transport:
         row["headers"] = list(headers.items())
         return row
 
-    async def acquire(self, request):
+    async def acquire(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """Redirect hops and bounded retries are separate facts linked to their parent."""
         await self.start()
         url = guard(self.config, request["url"])
@@ -378,6 +397,7 @@ class Transport:
         meta = {"role": request.get("role", "page")}
         if form:
             meta.update(form_digest=digest(form), form_fields=sorted(form))
+        row = {}  # Validated retries >= 0; the first exchange replaces this.
         parent, relation = None, None
         for attempt in range(self.config["fetch"]["retries"] + 1):
             current, hop_method, hop_form = url, method, form
@@ -403,7 +423,7 @@ class Transport:
                     hop_method, hop_form = "GET", None
             else:
                 row = dict(row, outcome="blocked", error="redirect_limit_exceeded")
-            retry = (row["state"] == "failed" and row["error"] == "network_failed") or (
+            retry: bool = (row["state"] == "failed" and row["error"] == "network_failed") or (
                 row["state"] == "archived" and int(row["http_status"] or 0) >= 500
             )
             if not retry or attempt == self.config["fetch"]["retries"]:
@@ -413,5 +433,5 @@ class Transport:
         return row
 
 
-def host_of(url):
+def host_of(url: str) -> str | None:
     return urlsplit(url).hostname

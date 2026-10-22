@@ -1,6 +1,10 @@
 """Public English row contract; datetime values serialize as ISO-8601."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from datetime import date, datetime
+from typing import Any
 
 COLUMNS = (
     "source_id",
@@ -31,7 +35,7 @@ COLUMNS = (
 )
 
 
-def project_canonical(row):
+def project_canonical(row: Mapping[str, Any]) -> dict[str, Any]:
     return {
         key: value.isoformat() if isinstance(value, (date, datetime)) else value
         for key in COLUMNS

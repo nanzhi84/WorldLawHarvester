@@ -1,5 +1,8 @@
 """The single adapter boundary: legal metadata and one or more deliverable units."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,11 +25,11 @@ class RawUnitSource(BaseModel):
     volume_order: int | None = Field(default=None, gt=0)
     markdown: str
     input: int = Field(ge=0)
-    original: dict | None = None
-    quality: dict = Field(default_factory=dict)
-    extraction: dict = Field(default_factory=dict)
+    original: dict[str, Any] | None = None
+    quality: dict[str, Any] = Field(default_factory=dict)
+    extraction: dict[str, Any] = Field(default_factory=dict)
     parsers: list[str] = Field(default_factory=list)
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RawRecord(BaseModel):
@@ -44,14 +47,15 @@ class RawRecord(BaseModel):
     source_name: str | None = None
     detail_url: str | None = None
     units: list[RawUnitSource] = Field(min_length=1)
-    recheck_locator: dict = Field(default_factory=dict)
-    inputs: list[dict] = Field(min_length=1)
+    recheck_locator: dict[str, Any] = Field(default_factory=dict)
+    inputs: list[dict[str, Any]] = Field(min_length=1)
     parsers: list[str] = Field(default_factory=list)
-    extensions: dict = Field(default_factory=dict)
+    extensions: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
-    def from_candidate(cls, value):
+    def from_candidate(cls, value: Mapping[str, Any]) -> RawRecord:
         meta = value["metadata"]
+        dates = value.get("dates", {})
         return cls(
             namespace=value["namespace"],
             external_key=value["external_key"],
@@ -60,7 +64,7 @@ class RawRecord(BaseModel):
             **{
                 key: meta.get(key) for key in ("document_number", "issuer", "status", "source_name")
             },
-            **value.get("dates", {}),
+            **dates,
             detail_url=value.get("public_url"),
             recheck_locator=value.get("recheck_locator") or {},
             inputs=value["inputs"],
@@ -69,7 +73,7 @@ class RawRecord(BaseModel):
             extensions=value.get("extensions", {}),
         )
 
-    def candidate(self):
+    def candidate(self) -> dict[str, Any]:
         return {
             "namespace": self.namespace,
             "external_key": self.external_key,

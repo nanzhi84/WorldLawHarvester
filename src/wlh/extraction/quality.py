@@ -5,8 +5,12 @@ Refactored from docs/reference/production_document_parse.py. Vietnamese-specific
 ``vi`` profile so that Chinese or English sources are not misjudged.
 """
 
+from __future__ import annotations
+
 import json
 import re
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 
 QUALITY_CONTRACT = "wlh.quality.v1"
 LEGACY_GARBLED = set("§©®µ¶¸¹º»¼½¾¿")
@@ -20,9 +24,9 @@ WARNING_REASONS = {
 SIGNATURE_MARKERS = ("TM.", "T.M.", "KT.", "KÝ TÊN", "THỦ TƯỚNG", "BỘ TRƯỞNG", "CHỦ TỊCH")
 
 
-def json_value(value, fallback):
+def json_value(value: Any, fallback: Any) -> Any:
     if isinstance(value, list):
-        return value
+        return cast(list[Any], value)
     if isinstance(value, str):
         try:
             return json.loads(value)
@@ -31,8 +35,8 @@ def json_value(value, fallback):
     return fallback
 
 
-def block_text(block):
-    values = [
+def block_text(block: Mapping[str, Any]) -> str:
+    values: list[Any] = [
         block.get("text"),
         block.get("content"),
         block.get("table_body"),
@@ -41,21 +45,21 @@ def block_text(block):
     ]
     items = block.get("list_items")
     if isinstance(items, list):
-        values.extend(items)
+        values.extend(cast(list[Any], items))
     return " ".join(str(v) for v in values if v)
 
 
-def bbox_y0(block):
+def bbox_y0(block: Mapping[str, Any]) -> float:
     value = block.get("bbox") or [0, 0, 1, 1]
-    if isinstance(value, (list, tuple)) and len(value) >= 2:
+    if isinstance(value, (list, tuple)) and len(cast(Sequence[Any], value)) >= 2:
         try:
-            return float(value[1])
+            return float(cast(Sequence[Any], value)[1])
         except (TypeError, ValueError):
             return 0.0
     return 0.0
 
 
-def route(document_reasons, pages):
+def route(document_reasons: Sequence[str], pages: Sequence[Mapping[str, Any]]) -> str:
     hard = [p for p in pages if p["route"] == "vision_reparse"]
     warnings = [p for p in pages if p["route"] == "accept_with_warning"]
     return (
@@ -69,35 +73,43 @@ def route(document_reasons, pages):
     )
 
 
-def quality_check(analysis, result, profile="generic"):
+def quality_check(
+    analysis: Mapping[str, Any], result: Mapping[str, Any], profile: str = "generic"
+) -> dict[str, Any]:
     """Route only objectively suspicious pages; never certify legal correctness."""
     vietnamese = profile == "vi"
     blocks = json_value(result.get("page_parse_json"), [])
     markdown = result.get("whole_text_md") or ""
-    blocks = [b for b in blocks if isinstance(b, dict)] if isinstance(blocks, list) else []
+    blocks = (
+        [cast(dict[str, Any], b) for b in cast(list[Any], blocks) if isinstance(b, dict)]
+        if isinstance(blocks, list)
+        else []
+    )
     raw_indices = [b["page_idx"] for b in blocks if isinstance(b.get("page_idx"), int)]
     zero_based = bool(raw_indices) and min(raw_indices) == 0
-    by_page = {}
+    by_page: dict[int, list[dict[str, Any]]] = {}
     for block in blocks:
         value = block.get("page_idx")
         if isinstance(value, int):
             by_page.setdefault(value + 1 if zero_based else value, []).append(block)
     garbled = sum(char in LEGACY_GARBLED for char in markdown) if vietnamese else 0
     garbled_ratio = garbled / max(len(markdown), 1)
-    document_reasons = []
+    document_reasons: list[str] = []
     expected = len(analysis.get("pages", []))
     if raw_indices and expected and (min(raw_indices) not in {0, 1} or max(by_page) > expected):
         document_reasons.append("page_number_mapping_unreliable")
     if garbled >= 8 and garbled_ratio >= 0.002:
         document_reasons.append("legacy_vietnamese_font_encoding_suspect")
-    pages = []
+    pages: list[dict[str, Any]] = []
     for page in analysis.get("pages", []):
         number = page["page"]
         local = by_page.get(number, [])
-        text_blocks = [b for b in local if b.get("type") in {"text", "header", "list", "table"}]
+        text_blocks: list[dict[str, Any]] = [
+            b for b in local if b.get("type") in {"text", "header", "list", "table"}
+        ]
         local_text = "\n".join(block_text(b) for b in text_blocks)
         ocr_chars = len(local_text.strip())
-        reasons = []
+        reasons: list[str] = []
         ink = page.get("ink_ratio", 0)
         native = page.get("native_text_chars", 0)
         blank_candidate = ink < 0.012 and native < 20 and ocr_chars < 20
@@ -124,7 +136,9 @@ def quality_check(analysis, result, profile="generic"):
                 reasons.append("non_vietnamese_garbage")
             if sum(char in FOREIGN_DIACRITICS for char in local_text) >= 3:
                 reasons.append("foreign_diacritic_garbage")
-        tables = [b for b in local if str(b.get("type", "")).lower() == "table"]
+        tables: list[dict[str, Any]] = [
+            b for b in local if str(b.get("type", "")).lower() == "table"
+        ]
         if tables and sum(len(block_text(b).strip()) for b in tables) < 20:
             reasons.append("table_content_missing")
         if any(
@@ -172,9 +186,9 @@ def quality_check(analysis, result, profile="generic"):
     }
 
 
-def text_check(markdown, profile="generic"):
+def text_check(markdown: str, profile: str = "generic") -> dict[str, Any]:
     """Document-level checks for direct text extraction (HTML, TXT, Office)."""
-    reasons = []
+    reasons: list[str] = []
     replacements = markdown.count("\ufffd")
     if replacements >= 3:
         reasons.append("replacement_character")

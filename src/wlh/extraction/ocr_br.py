@@ -1,5 +1,7 @@
 """Bounded br-ocr-v1 service protocol; failures are safe to fall back from."""
 
+from __future__ import annotations
+
 import base64
 import json
 import os
@@ -7,13 +9,18 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, cast
 
 from wlh.core import WlhError
 
 
-def br_request(url, payload=None, timeout: float = 60):
+def br_request(
+    url: str, payload: Mapping[str, Any] | None = None, timeout: float = 60
+) -> dict[str, Any]:
     data = None if payload is None else json.dumps(payload).encode()
-    request = urllib.request.Request(
+    request: urllib.request.Request = urllib.request.Request(
         url,
         data=data,
         method="POST" if payload is not None else "GET",
@@ -27,7 +34,7 @@ def br_request(url, payload=None, timeout: float = 60):
     if len(body) > 64 * 1024 * 1024:
         raise WlhError("pdf_output_too_large")
     try:
-        value = json.loads(body)
+        value: dict[str, Any] | list[Any] | str | int | float | None = json.loads(body)
     except ValueError:
         raise WlhError("br_ocr_invalid_response") from None
     if (
@@ -36,20 +43,24 @@ def br_request(url, payload=None, timeout: float = 60):
         or not isinstance(value.get("data"), dict)
     ):
         raise WlhError("br_ocr_failed")
-    return value["data"]
+    return cast(dict[str, Any], value["data"])
 
 
-def br_ocr(path, cfg, deadline, page_count=0):
+def br_ocr(
+    path: str | Path, cfg: Mapping[str, Any], deadline: float, page_count: int = 0
+) -> dict[str, Any]:
     """br-ocr-v1: /file_parse submit, /status/{uuid} poll, /result/{uuid} fetch."""
     if page_count > cfg["max_pages"]:
         raise WlhError("pdf_ocr_page_limit_exceeded")
-    base = (os.environ.get("WLH_BR_OCR_URL") or "http://192.168.160.67:7555/api/v1").rstrip("/")
+    base: str = (os.environ.get("WLH_BR_OCR_URL") or "http://192.168.160.67:7555/api/v1").rstrip(
+        "/"
+    )
     if not base.startswith(("http://", "https://")):
         raise WlhError("br_ocr_url_required")
     with open(path, "rb") as stream:
         content = base64.b64encode(stream.read()).decode("ascii")
     task = str(uuid.uuid4())
-    submitted = br_request(
+    submitted: dict[str, Any] = br_request(
         base + "/file_parse",
         {
             "task_id": task,
@@ -72,13 +83,13 @@ def br_ocr(path, cfg, deadline, page_count=0):
         raise WlhError("br_ocr_invalid_response")
     while time.monotonic() < deadline:
         time.sleep(cfg["poll_seconds"])
-        status = br_request(
+        status: dict[str, Any] = br_request(
             base + "/status/" + task_uuid,
             timeout=max(0.1, min(3.0, deadline - time.monotonic())),
         )
         state = status.get("task_status")
         if state == "SUCCESS":
-            result = br_request(
+            result: dict[str, Any] = br_request(
                 base + "/result/" + task_uuid,
                 timeout=max(0.1, min(3.0, deadline - time.monotonic())),
             )
