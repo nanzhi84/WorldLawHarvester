@@ -4,9 +4,13 @@ Async engine code uses acquire. Synchronous upstream plugins may use get/post fr
 an executor thread with the owning event loop supplied. No global monkeypatching.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from wlh.core import WlhError
 from wlh.db import connect
@@ -16,41 +20,48 @@ from wlh.engine.transport import request_key
 
 @dataclass(frozen=True)
 class ArchivedResponse:
-    acquisition: dict
+    acquisition: Mapping[str, Any]
     content: bytes
 
     @property
-    def status_code(self):
+    def status_code(self) -> int:
         return self.acquisition["http_status"]
 
     @property
-    def url(self):
+    def url(self) -> str:
         return self.acquisition["actual_url"] or self.acquisition["request_url"]
 
     @property
-    def text(self):
+    def text(self) -> str:
         return self.content.decode(self.acquisition.get("charset") or "utf-8")
 
-    def json(self):
+    def json(self) -> Any:
         return json.loads(self.content)
 
-    def raise_for_status(self):
+    def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise WlhError("upstream_http_error")
 
 
 class CasSessionProxy:
-    def __init__(self, transport, mode="collect", *, loop=None, archived=None):
+    def __init__(
+        self,
+        transport: Any,
+        mode: str = "collect",
+        *,
+        loop: asyncio.AbstractEventLoop | None = None,
+        archived: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> None:
         self.transport, self.mode, self.loop = transport, mode, loop
-        self.archived = archived or {}
-        self.objects = Objects()
+        self.archived: Mapping[str, Mapping[str, Any]] = archived or {}
+        self.objects: Any = Objects()
 
-    def read(self, acquisition):
+    def read(self, acquisition: Mapping[str, Any]) -> ArchivedResponse:
         if acquisition.get("state") != "archived":
             raise WlhError("input_not_archived")
         return ArchivedResponse(acquisition, self.objects.get(acquisition["archive_ref"]))
 
-    async def acquire(self, request):
+    async def acquire(self, request: Any) -> Mapping[str, Any]:
         if hasattr(request, "model_dump"):
             request = request.model_dump(exclude_none=True)
         key = request_key(request)
@@ -72,8 +83,11 @@ class CasSessionProxy:
             return previous
         return await self.transport.acquire(request)
 
-    def request(self, method, url, *, data=None, idempotent=False):
-        request = {
+    def request(
+        self, method: str, url: str, *, data: Mapping[str, Any] | None = None,
+        idempotent: bool = False,
+    ) -> ArchivedResponse:
+        request: dict[str, Any] = {
             "method": method.upper(),
             "url": url,
             "form": data,
@@ -100,8 +114,10 @@ class CasSessionProxy:
             future.cancel()
             raise WlhError("bridge_request_timeout") from None
 
-    def get(self, url):
+    def get(self, url: str) -> ArchivedResponse:
         return self.request("GET", url)
 
-    def post(self, url, data=None, *, idempotent=False):
+    def post(
+        self, url: str, data: Mapping[str, Any] | None = None, *, idempotent: bool = False,
+    ) -> ArchivedResponse:
         return self.request("POST", url, data=data, idempotent=idempotent)

@@ -1,11 +1,15 @@
 """Frozen parser semantics and deterministic identities, independent of persistence."""
 
+from __future__ import annotations
+
 import os
 import re
 import shutil
 import subprocess
+from collections.abc import Iterable, Mapping
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import Any
 
 from wlh.core import WlhError, digest
 from wlh.extraction.markdown import MARKDOWN_CONTRACT
@@ -20,21 +24,21 @@ ZIP_CONTRACT = "wlh.zip.v2"
 ALWAYS = ("algorithm", "adapter", "fetch", "markdown")
 
 
-def package(name):
+def package(name: str) -> str:
     try:
         return version(name)
     except PackageNotFoundError:
         return "unavailable"
 
 
-def ocr_runtime(languages):
+def ocr_runtime(languages: str) -> dict[str, Any]:
     executable = shutil.which(os.environ.get("WLH_TESSERACT", "tesseract"))
     if not executable:
         return {"status": "unavailable"}
     try:
 
-        def probe(option):
-            result = subprocess.run(
+        def probe(option: str) -> str:
+            result: subprocess.CompletedProcess[bytes] = subprocess.run(
                 [executable, option], capture_output=True, timeout=5, check=True
             )
             if len(result.stdout) > 65536:
@@ -43,7 +47,9 @@ def ocr_runtime(languages):
 
         engine = probe("--version").splitlines()[0]
         listing = probe("--list-langs")
-        match = re.search(r'List of available languages in "([^"]+)"', listing)
+        match: re.Match[str] | None = re.search(
+            r'List of available languages in "([^"]+)"', listing
+        )
         root = Path(os.environ.get("TESSDATA_PREFIX") or (match[1] if match else ""))
         models = {}
         for language in languages.split("+"):
@@ -59,7 +65,7 @@ def ocr_runtime(languages):
         return {"status": "unavailable"}
 
 
-def manifest(config):
+def manifest(config: Mapping[str, Any]) -> dict[str, Any]:
     from wlh.adapters import contract, semantic_options
 
     fetch = {"mode": config["fetch"]["mode"]}
@@ -132,7 +138,7 @@ def manifest(config):
     }
 
 
-def require_runtime(config, frozen):
+def require_runtime(config: Mapping[str, Any], frozen: Mapping[str, Any] | None) -> None:
     current = manifest(config)
     if frozen is None or frozen != current:
         raise WlhError("parser_runtime_changed_requires_new_run")
@@ -142,12 +148,12 @@ def require_runtime(config, frozen):
         raise WlhError("browser_runtime_unavailable")
 
 
-def effective(frozen, used):
+def effective(frozen: Mapping[str, Any] | None, used: Iterable[str]) -> dict[str, Any]:
     """The frozen manifest subset that actually produced this document."""
     if frozen is None:
         raise WlhError("parser_manifest_required")
     return {k: frozen[k] for k in frozen if k in ALWAYS or k in set(used)}
 
 
-def fingerprint(kind, value):
+def fingerprint(kind: str, value: Any) -> str:
     return digest({"algorithm": FINGERPRINT_ALGORITHM, "kind": kind, "value": value})

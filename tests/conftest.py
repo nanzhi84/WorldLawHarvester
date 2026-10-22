@@ -60,13 +60,16 @@ def initialized_db(wlh_env: dict[str, str]) -> dict[str, str]:
 
 def make_native_pdf(path: Path, pages_text: list[str]) -> Path:
     """Create a real multi-page PDF with native text layer using PyMuPDF (fitz)."""
-    import fitz
+    from typing import Any
 
-    doc = fitz.open()
+    import fitz  # type: ignore[import-untyped]
+
+    fitz_mod: Any = fitz
+    doc = fitz_mod.open()
     for text in pages_text:
         page = doc.new_page(width=595, height=842)
         page.insert_textbox(
-            fitz.Rect(50, 50, 545, 792),
+            fitz_mod.Rect(50, 50, 545, 792),
             text,
             fontsize=12,
             fontname="helv",
@@ -78,24 +81,27 @@ def make_native_pdf(path: Path, pages_text: list[str]) -> Path:
 
 def make_scanned_pdf(path: Path, pages_text: list[str]) -> Path:
     """Create a real image-only scanned PDF (0 native chars, ink_ratio > 0.003)."""
-    import fitz
+    from typing import Any
 
+    import fitz  # type: ignore[import-untyped]
+
+    fitz_mod: Any = fitz
     # First render text onto a temporary PDF, rasterize to pixmap, and insert as image
-    temp_doc = fitz.open()
+    temp_doc = fitz_mod.open()
     for text in pages_text:
         p = temp_doc.new_page(width=595, height=842)
         p.insert_textbox(
-            fitz.Rect(50, 80, 545, 760),
+            fitz_mod.Rect(50, 80, 545, 760),
             text,
             fontsize=18,
             fontname="helv",
         )
-    scan_doc = fitz.open()
+    scan_doc = fitz_mod.open()
     for page in temp_doc:
         pix = page.get_pixmap(dpi=150)
         img_bytes = pix.tobytes("png")
         scan_page = scan_doc.new_page(width=595, height=842)
-        scan_page.insert_image(fitz.Rect(0, 0, 595, 842), stream=img_bytes)
+        scan_page.insert_image(fitz_mod.Rect(0, 0, 595, 842), stream=img_bytes)
     temp_doc.close()
     scan_doc.save(str(path))
     scan_doc.close()

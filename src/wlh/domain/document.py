@@ -4,9 +4,13 @@ Adapters return plain candidates; only this boundary turns them into immutable C
 objects (Markdown bytes, input manifest, unified document) and delivery rows.
 """
 
+from __future__ import annotations
+
 import re
 import unicodedata
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timezone
+from typing import Any, cast
 
 from wlh.config import DOCUMENT_TYPES
 from wlh.core import WlhError, canonical, digest
@@ -53,7 +57,7 @@ DATE_FIELDS = ("published_at", "effective_at", "expired_at")
 MAX_TEXT = 4000
 
 
-def source_record_hash(source_id, namespace, external_key):
+def source_record_hash(source_id: str, namespace: str, external_key: str) -> str:
     return digest(
         {
             "algorithm": SOURCE_RECORD_ALGORITHM,
@@ -64,7 +68,7 @@ def source_record_hash(source_id, namespace, external_key):
     )
 
 
-def safe_name(title):
+def safe_name(title: str) -> str:
     value = unicodedata.normalize("NFC", title)
     value = re.sub(r'[\x00-\x1f\x7f/\\:*?"<>|]+', "_", value)
     value = re.sub(r"\s+", " ", value).strip(" ._")
@@ -73,17 +77,20 @@ def safe_name(title):
     return value.rstrip(" ._") or "document"
 
 
-def file_names(title, markdown_hash, original_hash, extension, volume_order):
+def file_names(
+    title: str, markdown_hash: str, original_hash: str | None,
+    extension: str | None, volume_order: int | None,
+) -> tuple[str, str | None]:
     suffix = "_%02d" % volume_order if volume_order else ""
     base = safe_name(title)
     markdown_file = f"{base}_{markdown_hash[:8]}{suffix}.md"
-    original_file = (
+    original_file: str | None = (
         f"{base}_{original_hash[:8]}{suffix}.{extension}" if original_hash and extension else None
     )
     return markdown_file, original_file
 
 
-def text(value, field):
+def text(value: Any, field: str) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str):
@@ -95,7 +102,7 @@ def text(value, field):
     return value or None
 
 
-def iso_date(value, field):
+def iso_date(value: Any, field: str) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
@@ -107,21 +114,21 @@ def iso_date(value, field):
     return value
 
 
-def timestamp(value):
+def timestamp(value: str | datetime) -> str:
     """采集时间: UTC, YYYY-MM-DD HH:MM:SS."""
     if isinstance(value, str):
         value = datetime.fromisoformat(value)
     return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def sha(value, code):
+def sha(value: Any, code: str) -> str:
     if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
         raise WlhError(code)
     return value
 
 
-def normalize_metadata(candidate):
-    meta = candidate.get("metadata") or {}
+def normalize_metadata(candidate: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str | None]]:
+    meta: Mapping[str, Any] = candidate.get("metadata") or {}
     if set(meta) - set(METADATA_FIELDS):
         raise WlhError("invalid_document_metadata")
     metadata = {k: text(meta.get(k), k) for k in METADATA_FIELDS}
@@ -129,18 +136,20 @@ def normalize_metadata(candidate):
         raise WlhError("document_title_missing")
     if metadata["document_type"] not in DOCUMENT_TYPES:
         raise WlhError("invalid_document_type")
-    dates = candidate.get("dates") or {}
+    dates: Mapping[str, Any] = candidate.get("dates") or {}
     if set(dates) - set(DATE_FIELDS):
         raise WlhError("invalid_document_dates")
     return metadata, {k: iso_date(dates.get(k), k) for k in DATE_FIELDS}
 
 
-def normalize_inputs(candidate, acquisitions):
-    inputs = []
-    for item in candidate.get("inputs") or []:
+def normalize_inputs(
+    candidate: Mapping[str, Any], acquisitions: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    inputs: list[dict[str, Any]] = []
+    for item in cast(list[dict[str, Any]], candidate.get("inputs") or []):
         if item.get("role") not in INPUT_ROLES:
             raise WlhError("invalid_input_role")
-        acquisition = acquisitions.get(item.get("acquisition_id"))
+        acquisition = acquisitions.get(cast(Any, item.get("acquisition_id")))
         if acquisition is None or acquisition["state"] != "archived":
             raise WlhError("input_acquisition_not_archived")
         if item.get("archive_ref") != acquisition["archive_ref"] and item.get("role") != "derived":
@@ -168,7 +177,7 @@ def normalize_inputs(candidate, acquisitions):
     return inputs
 
 
-def check_volumes(deliverables):
+def check_volumes(deliverables: Sequence[Mapping[str, Any]]) -> None:
     volumes = [d for d in deliverables if d["role"] == "volume"]
     if any(type(d.get("volume_order")) is not int for d in volumes):
         raise WlhError("volume_order_ambiguous")
@@ -181,7 +190,10 @@ def check_volumes(deliverables):
         raise WlhError("multiple_primary_deliverables")
 
 
-def build(objects, *, source_id, run_id, manifest, candidate, acquisitions):
+def build(
+    objects: Any, *, source_id: str, run_id: str, manifest: Mapping[str, Any] | None,
+    candidate: Mapping[str, Any], acquisitions: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
     """Validate a candidate, write Markdown/manifest/document to CAS, return rows."""
     namespace = text(candidate.get("namespace"), "namespace")
     external_key = candidate.get("external_key")
@@ -190,7 +202,7 @@ def build(objects, *, source_id, run_id, manifest, candidate, acquisitions):
     metadata, dates = normalize_metadata(candidate)
     inputs = normalize_inputs(candidate, acquisitions)
     record = source_record_hash(source_id, namespace, external_key)
-    raw = candidate.get("deliverables") or []
+    raw: list[dict[str, Any]] = candidate.get("deliverables") or []
     if not raw:
         raise WlhError("document_deliverables_required")
     for item in raw:
@@ -199,17 +211,20 @@ def build(objects, *, source_id, run_id, manifest, candidate, acquisitions):
         if item["role"] != "volume" and item.get("volume_order") is not None:
             raise WlhError("volume_order_without_volume")
     check_volumes(raw)
-    ordered = sorted(
+    ordered: list[dict[str, Any]] = sorted(
         raw,
         key=lambda d: (
             DELIVERABLE_ROLES.index(d["role"]),
             d.get("volume_order") or 0,
             text(d.get("title"), "title") or "",
-            (d.get("original") or {}).get("ref") or "",
+            cast(dict[str, Any], d.get("original") or {}).get("ref") or "",
             normalized(d.get("markdown") or ""),
         ),
     )
-    deliverables, rows, files, names = [], [], [], set()
+    deliverables: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    files: list[dict[str, Any]] = []
+    names: set[str] = set()
     for index, item in enumerate(ordered, 1):
         body = normalized(item.get("markdown") or "")
         if not body.strip():
@@ -240,16 +255,16 @@ def build(objects, *, source_id, run_id, manifest, candidate, acquisitions):
             raise WlhError("duplicate_deliverable_file")
         names.add(markdown_file)
         shared = item["role"] != "independent_attachment"
-        overrides = item.get("metadata") or {}
-        row_meta = {
+        overrides: Mapping[str, Any] = item.get("metadata") or {}
+        row_meta: dict[str, str | None] = {
             k: text(overrides.get(k), k) if k in overrides else (metadata[k] if shared else None)
             for k in ("document_number", "issuer", "status")
         }
-        row_dates = {
+        row_dates: dict[str, str | None] = {
             k: iso_date(overrides.get(k), k) if k in overrides else (dates[k] if shared else None)
             for k in DATE_FIELDS
         }
-        deliverable = {
+        deliverable: dict[str, Any] = {
             "index": index,
             "role": item["role"],
             "title": title,
@@ -313,15 +328,15 @@ def build(objects, *, source_id, run_id, manifest, candidate, acquisitions):
         used.update(item.get("parsers") or [])
     parser_config = effective(manifest, used)
     if "ocr" in parser_config:
-        engines = sorted(
+        engines: list[str] = sorted(
             {
-                (d.get("extraction", {}).get("ocr") or {}).get("engine", "unknown")
+                cast(dict[str, Any], d.get("extraction", {}).get("ocr") or {}).get("engine", "unknown")
                 for d in deliverables
                 if (d.get("extraction", {}).get("ocr"))
             }
         )
         parser_config["ocr"] = {**parser_config["ocr"], "effective_engines": engines}
-    semantic_inputs = sorted(
+    semantic_inputs: list[dict[str, Any]] = sorted(
         (
             {
                 k: item[k]
@@ -339,13 +354,13 @@ def build(objects, *, source_id, run_id, manifest, candidate, acquisitions):
         ),
         key=canonical,
     )
-    input_fp = fingerprint(
+    input_fp: str = fingerprint(
         "input",
         {"namespace": namespace, "external_key": external_key, "inputs": semantic_inputs},
     )
     parser_fp = fingerprint("parser", parser_config)
     version_fp = fingerprint("version", {"input": input_fp, "parser": parser_fp})
-    business = {
+    business: dict[str, Any] = {
         "metadata": metadata,
         "dates": dates,
         "deliverables": [
@@ -365,7 +380,7 @@ def build(objects, *, source_id, run_id, manifest, candidate, acquisitions):
         "extensions": candidate.get("extensions") or {},
     }
     content_hash = fingerprint("content", business)
-    manifest_doc = {
+    manifest_doc: dict[str, Any] = {
         "schema": INPUTS_SCHEMA,
         "source_id": source_id,
         "run_id": run_id,
@@ -376,7 +391,7 @@ def build(objects, *, source_id, run_id, manifest, candidate, acquisitions):
     }
     inputs_ref = objects.put_json(manifest_doc)
     acquired = max(item["acquired_at"] for item in inputs)
-    document = {
+    document: dict[str, Any] = {
         "schema": DOCUMENT_SCHEMA,
         "identity": {
             "source_id": source_id,
@@ -425,45 +440,48 @@ def build(objects, *, source_id, run_id, manifest, candidate, acquisitions):
     }
 
 
-def verify_document(objects, result_ref, *, max_bytes=None, deadline=None, sizes=None):
+def verify_document(
+    objects: Any, result_ref: str, *, max_bytes: int | None = None,
+    deadline: float | None = None, sizes: dict[str, int] | None = None,
+) -> dict[str, Any]:
     """Read-side validator: unified document plus its complete object closure."""
     try:
         import json
 
         value = json.loads(objects.get(result_ref, max_bytes=max_bytes, deadline=deadline))
-        if not isinstance(value, dict) or value.get("schema") != DOCUMENT_SCHEMA:
+        if not isinstance(value, dict) or cast(dict[str, Any], value).get("schema") != DOCUMENT_SCHEMA:
             raise ValueError
-        deliverables = value.get("deliverables")
+        deliverables = cast(dict[str, Any], value).get("deliverables")
         if not isinstance(deliverables, list) or not deliverables:
             raise ValueError
-        for item in deliverables:
+        for item in cast(list[Any], deliverables):
             if not isinstance(item, dict):
                 raise ValueError
-            md_sha = sha(item.get("markdown_ref"), "document_invalid")
+            md_sha = sha(cast(dict[str, Any], item).get("markdown_ref"), "document_invalid")
             md_bytes = objects.get(md_sha, deadline=deadline)
             if sizes is not None:
                 sizes[md_sha] = len(md_bytes)
-            if item.get("original_file_ref"):
+            if cast(dict[str, Any], item).get("original_file_ref"):
                 orig_sha = sha(item["original_file_ref"], "document_invalid")
                 orig_bytes = objects.get(orig_sha, deadline=deadline)
                 if sizes is not None:
                     sizes[orig_sha] = len(orig_bytes)
-        lineage = value.get("lineage") or {}
+        lineage: Any = cast(dict[str, Any], value).get("lineage") or {}
         if not isinstance(lineage, dict):
             raise ValueError
-        manifest_raw = objects.get(
-            sha(lineage.get("inputs_ref"), "document_invalid"), deadline=deadline
+        manifest_raw: bytes = objects.get(
+            sha(cast(dict[str, Any], lineage).get("inputs_ref"), "document_invalid"), deadline=deadline
         )
         manifest = json.loads(manifest_raw)
-        if not isinstance(manifest, dict) or manifest.get("schema") != INPUTS_SCHEMA:
+        if not isinstance(manifest, dict) or cast(dict[str, Any], manifest).get("schema") != INPUTS_SCHEMA:
             raise ValueError
-        inputs = manifest["inputs"]
+        inputs = cast(dict[str, Any], manifest)["inputs"]
         if not isinstance(inputs, list) or not inputs:
             raise ValueError
-        for item in inputs:
+        for item in cast(list[Any], inputs):
             if not isinstance(item, dict):
                 raise ValueError
-            objects.get(sha(item.get("archive_ref"), "document_invalid"), deadline=deadline)
+            objects.get(sha(cast(dict[str, Any], item).get("archive_ref"), "document_invalid"), deadline=deadline)
     except (KeyError, TypeError, ValueError, AttributeError):
         raise WlhError("document_invalid") from None
-    return value
+    return cast(dict[str, Any], value)

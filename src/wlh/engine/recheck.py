@@ -1,8 +1,15 @@
 """Freeze due Resources (stable identity, display URL, recheck locator, current Version)."""
 
+from __future__ import annotations
 
-def plan_recheck(c, source, config):
-    rows = c.execute(
+from collections.abc import Mapping
+from typing import Any
+
+from wlh.db import DbConn
+
+
+def plan_recheck(c: DbConn, source: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = c.execute(
         """SELECT r.id,r.identity_namespace AS namespace,r.external_key,r.public_url,
         r.recheck_locator,r.current_version_id FROM wlh.resource r
         JOIN wlh.frontier f ON f.id=r.frontier_id

@@ -1,20 +1,26 @@
 """Render only scan pages and run a bounded local OCR process."""
 
+from __future__ import annotations
+
 import math
 import os
 import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
-import pymupdf as fitz
+import pymupdf as _fitz  # type: ignore[import-untyped]
 
 from wlh.core import WlhError
 
+fitz: Any = _fitz
 
-def command(args, limit, timeout):
-    process = subprocess.Popen(
+
+def command(args: Sequence[str], limit: int, timeout: float) -> str:
+    process: subprocess.Popen[bytes] = subprocess.Popen(
         args,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -33,7 +39,9 @@ def command(args, limit, timeout):
     return output.decode("utf-8", errors="strict")
 
 
-def tesseract_pages(path, numbers, cfg, deadline):
+def tesseract_pages(
+    path: str | Path, numbers: Sequence[int], cfg: Mapping[str, Any], deadline: float
+) -> tuple[dict[int, str], dict[str, Any]]:
     executable = shutil.which(os.environ.get("WLH_TESSERACT", "tesseract"))
     if not executable:
         raise WlhError("ocr_engine_unavailable")
@@ -42,7 +50,8 @@ def tesseract_pages(path, numbers, cfg, deadline):
         raise WlhError("ocr_language_unavailable")
     if len(numbers) > cfg["max_pages"]:
         raise WlhError("pdf_ocr_page_limit_exceeded")
-    result, size = {}, 0
+    result: dict[int, str] = {}
+    size = 0
     # Homebrew Leptonica rejects /tmp paths; keep rendered pages with the extraction input.
     with (
         fitz.open(path) as document,
@@ -60,7 +69,7 @@ def tesseract_pages(path, numbers, cfg, deadline):
             image = Path(folder) / f"page-{number}.png"
             page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csGRAY).save(image)
             try:
-                text = command(
+                text: str = command(
                     [
                         executable,
                         str(image),

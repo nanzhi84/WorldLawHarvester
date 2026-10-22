@@ -1121,11 +1121,12 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
 
         try:
             repo_root = Path(__file__).resolve().parents[1]
-            raw_cfg = yaml.safe_load(
+            raw_cfg: dict[str, Any] = yaml.safe_load(
                 (repo_root / "sources" / f"{source_id}.yaml").read_text(encoding="utf-8")
             )
-            rewritten_urls = []
-            for entry_url in raw_cfg["entry_urls"]:
+            rewritten_urls: list[str] = []
+            entry_urls: list[str] = raw_cfg["entry_urls"]
+            for entry_url in entry_urls:
                 parts = urlsplit(entry_url)
                 rewritten_urls.append(
                     urlunsplit(("http", f"127.0.0.1:{port}", parts.path, parts.query, ""))

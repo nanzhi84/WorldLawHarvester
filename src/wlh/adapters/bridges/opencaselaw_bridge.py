@@ -1,5 +1,9 @@
 """OpenCaseLaw Decision records and Swiss Bundesgericht HTML."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import urljoin
 
 from wlh.adapters.bridges.common import RecordAdapter, html_records, items, payload
@@ -9,26 +13,25 @@ class Adapter(RecordAdapter):
     CONTRACT = "wlh.adapter.opencaselaw.v1"
     NAMESPACE = "opencaselaw/decision"
 
-    def next_requests(self, data, acquisition):
+    def next_requests(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
         if not data.lstrip().startswith((b"{", b"[")):
             return []
         entries = items(payload(data), ("decisions", "results"))
-        limit = self.config["budget"]["documents"]
-        requests = []
+        limit: int = self.config["budget"]["documents"]
+        requests: list[dict[str, Any]] = []
         for r in entries[:limit]:
             if (
-                isinstance(r, dict)
-                and r.get("decision_id")
+                r.get("decision_id")
                 and not (r.get("full_text") or r.get("text") or r.get("pdf_url"))
             ):
                 target = urljoin(acquisition["actual_url"], f"/api/decisions/{r['decision_id']}")
                 requests.append({"url": target, "role": "page", "depth": 1})
         return requests
 
-    def records(self, data, acquisition):
+    def records(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
         if data.lstrip().startswith((b"{", b"[")):
             entries = items(payload(data), ("decisions", "results"))
-            limit = self.config["budget"]["documents"]
+            limit: int = self.config["budget"]["documents"]
             return [
                 {
                     "external_key": str(r.get("decision_id") or r.get("id") or r["docket_number"]),

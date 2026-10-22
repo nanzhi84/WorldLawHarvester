@@ -1,11 +1,15 @@
 """Private caller configuration and authenticated, opaque pagination cursors."""
 
+from __future__ import annotations
+
 import base64
 import binascii
 import hashlib
 import hmac
 import json
+from os import PathLike
 from pathlib import Path
+from typing import Self
 from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -15,7 +19,9 @@ from wlh.core import MAX_ORIGINAL_BYTES, WlhError, canonical
 
 
 class ApiError(Exception):
-    def __init__(self, status, code):
+    def __init__(self, status: int, code: str) -> None:
+        self.status: int
+        self.code: str
         self.status, self.code = status, code
         super().__init__(code)
 
@@ -31,14 +37,14 @@ class Caller(Strict):
 
     @field_validator("sources")
     @classmethod
-    def source_ids(cls, values):
+    def source_ids(cls, values: list[str]) -> list[str]:
         import re
 
         if any(not re.fullmatch(r"dd-[0-9]{3,}", value) for value in values):
             raise ValueError("invalid_source_id")
         return values
 
-    def authorize(self, source_id):
+    def authorize(self, source_id: str) -> None:
         if source_id not in self.sources:
             raise ApiError(403, "source_forbidden")
 
@@ -54,7 +60,7 @@ class Settings(Strict):
 
     @field_validator("public_base_url")
     @classmethod
-    def base_url(cls, value):
+    def base_url(cls, value: str) -> str:
         parts = urlsplit(value)
         if (
             parts.scheme not in {"http", "https"}
@@ -70,7 +76,7 @@ class Settings(Strict):
         return value.rstrip("/")
 
     @model_validator(mode="after")
-    def unique_callers(self):
+    def unique_callers(self) -> Self:
         if len({c.id for c in self.callers}) != len(self.callers) or len(
             {c.token_sha256 for c in self.callers}
         ) != len(self.callers):
@@ -78,7 +84,7 @@ class Settings(Strict):
         return self
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path: str | PathLike[str]) -> Self:
         try:
             import yaml
 
@@ -88,7 +94,7 @@ class Settings(Strict):
         except (OSError, ValueError, TypeError):
             raise WlhError("invalid_api_config") from None
 
-    def authenticate(self, authorization):
+    def authenticate(self, authorization: str | None) -> Caller:
         scheme, _, key = (authorization or "").partition(" ")
         if scheme.lower() != "bearer" or not key or len(key) > 4096 or key.isspace():
             raise ApiError(401, "unauthenticated")
@@ -113,17 +119,17 @@ class Cursor(Strict):
 
 
 class Tokens:
-    def __init__(self, settings):
-        self.cipher = Fernet(
+    def __init__(self, settings: Settings) -> None:
+        self.cipher: Fernet = Fernet(
             base64.urlsafe_b64encode(hashlib.sha256(settings.cursor_secret.encode()).digest())
         )
 
-    def encode(self, payload):
+    def encode(self, payload: Cursor) -> str:
         return self.cipher.encrypt_at_time(
             canonical(payload.model_dump()), payload.issued_at
         ).decode()
 
-    def decode(self, value, model=Cursor):
+    def decode(self, value: str, model: type[Cursor] = Cursor) -> Cursor:
         status, code = 400, "invalid_cursor"
         try:
             if not value or len(value) > 4096:

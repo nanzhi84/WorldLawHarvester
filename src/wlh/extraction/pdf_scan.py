@@ -4,9 +4,14 @@ Thresholds follow production_document_parse.py. Native pages remain authoritativ
 when a document also contains scans. Quality failures are never successful Versions.
 """
 
-import time
+from __future__ import annotations
 
-import pymupdf as fitz
+import time
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, cast
+
+import pymupdf as _fitz  # type: ignore[import-untyped]
 
 from wlh.core import WlhError
 from wlh.extraction.markdown import normalized, text_to_markdown
@@ -15,6 +20,8 @@ from wlh.extraction.ocr_tesseract import tesseract_pages
 from wlh.extraction.quality import block_text, json_value, quality_check
 from wlh.extraction.vi_tcvn3 import normalize_detected_tcvn3
 
+fitz: Any = _fitz
+
 PDF_CONTRACT = "wlh.pdf-scan.v1"
 SCAN_TEXT_CHARS = 30
 SCAN_INK_RATIO = 0.003
@@ -22,8 +29,9 @@ INK_THRESHOLD = 210
 ANALYSIS_SCALE = 0.5
 
 
-def analyze(path):
-    pages, texts = [], []
+def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
+    pages: list[dict[str, Any]] = []
+    texts: list[str] = []
     try:
         with fitz.open(path) as document:
             if document.needs_pass or not len(document):
@@ -57,7 +65,7 @@ def analyze(path):
     }, texts
 
 
-def page_blocks(texts):
+def page_blocks(texts: Mapping[int, str]) -> list[dict[str, Any]]:
     return [
         {"type": "text", "page_idx": n, "text": text}
         for n, text in sorted(texts.items())
@@ -65,31 +73,46 @@ def page_blocks(texts):
     ]
 
 
-def extract_pdf(path, ocr, profile, cached_result=None):
+def extract_pdf(
+    path: str | Path,
+    ocr: Mapping[str, Any],
+    profile: str,
+    cached_result: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any], dict[str, Any], list[str]]:
     analysis, native = analyze(path)
     scans = analysis["suspected_scan_pages"]
-    texts, recovered = {}, False
+    texts: dict[int, str] = {}
+    recovered = False
     for i, text in enumerate(native, 1):
         texts[i], changed = normalize_detected_tcvn3(text)
         recovered |= changed
-    info = {"kind": "pdf", "analysis": analysis, "method": "native", "ocr": None}
-    parsers, service_blocks = ["pdf", "quality"], []
+    info: dict[str, Any] = {"kind": "pdf", "analysis": analysis, "method": "native", "ocr": None}
+    parsers: list[str] = ["pdf", "quality"]
+    service_blocks: list[dict[str, Any]] = []
     if recovered:
         parsers.append("tcvn3")
     if scans:
         deadline = time.monotonic() + ocr["timeout_seconds"]
-        recognized = None
-        engine = {}
+        recognized: dict[int, str] | None = None
+        engine: dict[str, Any] = {}
         if ocr["engine"] == "br-ocr-v1":
             try:
-                result = cached_result or br_ocr(path, ocr, deadline, page_count=len(native))
+                result: dict[str, Any] = cached_result or br_ocr(
+                    path, ocr, deadline, page_count=len(native)
+                )
                 blocks = json_value(result.get("page_parse_json"), [])
-                indices = [b.get("page_idx") for b in blocks if isinstance(b, dict)]
+                indices: list[Any] = [
+                    cast(dict[str, Any], b).get("page_idx") for b in blocks if isinstance(b, dict)
+                ]
                 offset = 1 if 0 in indices else 0
                 service_blocks = [
-                    dict(b, page_idx=b["page_idx"] + offset)
+                    dict(
+                        cast(dict[str, Any], b),
+                        page_idx=cast(dict[str, Any], b)["page_idx"] + offset,
+                    )
                     for b in blocks
-                    if isinstance(b, dict) and isinstance(b.get("page_idx"), int)
+                    if isinstance(b, dict)
+                    and isinstance(cast(dict[str, Any], b).get("page_idx"), int)
                 ]
                 recognized = {
                     n: "\n".join(block_text(b) for b in service_blocks if b["page_idx"] == n)
@@ -110,7 +133,7 @@ def extract_pdf(path, ocr, profile, cached_result=None):
         texts.update(recognized)
         info.update(method="hybrid_ocr" if len(scans) < len(native) else "ocr", ocr=engine)
         parsers.append("ocr")
-    markdown = normalized(
+    markdown: str = normalized(
         "\n".join(text_to_markdown(texts[n]) for n in sorted(texts) if texts[n].strip())
     )
     if not markdown.strip():
@@ -120,7 +143,7 @@ def extract_pdf(path, ocr, profile, cached_result=None):
         if service_blocks
         else page_blocks(texts)
     )
-    report = quality_check(
+    report: dict[str, Any] = quality_check(
         analysis, {"page_parse_json": blocks, "whole_text_md": markdown}, profile
     )
     return markdown, info, report, parsers

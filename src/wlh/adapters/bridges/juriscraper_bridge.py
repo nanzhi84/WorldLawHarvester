@@ -1,5 +1,10 @@
 """Juriscraper opinion dictionaries and court HTML lists -> archived legal records."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any, cast
+
 from wlh.adapters.bridges.common import RecordAdapter, items, payload, scalar
 from wlh.adapters.web import parse_html
 from wlh.core import WlhError
@@ -9,22 +14,24 @@ class Adapter(RecordAdapter):
     CONTRACT = "wlh.adapter.juriscraper.v1"
     NAMESPACE = "juriscraper/opinion"
 
-    def records(self, data, acquisition):
+    def records(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
         if data.lstrip().startswith((b"{", b"[")):
-            value = payload(data)
-            court = value.get("court_name") if isinstance(value, dict) else None
+            value: Any = payload(data)
+            court: Any = cast(dict[str, Any], value).get("court_name") if isinstance(value, dict) else None
             entries = items(value, ("cases", "opinions", "results"))
-            if isinstance(value, dict) and isinstance(value.get("case_names"), list):
+            if isinstance(value, dict) and isinstance(cast(dict[str, Any], value).get("case_names"), list):
+                val_dict = cast(dict[str, Any], value)
+                case_names = cast(list[Any], val_dict["case_names"])
                 entries = [
                     {
-                        key: values[i]
-                        for key, values in value.items()
-                        if isinstance(values, list) and i < len(values)
+                        key: cast(list[Any], values)[i]
+                        for key, values in val_dict.items()
+                        if isinstance(values, list) and i < len(cast(list[Any], values))
                     }
-                    for i in range(len(value["case_names"]))
+                    for i in range(len(case_names))
                 ]
-            records = []
-            limit = self.config["budget"]["documents"]
+            records: list[dict[str, Any]] = []
+            limit: int = self.config["budget"]["documents"]
             for item in entries[:limit]:
                 name = (
                     item.get("case_name")
@@ -37,10 +44,15 @@ class Adapter(RecordAdapter):
                     or item.get("docket_numbers")
                     or item.get("docketNumber")
                 )
-                opinions = item.get("opinions") if isinstance(item.get("opinions"), list) else []
-                first_op = opinions[0] if opinions and isinstance(opinions[0], dict) else {}
+                raw_opinions = item.get("opinions")
+                opinions: list[Any] = cast(list[Any], raw_opinions) if isinstance(raw_opinions, list) else []
+                first_op: dict[str, Any] = (
+                    cast(dict[str, Any], opinions[0])
+                    if opinions and isinstance(opinions[0], dict)
+                    else {}
+                )
                 local_pdf = (
-                    "https://storage.courtlistener.com/" + first_op["local_path"].lstrip("/")
+                    "https://storage.courtlistener.com/" + str(first_op["local_path"]).lstrip("/")
                     if first_op.get("local_path")
                     else None
                 )

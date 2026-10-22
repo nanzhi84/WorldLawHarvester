@@ -1,5 +1,7 @@
 """Operator commands and a read-only result server."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -7,16 +9,17 @@ import signal
 import sys
 import threading
 from pathlib import Path
+from typing import Any, NoReturn
 
 from wlh.core import WlhError
 
 
 class Parser(argparse.ArgumentParser):
-    def error(self, message):
+    def error(self, message: str) -> NoReturn:
         raise WlhError("invalid_arguments")
 
 
-def parser():
+def parser() -> Parser:
     root = Parser(prog="wlh")
     commands = root.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="Explicitly initialize or upgrade storage")
@@ -56,7 +59,7 @@ def parser():
     return root
 
 
-def dispatch(args):
+def dispatch(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "serve":
         from wlh.api.server import serve
 
@@ -94,8 +97,12 @@ def dispatch(args):
         return receipt(run_id)
     cancelled = threading.Event()
     handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+
+    def _on_signal(_signum: int, _frame: Any) -> None:
+        cancelled.set()
+
     for sig in handlers:
-        signal.signal(sig, lambda *_: cancelled.set())
+        signal.signal(sig, _on_signal)
     with ProgressPanel(not args.no_progress) as panel:
         try:
             result = execute_run(run_id, progress=panel, cancel_event=cancelled)
@@ -108,7 +115,7 @@ def dispatch(args):
         return result
 
 
-def main():
+def main() -> int:
     try:
         args = parser().parse_args()
         result = dispatch(args)

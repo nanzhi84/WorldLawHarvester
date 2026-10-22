@@ -1,5 +1,7 @@
 """Private S3 CAS; relational references commit only after verified object reads."""
 
+from __future__ import annotations
+
 import atexit
 import json
 import os
@@ -7,18 +9,20 @@ import re
 import time
 from functools import cache
 from pathlib import Path
+from typing import Any, cast
 from urllib.parse import urlsplit
 
-from boto3.session import Session
-from botocore.config import Config
-from botocore.exceptions import BotoCoreError, ClientError
+from boto3.session import Session  # type: ignore[import-untyped]
+from botocore.config import Config  # type: ignore[import-untyped]
+from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
 
 from wlh.core import WlhError, canonical, digest
 
 
 @cache
-def client(endpoint, access_key, secret_key, region):
-    value = Session().client(
+def client(endpoint: str, access_key: str, secret_key: str, region: str) -> Any:
+    session: Any = Session()
+    value: Any = session.client(
         "s3",
         endpoint_url=endpoint,
         aws_access_key_id=access_key,
@@ -36,21 +40,21 @@ def client(endpoint, access_key, secret_key, region):
     return value
 
 
-def work_directory():
+def work_directory() -> Path:
     path = Path(os.environ.get("WLH_WORK_DIR", "work/wlh")).resolve()
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     return path
 
 
 class Objects:
-    def __init__(self):
-        defaults = {
+    def __init__(self) -> None:
+        defaults: dict[str, str] = {
             "ENDPOINT": "http://127.0.0.1:19000",
             "BUCKET": "wlh-archive",
             "ACCESS_KEY": "wlh",
             "SECRET_KEY": "wlhsecret",
         }
-        settings = {
+        settings: dict[str, str] = {
             name: os.environ.get("WLH_S3_" + name, default) for name, default in defaults.items()
         }
         try:
@@ -68,27 +72,27 @@ class Objects:
             _ = endpoint.port
         except ValueError:
             raise WlhError("invalid_object_storage_endpoint") from None
-        self.bucket = settings["BUCKET"]
-        self.client = client(
+        self.bucket: str = settings["BUCKET"]
+        self.client: Any = client(
             settings["ENDPOINT"],
             settings["ACCESS_KEY"],
             settings["SECRET_KEY"],
             os.environ.get("WLH_S3_REGION", "us-east-1"),
         )
 
-    def check(self):
+    def check(self) -> None:
         try:
             self.client.head_bucket(Bucket=self.bucket)
         except (BotoCoreError, ClientError, OSError):
             raise WlhError("object_storage_unavailable") from None
 
     @staticmethod
-    def key(value):
+    def key(value: Any) -> str:
         if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
             raise WlhError("archive_invalid")
         return value
 
-    def put(self, body):
+    def put(self, body: bytes) -> str:
         key = digest(body)
         try:
             self.client.put_object(
@@ -101,7 +105,7 @@ class Objects:
         except ClientError as exc:
             # A concurrent writer or a retried successful PUT may already own the key.
             # Never overwrite it: re-read and verify the original bytes instead.
-            if exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 412:
+            if cast(Any, exc).response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 412:
                 raise WlhError("archive_write_failed") from None
             self.get(key)
         except (BotoCoreError, OSError):
@@ -109,7 +113,9 @@ class Objects:
         self.get(key)
         return key
 
-    def get(self, key, *, max_bytes=None, deadline=None):
+    def get(
+        self, key: str, *, max_bytes: int | None = None, deadline: float | None = None
+    ) -> bytes:
         self.key(key)
         if deadline is not None and time.monotonic() >= deadline:
             raise WlhError("archive_read_timeout")
@@ -137,7 +143,7 @@ class Objects:
             finally:
                 stream.close()
         except ClientError as exc:
-            if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+            if cast(Any, exc).response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
                 raise WlhError("archive_missing") from None
             raise WlhError("archive_unreadable") from None
         except (BotoCoreError, OSError):
@@ -146,8 +152,8 @@ class Objects:
             raise WlhError("archive_corrupt")
         return body
 
-    def put_json(self, value):
+    def put_json(self, value: Any) -> str:
         return self.put(canonical(value))
 
-    def json(self, key):
+    def json(self, key: str) -> Any:
         return json.loads(self.get(key))

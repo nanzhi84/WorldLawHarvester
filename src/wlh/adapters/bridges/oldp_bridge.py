@@ -1,20 +1,26 @@
 """OLDP provider/API cases, RII XML and German court HTML."""
 
+from __future__ import annotations
+
 import io
 import re
 import zipfile
+from collections.abc import Mapping
+from typing import Any
 
-import lxml.etree as etree
+import lxml.etree as _etree  # type: ignore[import-untyped]
 
 from wlh.adapters.bridges.common import RecordAdapter, day, first, html_records, items, payload
 from wlh.core import WlhError
 
+etree: Any = _etree
 
-def rii_xml(data, max_bytes):
+
+def rii_xml(data: bytes, max_bytes: int) -> bytes:
     """Read the first XML member in memory, bounded like other archived inputs."""
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            member = next(
+            member: zipfile.ZipInfo | None = next(
                 (
                     m
                     for m in archive.infolist()
@@ -36,16 +42,16 @@ def rii_xml(data, max_bytes):
 
 
 class Adapter(RecordAdapter):
-    CONTRACT = "wlh.adapter.oldp.v2"
-    NAMESPACE = "oldp/case"
+    CONTRACT: str = "wlh.adapter.oldp.v2"
+    NAMESPACE: str = "oldp/case"
 
-    def records(self, data, acquisition):
+    def records(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
         raw_bytes = data
         zipped = data.startswith(b"PK\x03\x04")
         if zipped:
             data = rii_xml(data, self.config["budget"]["response_bytes"])
         if data.lstrip().startswith((b"{", b"[")):
-            result = []
+            result: list[dict[str, Any]] = []
             for raw in items(payload(data), ("results", "cases", "data"))[
                 : self.config["budget"]["documents"]
             ]:
@@ -67,11 +73,17 @@ class Adapter(RecordAdapter):
                 )
             return result
         if zipped or data.lstrip(b"\xef\xbb\xbf \t\r\n").startswith((b"<?xml", b"<dokument")):
-            tree = etree.fromstring(data, etree.XMLParser(resolve_entities=False, no_network=True))
-            key = first(tree, ".//ecli/text()") or first(tree, ".//doknr/text()")
-            number = first(tree, ".//aktenzeichen/text()") or first(tree, ".//az/text()")
-            title = first(tree, ".//titelzeile") or first(tree, ".//titel") or number or key
-            published = first(tree, ".//entsch-datum/text()")
+            tree: Any = etree.fromstring(
+                data, etree.XMLParser(resolve_entities=False, no_network=True)
+            )
+            key: str | None = first(tree, ".//ecli/text()") or first(tree, ".//doknr/text()")
+            number: str | None = first(tree, ".//aktenzeichen/text()") or first(
+                tree, ".//az/text()"
+            )
+            title: str | None = (
+                first(tree, ".//titelzeile") or first(tree, ".//titel") or number or key
+            )
+            published: str | None = first(tree, ".//entsch-datum/text()")
             if published and re.fullmatch(r"\d{8}", published):
                 published = f"{published[:4]}-{published[4:6]}-{published[6:]}"
             return [

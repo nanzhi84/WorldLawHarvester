@@ -1,19 +1,30 @@
 """Bounded subprocess lifecycle; Source session lock and epoch fencing protect writers."""
 
+from __future__ import annotations
+
 import os
 import signal
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from threading import Event
+from typing import TYPE_CHECKING, Any
 
 from wlh.core import WlhError, digest, uid
-from wlh.db import connect, j, locked_run, one
+from wlh.db import DbConn, connect, j, locked_run, one
 from wlh.engine.run_state import TERMINAL_STATES, eligibility_error, exhaustion_error
 from wlh.extraction.manifest import manifest, require_runtime
 
+if TYPE_CHECKING:
+    from wlh.engine.progress import ProgressPanel
 
-def create_run(source_id, mode, connection, parser_manifest):
+
+def create_run(
+    source_id: str, mode: str, connection: DbConn, parser_manifest: Mapping[str, Any]
+) -> str:
     c = connection
     source = one(c, "SELECT * FROM wlh.source WHERE id=%s FOR UPDATE", (source_id,))
     if source["paused"]:
@@ -54,7 +65,10 @@ def create_run(source_id, mode, connection, parser_manifest):
     return identity
 
 
-def end_run(c, source, run, status, reason):
+def end_run(
+    c: DbConn, source: Mapping[str, Any], run: Mapping[str, Any],
+    status: str, reason: str | None,
+) -> None:
     from wlh.engine.progress import terminal_report
 
     c.execute(
@@ -74,7 +88,7 @@ def end_run(c, source, run, status, reason):
     )
 
 
-def begin_attempt(run_id):
+def begin_attempt(run_id: str) -> int | None:
     with connect() as c:
         preflight = one(c, "SELECT config,parser_manifest FROM wlh.run WHERE id=%s", (run_id,))
     try:
@@ -123,14 +137,14 @@ def begin_attempt(run_id):
         return run["attempt_epoch"] + 1
 
 
-def run_context(run_id, epoch):
+def run_context(run_id: str, epoch: int) -> dict[str, Any]:
     with connect() as c:
         run = one(c, "SELECT * FROM wlh.run WHERE id=%s AND attempt_epoch=%s", (run_id, epoch))
         frontier = one(c, "SELECT * FROM wlh.frontier WHERE source_id=%s", (run["source_id"],))
         return dict(run, deadline=run["deadline"].isoformat(), checkpoint=frontier["checkpoint"])
 
 
-def run_receipt(c, run):
+def run_receipt(c: DbConn, run: Mapping[str, Any]) -> dict[str, Any]:
     from wlh.engine.progress import snapshot
 
     counts = snapshot(c, run).counts
@@ -155,12 +169,12 @@ def run_receipt(c, run):
     }
 
 
-def receipt(run_id):
+def receipt(run_id: str) -> dict[str, Any]:
     with connect() as c:
         return run_receipt(c, one(c, "SELECT * FROM wlh.run WHERE id=%s", (run_id,)))
 
 
-def stop_process(process):
+def stop_process(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is None:
         os.killpg(process.pid, signal.SIGTERM)
         try:
@@ -172,14 +186,17 @@ def stop_process(process):
             process.wait()
 
 
-def _execute_attempt(run_id, owner, progress, cancel_event=None):
+def _execute_attempt(
+    run_id: str, owner: DbConn, progress: ProgressPanel | None,
+    cancel_event: Event | None = None,
+) -> dict[str, Any]:
     from wlh.engine.completion import finish_run
 
     epoch = begin_attempt(run_id)
     if epoch is None:
         return receipt(run_id)
     context = run_context(run_id, epoch)
-    process = subprocess.Popen(
+    process: subprocess.Popen[bytes] = subprocess.Popen(
         [sys.executable, "-m", "wlh.engine.runtime_process", run_id, str(epoch), str(os.getpid())],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -225,7 +242,7 @@ def _execute_attempt(run_id, owner, progress, cancel_event=None):
         if run["status"] in TERMINAL_STATES or run["attempt_epoch"] != epoch:
             return run_receipt(c, run)
         reason = reason or "child_process_failed"
-        status = (
+        status: str = (
             "failed"
             if exhaustion_error(run) or reason not in {"child_process_failed", "interrupted"}
             else "retryable"
@@ -234,11 +251,13 @@ def _execute_attempt(run_id, owner, progress, cancel_event=None):
     return receipt(run_id)
 
 
-def execute_run(run_id, progress=None, cancel_event=None):
+def execute_run(
+    run_id: str, progress: ProgressPanel | None = None, cancel_event: Event | None = None
+) -> dict[str, Any]:
     with connect() as owner:
         source_id = one(owner, "SELECT source_id FROM wlh.run WHERE id=%s", (run_id,))["source_id"]
         keys = [run_id, "frontier:" + source_id]
-        acquired = []
+        acquired: list[str] = []
         try:
             for key in keys:
                 if not one(
@@ -263,7 +282,7 @@ def execute_run(run_id, progress=None, cancel_event=None):
                     owner.execute("SELECT pg_advisory_unlock(hashtextextended(%s,0))", (key,))
 
 
-def prepare_run(path, mode, *, enqueue=False):
+def prepare_run(path: str | Path, mode: str, *, enqueue: bool = False) -> str:
     from wlh.config import load_file
     from wlh.db import decision
 
@@ -278,7 +297,7 @@ def prepare_run(path, mode, *, enqueue=False):
             (config["id"], j(config)),
         )
         source = one(c, "SELECT * FROM wlh.source WHERE id=%s FOR UPDATE", (config["id"],))
-        frontier = c.execute(
+        frontier: dict[str, Any] | None = c.execute(
             "SELECT id FROM wlh.frontier WHERE source_id=%s", (config["id"],)
         ).fetchone()
         if source["config"] != config:

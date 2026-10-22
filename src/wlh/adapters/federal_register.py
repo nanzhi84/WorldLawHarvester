@@ -8,9 +8,12 @@ re-version a document. Only endpoint and field-mapping ideas come from public pr
 external runner, storage or de-duplication state machine is used.
 """
 
+from __future__ import annotations
+
 import json
 import re
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Any, cast
 from urllib.parse import urlencode, urlsplit
 
 import lxml.etree as etree
@@ -21,8 +24,9 @@ from wlh.engine.scope import guard
 from wlh.extraction.markdown import normalized, text_to_markdown
 from wlh.extraction.office import detect_real_format
 
-API = "https://www.federalregister.gov/api/v1"
-FIELDS = (
+etree: Any
+API: str = "https://www.federalregister.gov/api/v1"
+FIELDS: tuple[str, ...] = (
     "document_number",
     "title",
     "type",
@@ -36,17 +40,17 @@ FIELDS = (
     "pdf_url",
     "full_text_xml_url",
 )
-TYPES = {
+TYPES: dict[str, str] = {
     "Rule": "法律法规",
     "Proposed Rule": "法律法规",
     "Notice": "通知公告",
     "Presidential Document": "政策文件",
 }
-HEADINGS = {"HD1": "##", "HD2": "###", "HD3": "####", "HD4": "#####", "HD5": "#####"}
-SKIP = {"PRTPAGE", "FRDOC", "BILCOD", "GPH", "GID", "STARS"}
+HEADINGS: dict[str, str] = {"HD1": "##", "HD2": "###", "HD3": "####", "HD4": "#####", "HD5": "#####"}
+SKIP: set[str] = {"PRTPAGE", "FRDOC", "BILCOD", "GPH", "GID", "STARS"}
 
 
-def pointer(value, path):
+def pointer(value: Any, path: str) -> Any:
     """RFC 6901 JSON Pointer resolution (real locator into the archived response)."""
     if path == "":
         return value
@@ -55,31 +59,31 @@ def pointer(value, path):
     for raw in path[1:].split("/"):
         token = raw.replace("~1", "/").replace("~0", "~")
         if isinstance(value, list):
-            if not token.isdigit() or int(token) >= len(value):
+            if not token.isdigit() or int(token) >= len(cast(list[Any], value)):
                 raise WlhError("json_pointer_unresolved")
-            value = value[int(token)]
+            value = cast(list[Any], value)[int(token)]
         elif isinstance(value, dict):
             if token not in value:
                 raise WlhError("json_pointer_unresolved")
-            value = value[token]
+            value = cast(dict[str, Any], value)[token]
         else:
             raise WlhError("json_pointer_unresolved")
     return value
 
 
-def text_of(node):
+def text_of(node: Any) -> str:
     return re.sub(r"\s+", " ", "".join(node.itertext())).strip()
 
 
-def xml_to_markdown(data):
+def xml_to_markdown(data: bytes) -> str:
     """Federal Register full-text XML → Markdown: headings, paragraphs, tables, footnotes."""
     try:
-        root = etree.fromstring(data, etree.XMLParser(resolve_entities=False, no_network=True))
+        root: Any = etree.fromstring(data, etree.XMLParser(resolve_entities=False, no_network=True))
     except etree.XMLSyntaxError:
         raise WlhError("full_text_xml_invalid") from None
-    blocks = []
+    blocks: list[str] = []
 
-    def walk(node):
+    def walk(node: Any) -> None:
         tag = node.tag if isinstance(node.tag, str) else ""
         if tag in SKIP:
             return
@@ -104,7 +108,7 @@ def xml_to_markdown(data):
                 blocks.append(text_to_markdown(text).strip())
             return
         if tag == "GPOTABLE":
-            rows = []
+            rows: list[list[str]] = []
             heads = [text_of(c) for c in node.iter("CHED")]
             if heads:
                 rows.append(heads)
@@ -115,7 +119,7 @@ def xml_to_markdown(data):
                 rows = [[c.replace("|", "\\|") for c in r] + [""] * (width - len(r)) for r in rows]
                 lines = ["| " + " | ".join(rows[0]) + " |", "|" + " --- |" * width]
                 lines.extend("| " + " | ".join(r) + " |" for r in rows[1:])
-                caption = node.find("TTITLE")
+                caption: Any = node.find("TTITLE")
                 if caption is not None and text_of(caption):
                     blocks.append("**" + text_of(caption) + "**")
                 blocks.append("\n".join(lines))
@@ -131,64 +135,64 @@ def xml_to_markdown(data):
 
 
 class Adapter(Base):
-    CONTRACT = "wlh.adapter.federal-register.v1"
-    PLANNING_OPTIONS = ("per_page", "max_pages", "conditions")
+    CONTRACT: str = "wlh.adapter.federal-register.v1"
+    PLANNING_OPTIONS: tuple[str, ...] = ("per_page", "max_pages", "conditions")
 
     @staticmethod
-    def validate_options(options):
+    def validate_options(options: Mapping[str, Any]) -> None:
         allowed = {"conditions", "per_page", "max_pages", "listing_body_field", "document_types"}
         if set(options) - allowed:
             raise ValueError("unexpected_adapter_options")
-        conditions = options.get("conditions", {})
+        conditions: Any = options.get("conditions", {})
         if not isinstance(conditions, dict):
             raise ValueError("invalid_conditions")
-        for key, value in conditions.items():
-            values = value if isinstance(value, list) else [value]
+        for key, value in cast(dict[str, Any], conditions).items():
+            values = cast(list[Any], value) if isinstance(value, list) else [value]
             if not re.fullmatch(r"[a-z_]+(\[[a-z_]*\])*", key) or not all(
                 isinstance(v, str) and len(v) <= 200 for v in values
             ):
                 raise ValueError("invalid_conditions")
-        per_page = options.get("per_page", 20)
-        pages = options.get("max_pages", 1)
+        per_page: Any = options.get("per_page", 20)
+        pages: Any = options.get("max_pages", 1)
         if type(per_page) is not int or not 1 <= per_page <= 100:
             raise ValueError("invalid_per_page")
         if type(pages) is not int or not 1 <= pages <= 1000:
             raise ValueError("invalid_max_pages")
-        field = options.get("listing_body_field")
+        field: Any = options.get("listing_body_field")
         if field is not None and (
             not isinstance(field, str) or not re.fullmatch(r"[a-z_]+", field)
         ):
             raise ValueError("invalid_listing_body_field")
-        types = options.get("document_types", {})
+        types: Any = options.get("document_types", {})
         if not isinstance(types, dict):
             raise ValueError("invalid_document_types")
 
-    def __init__(self, config):
+    def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         options = config["adapter_options"]
-        self.options = options
-        self.base = config["entry_urls"][0].rstrip("/")
-        self.types = {**TYPES, **options.get("document_types", {})}
+        self.options: dict[str, Any] = options
+        self.base: str = config["entry_urls"][0].rstrip("/")
+        self.types: dict[str | None, Any] = {**TYPES, **options.get("document_types", {})}
 
-    def api_url(self, path, params):
+    def api_url(self, path: str, params: Sequence[tuple[str, Any]]) -> str:
         return public_url(
             self.base + path + ("?" + urlencode(params, doseq=True) if params else "")
         )
 
-    def fields(self):
+    def fields(self) -> list[tuple[str, str]]:
         return [("fields[]", f) for f in FIELDS] + (
             [("fields[]", self.options["listing_body_field"])]
             if self.options.get("listing_body_field") not in (None, *FIELDS)
             else []
         )
 
-    def plan(self, state):
+    def plan(self, state: dict[str, Any]) -> dict[str, Any]:
         params = [("per_page", str(self.options.get("per_page", 20))), ("order", "newest")]
         for key, value in sorted(self.options.get("conditions", {}).items()):
             name, _, rest = key.partition("[")
             param = "conditions[" + name + "]" + ("[" + rest if rest else "")
             if isinstance(value, list):
-                params.extend((param + "[]", item) for item in value)
+                params.extend((param + "[]", item) for item in cast(list[Any], value))
             else:
                 params.append((param, value))
         params.extend(self.fields())
@@ -199,14 +203,14 @@ class Adapter(Base):
             "state": state,
         }
 
-    def record_url(self, number):
+    def record_url(self, number: str) -> str:
         return self.api_url("/documents/" + number + ".json", self.fields())
 
-    def target(self, item, listing_request, index):
-        number = item.get("document_number")
+    def target(self, item: Mapping[str, Any], listing_request: Mapping[str, Any], index: int | None) -> dict[str, Any]:
+        number: Any = item.get("document_number")
         if not isinstance(number, str) or not re.fullmatch(r"[A-Za-z0-9-]{4,40}", number):
             raise WlhError("document_identity_missing")
-        inputs = [
+        inputs: list[dict[str, Any]] = [
             {
                 "request": listing_request,
                 "role": "listing",
@@ -215,7 +219,7 @@ class Adapter(Base):
         ]
         if not self.options.get("listing_body_field"):
             for role, key in (("full_text", "full_text_xml_url"), ("original", "pdf_url")):
-                url = item.get(key)
+                url: str | None = item.get(key)
                 if url:
                     inputs.append(
                         {
@@ -223,7 +227,7 @@ class Adapter(Base):
                             "role": role,
                         }
                     )
-        html_url = item.get("html_url")
+        html_url: Any = item.get("html_url")
         return {
             "identity": {
                 "namespace": "federalregister.gov/document_number",
@@ -238,15 +242,15 @@ class Adapter(Base):
             "inputs": inputs,
         }
 
-    def plan_recheck(self, resources, state):
+    def plan_recheck(self, resources: Sequence[Mapping[str, Any]], state: dict[str, Any]) -> dict[str, Any]:
         """Due documents are merged into batch requests; each still gets its own Observation.
 
         The request budget counts real batch requests, so more due Resources than requests
         can be rechecked. Identity comes from the frozen recheck_locator, never public_url.
         """
-        targets = []
+        targets: list[dict[str, Any]] = []
         size = self.options.get("per_page", 20)
-        numbers = []
+        numbers: list[tuple[str, Mapping[str, Any]]] = []
         for resource in resources:
             locator = resource["recheck_locator"]
             if locator.get("role") != "record" or not locator.get("document_number"):
@@ -255,7 +259,7 @@ class Adapter(Base):
         for start in range(0, len(numbers), size):
             chunk = numbers[start : start + size]
             batch = ",".join(sorted(number for number, _ in chunk))
-            request = {
+            request: dict[str, Any] = {
                 "url": self.api_url("/documents/" + batch + ".json", self.fields()),
                 "role": "batch",
                 "depth": 0,
@@ -280,47 +284,47 @@ class Adapter(Base):
                 )
         return {"requests": [], "targets": targets, "state": state}
 
-    def load_json(self, ctx, acquisition):
+    def load_json(self, ctx: Any, acquisition: Mapping[str, Any]) -> Any:
         try:
             return json.loads(ctx.read(acquisition))
         except ValueError:
             raise WlhError("api_response_not_json") from None
 
-    def parse(self, ctx, task, acquisition):
+    def parse(self, ctx: Any, task: Mapping[str, Any], acquisition: Mapping[str, Any]) -> dict[str, Any]:
         request = task["payload"]
-        role = request.get("role")
+        role: Any = request.get("role")
         if acquisition["outcome"] != "ok" or role not in {"listing", "record", "batch"}:
             return {"requests": [], "targets": []}
-        value = self.load_json(ctx, acquisition)
+        value: Any = self.load_json(ctx, acquisition)
         request = {k: request[k] for k in ("url", "role") if k in request} | {
             "depth": task["depth"]
         }
         if role == "record":
             if not isinstance(value, dict):
                 raise WlhError("api_structure_changed")
-            return {"requests": [], "targets": [self.target(value, request, None)]}
+            return {"requests": [], "targets": [self.target(cast(dict[str, Any], value), request, None)]}
         if role == "batch":
             # Batch recheck response: each document gains its body inputs; selection is by
             # document_number, never by position in the shared response.
-            results = value.get("results") if isinstance(value, dict) else None
-            if results is None and isinstance(value, dict) and value.get("document_number"):
-                results = [value]
+            results: Any = cast(dict[str, Any], value).get("results") if isinstance(value, dict) else None
+            if results is None and isinstance(value, dict) and cast(dict[str, Any], value).get("document_number"):
+                results = [cast(dict[str, Any], value)]
             if not isinstance(results, list):
                 raise WlhError("api_structure_changed")
-            targets = []
-            for item in results:
+            targets: list[dict[str, Any]] = []
+            for item in cast(list[dict[str, Any]], results):
                 target = self.target(item, request, None)
                 target["inputs"][0].pop("pointer")
                 target["inputs"][0]["select"] = {"document_number": item["document_number"]}
                 targets.append(target)
             return {"requests": [], "targets": targets}
-        results = value.get("results") if isinstance(value, dict) else None
+        results = cast(dict[str, Any], value).get("results") if isinstance(value, dict) else None
         if not isinstance(results, list):
             raise WlhError("api_structure_changed")
-        targets = [self.target(item, request, i) for i, item in enumerate(results)]
-        page = (task["payload"].get("meta") or {}).get("page", 1)
-        follow = []
-        following = value.get("next_page_url")
+        targets = [self.target(item, request, i) for i, item in enumerate(cast(list[dict[str, Any]], results))]
+        page = cast(Mapping[str, Any], task["payload"].get("meta") or {}).get("page", 1)
+        follow: list[dict[str, Any]] = []
+        following: Any = cast(dict[str, Any], value).get("next_page_url")
         if following and page < self.options.get("max_pages", 1):
             follow.append(
                 {
@@ -336,38 +340,39 @@ class Adapter(Base):
             "truncated": "page_limit_exceeded" if following and not follow else None,
             "state": {
                 "listing_pages": page,
-                "count": value.get("count"),
+                "count": cast(dict[str, Any], value).get("count"),
                 "last_page": not following,
             },
         }
 
-    def build(self, ctx, target, inputs):
+    def build(self, ctx: Any, target: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         by_role = {item["role"]: item for item in inputs}
-        listing: dict[str, Any] = by_role["listing"]
-        response = self.load_json(ctx, listing["acquisition"])
+        listing = by_role["listing"]
+        response: Any = self.load_json(ctx, listing["acquisition"])
         if listing.get("select"):
             wanted = listing["select"]["document_number"]
-            if isinstance(response, dict) and response.get("document_number") == wanted:
+            if isinstance(response, dict) and cast(dict[str, Any], response).get("document_number") == wanted:
                 listing = dict(listing, pointer="")
             else:
-                results = response.get("results") if isinstance(response, dict) else None
-                matches = [
+                results: Any = cast(dict[str, Any], response).get("results") if isinstance(response, dict) else None
+                matches: list[int] = [
                     i
-                    for i, item in enumerate(results or [])
-                    if isinstance(item, dict) and item.get("document_number") == wanted
+                    for i, item in enumerate(cast(Sequence[Any], results or []))
+                    if isinstance(item, dict) and cast(dict[str, Any], item).get("document_number") == wanted
                 ]
                 if len(matches) != 1:
                     raise WlhError("document_missing_from_batch")
                 listing = dict(listing, pointer="/results/" + str(matches[0]))
-        document = pointer(response, listing.get("pointer", ""))
+        document: Any = pointer(response, listing.get("pointer", ""))
         if not isinstance(document, dict):
             raise WlhError("api_structure_changed")
-        number = target["identity"]["external_key"]
+        document = cast(dict[str, Any], document)
+        number: Any = target["identity"]["external_key"]
         if document.get("document_number") != number:
             raise WlhError("api_structure_changed")
         listing_url = public_url(listing["acquisition"]["request_url"])
         slice_bytes = canonical(document)
-        candidate_inputs = [
+        candidate_inputs: list[dict[str, Any]] = [
             {
                 "acquisition_id": listing["acquisition"]["id"],
                 "archive_ref": listing["acquisition"]["archive_ref"],
@@ -383,10 +388,10 @@ class Adapter(Base):
             }
         ]
         parsers = {"markdown"}
-        deliverables = []
-        body_field = self.options.get("listing_body_field")
+        deliverables: list[dict[str, Any]] = []
+        body_field: str | None = self.options.get("listing_body_field")
         if body_field:
-            body = document.get(body_field)
+            body: Any = document.get(body_field)
             if not isinstance(body, str) or len(body.strip()) < 20:
                 raise WlhError("document_body_missing")
             quality = ctx.text_quality(body)
@@ -452,21 +457,21 @@ class Adapter(Base):
                         "kind": "pdf",
                         "byte_size": pdf_acq["byte_size"],
                         "source_url": public_url(pdf_acq["request_url"]),
-                        "original_name": urlsplit(pdf_acq["request_url"]).path.rsplit("/", 1)[-1],
+                        "original_name": urlsplit(cast(str, pdf_acq["request_url"])).path.rsplit("/", 1)[-1],
                     },
                     "quality": quality,
                     "extraction": extraction,
                 }
             )
-        agencies = [a.get("name") for a in document.get("agencies") or [] if isinstance(a, dict)]
-        dtype = self.types.get(document.get("type"), self.config["metadata"]["document_type"])
+        agencies = [cast(dict[str, Any], a).get("name") for a in cast(Sequence[Any], document.get("agencies") or []) if isinstance(a, dict)]
+        dtype: Any = self.types.get(document.get("type"), self.config["metadata"]["document_type"])
         metadata = dict(self.config["metadata"], document_type=dtype)
         metadata.update(
             title=document.get("title"),
             document_number=number,
             issuer="; ".join(a for a in agencies if a) or None,
         )
-        dates = {
+        dates: dict[str, Any] = {
             k: document.get(src)
             for k, src in (("published_at", "publication_date"), ("effective_at", "effective_on"))
             if document.get(src)

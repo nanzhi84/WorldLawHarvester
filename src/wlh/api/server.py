@@ -1,32 +1,36 @@
 """Bounded, read-only HTTP service: GET /results and GET /files/{sha256} only."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import re
 import time
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from os import PathLike
+from typing import Any
 from urllib.parse import quote
 
 import psycopg
 from aiohttp import web
 
 from wlh.api import queries as result_query
-from wlh.api.security import ApiError, Settings, Tokens
+from wlh.api.security import ApiError, Caller, Settings, Tokens
 from wlh.core import WlhError
 
-log = logging.getLogger(__name__)
-SERVICE = web.AppKey("service", object)
+log: logging.Logger = logging.getLogger(__name__)
 
 
 class Service:
-    def __init__(self, settings, config_path=None):
+    def __init__(self, settings: Settings, config_path: str | PathLike[str] | None = None) -> None:
         self.settings, self.tokens = settings, Tokens(settings)
         self.config_path = config_path
         self.pool = ThreadPoolExecutor(max_workers=settings.workers, thread_name_prefix="wlh-api")
         self.slots = asyncio.Semaphore(settings.workers)
 
-    def authenticate(self, authorization):
+    def authenticate(self, authorization: str | None) -> Caller:
         current = self.settings
         if self.config_path:
             try:
@@ -39,7 +43,9 @@ class Service:
                 raise ApiError(503, "invalid_api_config")
         return current.authenticate(authorization)
 
-    async def run(self, request, function, *args, hold_slot=False):
+    async def run[T](
+        self, request: web.Request, function: Callable[..., T], *args: Any, hold_slot: bool = False
+    ) -> T:
         request["waiting_for_slot"] = True
         try:
             await asyncio.wait_for(self.slots.acquire(), timeout=1)
@@ -53,7 +59,7 @@ class Service:
             raise
 
         # A cancelled HTTP coroutine must not free capacity while its thread still runs.
-        def finished(value):
+        def finished(value: asyncio.Future[T]) -> None:
             if not hold_slot:
                 self.slots.release()
             if not value.cancelled():
@@ -68,7 +74,10 @@ class Service:
             raise
 
 
-def storage_error(exc):
+SERVICE: web.AppKey[Service] = web.AppKey("service", Service)
+
+
+def storage_error(exc: WlhError) -> ApiError:
     if exc.code in {"archive_corrupt", "archive_invalid", "archive_missing", "archive_too_large"}:
         return ApiError(500, exc.code)
     if exc.code == "archive_read_timeout":
@@ -79,9 +88,12 @@ def storage_error(exc):
 
 
 @web.middleware
-async def boundary(request, handler):
+async def boundary(
+    request: web.Request, handler: Callable[[web.Request], Awaitable[web.StreamResponse]]
+) -> web.StreamResponse:
     route = request.match_info.route.name or "unmatched"
     error = None
+    response = None
     try:
         service = request.app[SERVICE]
         missing = request.match_info.http_exception
@@ -109,24 +121,25 @@ async def boundary(request, handler):
     except Exception as exc:
         log.error("route=%s category=%s", route, type(exc).__name__)
         error = ApiError(500, "internal_error")
-    if error:
-        response = web.json_response({"error": error.code}, status=error.status)
-        if error.status == 401:
+    if error is not None or response is None:
+        err = error or ApiError(500, "internal_error")
+        response = web.json_response({"error": err.code}, status=err.status)
+        if err.status == 401:
             response.headers["WWW-Authenticate"] = "Bearer"
-        log.warning("route=%s status=%s code=%s", route, error.status, error.code)
+        log.warning("route=%s status=%s code=%s", route, err.status, err.code)
     if not response.prepared:
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
 
-async def healthz(request):
+async def healthz(request: web.Request) -> web.Response:
     if request.query:
         raise ApiError(400, "invalid_parameters")
     return web.json_response({"status": "ok"})
 
 
-async def results(request):
+async def results(request: web.Request) -> web.Response:
     query = request.query
     try:
         if set(query) - {"source_id", "limit", "cursor", "projection"} or any(
@@ -167,12 +180,12 @@ async def results(request):
     return response
 
 
-def disposition(name):
+def disposition(name: str) -> str:
     fallback = "".join(ch if 32 <= ord(ch) < 127 and ch not in '"\\;' else "_" for ch in name)
     return "attachment; filename=\"%s\"; filename*=UTF-8''%s" % (fallback, quote(name, safe=""))
 
 
-async def files(request):
+async def files(request: web.Request) -> web.StreamResponse:
     if request.query:
         raise ApiError(400, "invalid_parameters")
     service = request.app[SERVICE]
@@ -186,7 +199,7 @@ async def files(request):
         hold_slot=True,
     )
     try:
-        response = web.StreamResponse(
+        response: web.StreamResponse = web.StreamResponse(
             headers={
                 "Content-Type": entry["media_type"],
                 "Content-Length": str(len(body)),
@@ -205,20 +218,22 @@ async def files(request):
         service.slots.release()
 
 
-async def cleanup(app):
+async def cleanup(app: web.Application) -> None:
     # All HTTP tasks stop first; submitted work has bounded DB/S3 timeouts and deadlines.
     await asyncio.to_thread(app[SERVICE].pool.shutdown, wait=True, cancel_futures=True)
 
 
 class ProtocolLog(logging.Filter):
-    def filter(self, record):
+    def filter(self, record: logging.LogRecord) -> bool:
         category = type(record.exc_info[1]).__name__ if record.exc_info else "ProtocolError"
         record.msg, record.args = "protocol_error category=%s", (category,)
         record.exc_info, record.exc_text, record.stack_info = None, None, None
         return True
 
 
-def application(settings, config_path=None):
+def application(
+    settings: Settings, config_path: str | PathLike[str] | None = None
+) -> web.Application:
     app = web.Application(middlewares=[boundary], client_max_size=1024)
     app[SERVICE] = Service(settings, config_path)
     app.router.add_get("/healthz", healthz, name="healthz", allow_head=False)
@@ -228,7 +243,7 @@ def application(settings, config_path=None):
     return app
 
 
-def serve(path, host, port):
+def serve(path: str | PathLike[str] | None, host: str, port: int) -> dict[str, str]:
     from wlh.db import dsn, require_current
     from wlh.engine.objects import Objects
 

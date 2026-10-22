@@ -5,6 +5,8 @@ materialized from verified CAS objects; LibreOffice runs headless in an isolated
 its own process group and a bounded timeout. Windows COM fallbacks are not supported.
 """
 
+from __future__ import annotations
+
 import codecs
 import io
 import os
@@ -14,7 +16,9 @@ import signal
 import subprocess
 import tempfile
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, cast
 
 from wlh.core import WlhError
 from wlh.extraction.markdown import compact
@@ -80,7 +84,7 @@ def detect_real_format(data: bytes, suffix: str = "") -> str:
         return hint if hint in {"txt", "html"} else "unknown"
 
 
-def soffice():
+def soffice() -> str | None:
     configured = os.environ.get("WLH_SOFFICE")
     for candidate in (
         configured,
@@ -93,9 +97,11 @@ def soffice():
     return None
 
 
-def bounded_run(args, timeout, cwd=None, limit=65536):
+def bounded_run(
+    args: Sequence[str], timeout: float, cwd: str | Path | None = None, limit: int = 65536
+) -> tuple[int, bytes]:
     """Own process group; stderr never forwarded (it can contain document text/paths)."""
-    process = subprocess.Popen(
+    process: subprocess.Popen[bytes] = subprocess.Popen(
         args,
         cwd=cwd,
         stdout=subprocess.PIPE,
@@ -117,7 +123,7 @@ def bounded_run(args, timeout, cwd=None, limit=65536):
     return process.returncode, output[:limit]
 
 
-def libreoffice_identity():
+def libreoffice_identity() -> dict[str, str]:
     executable = soffice()
     if not executable:
         return {"status": "unavailable"}
@@ -135,7 +141,9 @@ def libreoffice_identity():
         return {"status": "unavailable"}
 
 
-def libreoffice_convert(path, target_format, extension, timeout, kind):
+def libreoffice_convert(
+    path: str | Path, target_format: str, extension: str, timeout: float, kind: str
+) -> bytes:
     executable = soffice()
     if not executable:
         raise WlhError("libreoffice_unavailable")
@@ -163,7 +171,7 @@ def libreoffice_convert(path, target_format, extension, timeout, kind):
         return target.read_bytes()
 
 
-def extract_libreoffice_text(path, timeout, kind):
+def extract_libreoffice_text(path: str | Path, timeout: float, kind: str) -> str:
     raw = libreoffice_convert(path, "txt:Text (encoded):UTF8", "txt", timeout, kind)
     text = compact(raw.decode("utf-8", errors="replace"))
     if len(text) < 8:
@@ -171,16 +179,18 @@ def extract_libreoffice_text(path, timeout, kind):
     return text + "\n"
 
 
-def table_markdown(rows):
+def table_markdown(rows: list[list[str]]) -> str:
     """One Markdown table block; the first row is the header (source geometry unknown)."""
     width = max(len(row) for row in rows)
     rows = [row + [""] * (width - len(row)) for row in rows]
-    lines = ["| " + " | ".join(rows[0]) + " |", "| " + " | ".join(["---"] * width) + " |"]
+    lines: list[str] = [
+        "| " + " | ".join(rows[0]) + " |", "| " + " | ".join(["---"] * width) + " |"
+    ]
     lines.extend("| " + " | ".join(row) + " |" for row in rows[1:])
     return "\n".join(lines)
 
 
-def excel_value(value):
+def excel_value(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, float) and value.is_integer():
@@ -188,7 +198,7 @@ def excel_value(value):
     return compact(str(value))
 
 
-def normalized_office_archive(path):
+def normalized_office_archive(path: str | Path) -> io.BytesIO:
     """Normalize Windows-signed Office ZIPs in memory, preserving the archived original."""
     with io.BytesIO(Path(path).read_bytes()) as source, zipfile.ZipFile(source) as archive:
         if not any(
@@ -205,23 +215,23 @@ def normalized_office_archive(path):
     return normalized
 
 
-def extract_excel(path, kind):
+def extract_excel(path: str | Path, kind: str) -> tuple[str, str]:
     """XLS/XLSX workbooks (including spreadsheets disguised as DOC/DOCX) as Markdown tables."""
-    sheets = []
+    sheets: list[tuple[Any, list[list[str]]]] = []
     try:
         if kind == "xls":
-            import xlrd
+            import xlrd  # type: ignore[import-untyped]
 
-            workbook = xlrd.open_workbook(str(path), formatting_info=False, on_demand=True)
+            workbook: Any = xlrd.open_workbook(str(path), formatting_info=False, on_demand=True)
             for sheet in workbook.sheets():
-                rows = [
+                rows: list[list[str]] = [
                     [excel_value(sheet.cell_value(r, c)) for c in range(sheet.ncols)]
                     for r in range(sheet.nrows)
                 ]
                 sheets.append((sheet.name, rows))
             extractor = "xlrd"
         else:
-            from openpyxl import load_workbook
+            from openpyxl import load_workbook  # type: ignore[import-untyped]
 
             with normalized_office_archive(path) as handle:
                 workbook = load_workbook(handle, read_only=True, data_only=True)
@@ -236,7 +246,7 @@ def extract_excel(path, kind):
             extractor = "openpyxl"
     except Exception:
         raise WlhError("spreadsheet_invalid") from None
-    parts = []
+    parts: list[str] = []
     for name, rows in sheets:
         nonempty = [row for row in rows if any(cell for cell in row)]
         if not nonempty:
@@ -251,20 +261,20 @@ def extract_excel(path, kind):
     return value + "\n", extractor
 
 
-def extract_docx(path):
-    from docx import Document
-    from docx.table import Table
-    from docx.text.paragraph import Paragraph
+def extract_docx(path: str | Path) -> str:
+    from docx import Document  # type: ignore[import-untyped]
+    from docx.table import Table  # type: ignore[import-untyped]
+    from docx.text.paragraph import Paragraph  # type: ignore[import-untyped]
 
     try:
         with normalized_office_archive(path) as handle:
-            document = Document(handle)
+            document: Any = Document(handle)
     except Exception:
         raise WlhError("docx_invalid") from None
-    parts = []
+    parts: list[str] = []
     for child in document.element.body.iterchildren():
         if child.tag.endswith("}p"):
-            paragraph = Paragraph(child, document)
+            paragraph: Any = Paragraph(child, document)
             text = compact(paragraph.text)
             if not text:
                 continue
@@ -277,7 +287,7 @@ def extract_docx(path):
             else:
                 parts.append(text)
         elif child.tag.endswith("}tbl"):
-            rows = []
+            rows: list[list[str]] = []
             for row in Table(child, document).rows:
                 cells = [compact(cell.text).replace("|", "\\|") for cell in row.cells]
                 # Word represents horizontal merges as repeated cell objects.
@@ -291,16 +301,16 @@ def extract_docx(path):
     return value + "\n"
 
 
-def safe_member(name):
+def safe_member(name: str) -> str | None:
     parts = [p for p in Path(name.replace("\\", "/")).parts if p not in ("", ".", "/")]
     if not parts or any(p == ".." for p in parts) or name.startswith(("/", "\\")):
         return None
     return "/".join(parts)
 
 
-def unpack_zip(path, folder, max_bytes):
+def unpack_zip(path: str | Path, folder: str | Path, max_bytes: int) -> list[dict[str, Any]]:
     """Inner real documents with lineage paths; never hand the outer container to LibreOffice."""
-    members = []
+    members: list[dict[str, Any]] = []
     try:
         with zipfile.ZipFile(path) as archive:
             infos = [i for i in archive.infolist() if not i.is_dir()]
@@ -333,9 +343,11 @@ def unpack_zip(path, folder, max_bytes):
     return members
 
 
-def extract_office(path, kind=None, timeout=120):
+def extract_office(
+    path: str | Path, kind: str | None = None, timeout: float | dict[str, Any] = 120
+) -> tuple[str, dict[str, Any]]:
     path = Path(path)
-    cfg = (
+    cfg: dict[str, Any] = (
         timeout
         if isinstance(timeout, dict)
         else {"libreoffice_timeout_seconds": timeout, "office_text_policy": "prefer"}
@@ -363,9 +375,9 @@ def extract_office(path, kind=None, timeout=120):
         return result[0], {**result[1], "detected_format": kind}
 
     """Structured direct extraction first (office_text_policy=prefer), LibreOffice fallback."""
-    timeout = cfg["libreoffice_timeout_seconds"]
+    timeout = cast(float, cfg["libreoffice_timeout_seconds"])
     prefer = cfg["office_text_policy"] == "prefer"
-    info = {
+    info: dict[str, Any] = {
         "kind": kind,
         "detected_format": kind,
         "legacy_encoding": None,
@@ -394,9 +406,9 @@ def extract_office(path, kind=None, timeout=120):
                 if uses:
                     markdown = rtf_bytes_to_tcvn3_raw(raw)
                 else:
-                    from striprtf.striprtf import rtf_to_text
+                    from striprtf.striprtf import rtf_to_text  # type: ignore[import-untyped]
 
-                    markdown = rtf_to_text(raw.decode("latin-1"))
+                    markdown = cast(str, rtf_to_text(raw.decode("latin-1")))
                 info["extractor"] = "rtf_direct_text"
             except WlhError as exc:
                 info["attempts"].append(exc.code)

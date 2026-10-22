@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import os
 import pwd
-from collections.abc import Iterator
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, LiteralString, cast
@@ -14,14 +16,15 @@ from wlh.core import WlhError, uid
 from wlh.engine.run_state import eligibility_error
 
 j = Jsonb
+DbConn = psycopg.Connection[dict[str, Any]]
 
 
-def dsn():
+def dsn() -> str:
     return os.environ.get("WLH_DATABASE_URL", "postgresql://wlh:wlh@127.0.0.1:15432/wlh")
 
 
 @contextmanager
-def connect() -> Iterator[psycopg.Connection[dict[str, Any]]]:
+def connect() -> Generator[DbConn, None, None]:
     with psycopg.Connection[dict[str, Any]].connect(
         dsn(),
         row_factory=dict_row,
@@ -31,27 +34,35 @@ def connect() -> Iterator[psycopg.Connection[dict[str, Any]]]:
         yield connection
 
 
-def one(connection, query, params=()) -> dict[str, Any]:
+def one(
+    connection: DbConn, query: Any, params: Sequence[Any] | Mapping[str, Any] = ()
+) -> dict[str, Any]:
     value = connection.execute(query, params).fetchone()
     if value is None:
         raise WlhError("row_not_found")
     return value
 
 
-def decision(connection, source, kind, payload, key=None):
+def decision(
+    connection: DbConn,
+    source: str | None,
+    kind: str,
+    payload: Any,
+    key: str | None = None,
+) -> str:
     identity = uid()
     value = connection.execute(
         "INSERT INTO wlh.decision(id, source_id, kind, actor, payload, idempotency_key) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT(idempotency_key) DO NOTHING RETURNING id",
         (identity, source, kind, pwd.getpwuid(os.getuid()).pw_name, j(payload), key),
     ).fetchone()
-    return (
+    return str(
         value["id"]
         if value
         else one(connection, "SELECT id FROM wlh.decision WHERE idempotency_key=%s", (key,))["id"]
     )
 
 
-def locked_run(connection, run_id):
+def locked_run(connection: DbConn, run_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     # Every current-state writer uses Source -> Run -> Document lock order.
     source_id = one(connection, "SELECT source_id FROM wlh.run WHERE id=%s", (run_id,))["source_id"]
     source = one(connection, "SELECT * FROM wlh.source WHERE id=%s FOR UPDATE", (source_id,))
@@ -59,7 +70,7 @@ def locked_run(connection, run_id):
     return source, run
 
 
-def fenced(source, run, epoch):
+def fenced(source: Mapping[str, Any], run: Mapping[str, Any], epoch: int) -> None:
     if run["attempt_epoch"] != epoch:
         raise WlhError("stale_attempt")
     if run["deadline"] <= datetime.now(timezone.utc):
@@ -73,7 +84,7 @@ def fenced(source, run, epoch):
         raise WlhError("run_not_started")
 
 
-def record_error(run_id, epoch, code):
+def record_error(run_id: str, epoch: int, code: str) -> None:
     with connect() as connection:
         connection.execute(
             "UPDATE wlh.run SET errors=errors || %s WHERE id=%s AND attempt_epoch=%s AND status IN ('running','finishing')",
@@ -81,7 +92,7 @@ def record_error(run_id, epoch, code):
         )
 
 
-def initialize():
+def initialize() -> dict[str, Any]:
     """Install one atomic baseline and queue schema; never silently upgrade a database."""
     from importlib.resources import files
 
@@ -109,7 +120,7 @@ def initialize():
     return {"status": status, "schema": "wlh", "version": 1}
 
 
-def require_current(connection=None):
+def require_current(connection: DbConn | None = None) -> None:
     from importlib.resources import files
 
     from wlh.core import digest
@@ -117,7 +128,8 @@ def require_current(connection=None):
     if connection is None:
         with connect() as c:
             return require_current(c)
-    if not connection.execute("SELECT to_regclass('wlh.migration') AS name").fetchone()["name"]:
+    reg_row = connection.execute("SELECT to_regclass('wlh.migration') AS name").fetchone()
+    if not reg_row or not reg_row["name"]:
         raise WlhError("database_not_initialized")
     row = connection.execute("SELECT version,checksum FROM wlh.migration").fetchone()
     checksum = digest(files("wlh").joinpath("sql/schema.sql").read_bytes())

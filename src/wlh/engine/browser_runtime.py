@@ -1,5 +1,7 @@
 """Identity of the driver and headless browser WLH actually launches."""
 
+from __future__ import annotations
+
 import hashlib
 import os
 import re
@@ -9,18 +11,22 @@ import sys
 import time
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from wlh.core import digest
+
+if TYPE_CHECKING:
+    pass
 
 DRIVER = "playwright"
 BROWSER = "chromium-headless-shell"
 INSTALL_MARKERS = {"INSTALLATION_COMPLETE", "DEPENDENCIES_VALIDATED"}
 
 
-def bundle_identity(root, deadline):
-    entries = []
+def bundle_identity(root: Path, deadline: float) -> str:
+    entries: list[dict[str, Any]] = []
     executable = False
-    paths = []
+    paths: list[Path] = []
     for path in root.rglob("*"):
         if time.monotonic() >= deadline:
             raise TimeoutError
@@ -65,14 +71,14 @@ def bundle_identity(root, deadline):
     return digest(entries)
 
 
-def identity():
+def identity() -> dict[str, Any]:
     driver = {"package": DRIVER}
     try:
         driver["version"] = version(DRIVER)
         deadline = time.monotonic() + 10
         # The driver's public dry-run resolves its own registry, host platform,
         # PLAYWRIGHT_BROWSERS_PATH and per-package installs. No browser is started.
-        result = subprocess.run(
+        result: subprocess.CompletedProcess[bytes] = subprocess.run(
             [sys.executable, "-m", DRIVER, "install", "--dry-run", BROWSER],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -81,7 +87,7 @@ def identity():
         )
         if len(result.stdout) > 65536:
             raise ValueError
-        match = re.search(
+        match: re.Match[str] | None = re.search(
             r"Chrome Headless Shell ([^\n]+?) \(playwright chromium-headless-shell v([^\n)]+)\)"
             r"\s+Install location:\s+([^\n]+)",
             result.stdout.decode("utf-8"),

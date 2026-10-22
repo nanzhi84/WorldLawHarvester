@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import psycopg
 
@@ -115,7 +116,8 @@ documents:
             reparse_res = execute_run(reparse_run_id)
             assert reparse_res["status"] == "complete", f"reparse failed: {reparse_res}"
             assert _RedirectAndPolicyHandler.request_count == requests_before_reparse
-            report_counts = (reparse_res.get("report") or {}).get("counts") or {}
+            report_obj: dict[str, Any] = reparse_res.get("report") or {}
+            report_counts: dict[str, Any] = report_obj.get("counts") or {}
             assert report_counts.get("external_requests", 0) == 0
         finally:
             server.shutdown()
