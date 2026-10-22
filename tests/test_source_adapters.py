@@ -2430,12 +2430,45 @@ documents:
                 )
             assert exc_build.value.code == "http_503"
 
+            no_xpath_cfg = dict(dd512_cfg)
+            no_xpath_cfg["documents"] = dict(
+                dd512_cfg["documents"], detail_body=body_mode, content_xpath=None
+            )
+            no_xpath_adapter = WebAdapter(no_xpath_cfg)
+            trunc_and_blocked_html = (
+                b'<!DOCTYPE html><html data-wlh-truncated="http_503"><body><h1>Draft</h1><div>cf-chl-token</div></body></html>'
+            )
+            no_xpath_ctx = SimpleNamespace(
+                runtime=SimpleNamespace(mode="collect"),
+                read=lambda _acq: trunc_and_blocked_html,
+                follow_links=lambda _task: True,
+            )
+            with pytest.raises(WlhError) as exc_prec:
+                no_xpath_adapter.build(
+                    no_xpath_ctx,
+                    {"identity": {"namespace": "url", "external_key": detail_url}},
+                    [
+                        {
+                            "acquisition": {
+                                "id": "acq-prec",
+                                "archive_ref": "2" * 64,
+                                "mime_type": "text/html",
+                                "charset": "utf-8",
+                                "actual_url": detail_url,
+                                "request_url": detail_url,
+                                "byte_size": len(trunc_and_blocked_html),
+                            }
+                        }
+                    ],
+                )
+            assert exc_prec.value.code == "http_503"
+
         from wlh.adapters.bridges.worldwidelaw_bridge import Adapter as WorldWideLawBridge
 
         dd493_cfg = load_file(repo_root / "sources" / "dd-493.yaml").model_dump()
         bridge_adapter = WorldWideLawBridge(dd493_cfg)
         links_html = "".join(
-            f'<a href="https://congbao.chinhphu.vn/noi-dung-van-ban-so-{i:02d}-400{i:02d}">Doc {i}</a>'
+            f'<a href="https://congbao.chinhphu.vn/van-ban/sample-{i:02d}-{i:02d}.htm">Doc {i}</a>'
             for i in range(1, 13)
         )
         truncated_list_html = (
@@ -2457,6 +2490,7 @@ documents:
                 "request_url": "https://congbao.chinhphu.vn/",
             },
         )
+        assert len(bridge_parsed["requests"]) == dd493_cfg["budget"]["documents"] == 10
         assert bridge_parsed.get("truncated") == "http_503"
 
         class _DetailSubrequest503Handler(BaseHTTPRequestHandler):

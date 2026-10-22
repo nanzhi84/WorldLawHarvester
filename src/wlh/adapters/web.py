@@ -277,15 +277,15 @@ class Adapter(Base):
         acquisition = detail["acquisition"]
         data = ctx.read(acquisition)
         kind = detect_real_format(data, "html" if acquisition["mime_type"] == "text/html" else "")
+        meta = dict(self.config["metadata"])
+        url = acquisition["actual_url"] or acquisition["request_url"]
+        values, title, encoding = self.detail_values(data, kind, acquisition, url)
         if (
             kind in TEXT_KINDS
             and not (kind == "html" and self.config["documents"]["content_xpath"])
             and blocked(data, self.config)
         ):
             raise WlhError("target_content_blocked")
-        meta = dict(self.config["metadata"])
-        url = acquisition["actual_url"] or acquisition["request_url"]
-        values, title, encoding = self.detail_values(data, kind, acquisition, url)
         candidate_inputs: list[dict[str, Any]] = [
             {
                 "acquisition_id": acquisition["id"],
