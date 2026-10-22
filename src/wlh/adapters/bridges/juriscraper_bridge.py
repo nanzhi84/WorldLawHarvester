@@ -32,6 +32,8 @@ class Adapter(RecordAdapter):
                 ]
             records: list[dict[str, Any]] = []
             limit: int = self.config["budget"]["documents"]
+            if len(entries) > limit:
+                self.truncated = "document_budget_exceeded"
             for item in entries[:limit]:
                 name = (
                     item.get("case_name")

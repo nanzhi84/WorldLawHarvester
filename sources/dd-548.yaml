@@ -9,7 +9,7 @@ scope: 英国国家档案馆判例法库 Atom 订阅源发现及判例 XML 的�
 robots: true
 delay: 0.5
 budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 52428800}
-fetch: {mode: http, max_depth: 1, page_timeout_ms: 60000}
+fetch: {mode: http, max_depth: 2, page_timeout_ms: 60000}
 documents:
   detail_url_patterns:
   - ^https://caselaw\.nationalarchives\.gov\.uk/.+/data\.xml$

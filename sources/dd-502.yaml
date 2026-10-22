@@ -3,16 +3,18 @@ id: dd-502
 adapter: web
 scope: "中国政府网国家规章库（gjgzk）部门规章列表发现与规章全文有界采集"
 entry_urls: ["https://www.gov.cn/zhengce/xxgk/gjgzk/index.htm"]
-allowed_hosts: ["www.gov.cn", "sousuoht.www.gov.cn"]
-allowed_path_prefixes: ["/zhengce/", "/athena/forward/"]
+allowed_hosts: ["www.gov.cn", "user.www.gov.cn", "sousuoht.www.gov.cn"]
+allowed_path_prefixes: ["/zhengce/", "/static/js/", "/athena/forward/"]
 host_path_scopes:
   www.gov.cn: ["/zhengce/"]
+  user.www.gov.cn: ["/static/js/"]
   sousuoht.www.gov.cn: ["/athena/forward/"]
 archive_approved: true
 robots: false
 delay: 0.5
+adapter_options: {max_pages: 2}
 fetch: {mode: rendered_dom, wait_until: domcontentloaded, max_depth: 1, retries: 2, page_timeout_ms: 60000}
-budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 67108864}
+budget: {requests: 80, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "国家规章库"
   document_type: "法律法规"

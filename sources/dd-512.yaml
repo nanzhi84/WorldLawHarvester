@@ -13,7 +13,7 @@ robots: false
 delay: 0.5
 user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 fetch: {mode: rendered_dom, wait_until: domcontentloaded, max_depth: 1, retries: 4, page_timeout_ms: 60000}
-budget: {requests: 80, documents: 10, seconds: 600, response_bytes: 67108864}
+budget: {requests: 250, documents: 10, seconds: 600, response_bytes: 67108864}
 parser: {quality_accept_routes: ["accept", "accept_ocr", "accept_with_warning"]}
 metadata:
   source_name: "越南国会法律文书系统（Văn bản quy phạm pháp luật Quốc hội）"

@@ -10,7 +10,6 @@ import asyncio
 import base64
 import contextlib
 import hashlib
-import json
 import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
@@ -43,6 +42,7 @@ class Browser:
         self.playwright: Playwright | None = None
         self.browser: PlaywrightBrowser | None = None
         self.loopback_cookies: set[tuple[str, str, str]] = set()
+        self.script_cache: dict[str, dict[str, Any]] = {}
 
     def _detect_html_loopback(self, url: str, data: bytes) -> str | None:
         text = data.decode("utf-8", errors="replace")
@@ -133,24 +133,32 @@ class Browser:
         errors: list[str] = []
         facts: dict[str | None, str] = {}
         pending: set[asyncio.Task[Any]] = set()
+        main_doc_done = False
 
         async def route_input(event: dict[str, Any]) -> None:
+            nonlocal main_doc_done
             current = cast(asyncio.Task[Any], asyncio.current_task())
             pending.add(current)
             request_id = event["requestId"]
             browser_request = event["request"]
+            rtype = str(event.get("resourceType") or "")
             try:
                 if browser_request["url"].startswith(("data:", "blob:", "about:")):
                     await session.send("Fetch.continueRequest", {"requestId": request_id})
                     return
-                if event.get("resourceType") != "Document":
+                if rtype not in {"Document", "Script", "XHR", "Fetch"}:
                     await session.send(
                         "Fetch.failRequest",
                         {"requestId": request_id, "errorReason": "BlockedByClient"},
                     )
                     return
                 method = browser_request["method"]
-                if method not in {"GET", "HEAD", "OPTIONS"}:
+                allowed_methods = (
+                    {"GET", "HEAD", "OPTIONS", "POST"}
+                    if rtype in {"XHR", "Fetch"}
+                    else {"GET", "HEAD", "OPTIONS"}
+                )
+                if method not in allowed_methods:
                     # Script actions have no Adapter declaration of query idempotence.
                     # Such queries must be planned explicitly through Transport.acquire.
                     raise WlhError(
@@ -159,47 +167,52 @@ class Browser:
                         else "browser_method_not_supported"
                     )
                 target = guard(self.config, browser_request["url"])
-                await self.transport.robots.check(target, self.transport.fetch_policy)
-                entries = browser_request.get("postDataEntries")
-                body: bytes | None = (
-                    b"".join(base64.b64decode(entry["bytes"]) for entry in entries)
-                    if entries
-                    else browser_request.get("postData", "").encode("utf-8") or None
-                )
-                raw_key: str = request_key(
-                    {
-                        "url": target,
-                        "method": browser_request["method"],
-                        "role": "browser_http",
-                        "form": {"body_hash": hashlib.sha256(body).hexdigest()} if body else None,
-                    }
-                )
-                previous = facts.get(event.get("redirectedRequestId"))
                 req_headers = {
                     name: value
                     for name, value in browser_request.get("headers", {}).items()
                     if name.lower()
                     not in {"accept-encoding", "host", "connection", "content-length"}
                 }
-                row: dict[str, Any] = await self._exchange_with_retry(
-                    target,
-                    browser_request["method"],
-                    body,
-                    raw_key,
-                    "content",
-                    {
-                        "rendered_acquisition_id": identity,
-                        "resource_type": event["resourceType"],
-                    },
-                    previous,
-                    "redirect" if previous else None,
-                    headers=req_headers,
-                )
+                if rtype == "Script" and method == "GET" and target in self.script_cache:
+                    row: dict[str, Any] = self.script_cache[target]
+                else:
+                    await self.transport.robots.check(target, self.transport.fetch_policy)
+                    entries = browser_request.get("postDataEntries")
+                    body: bytes | None = (
+                        b"".join(base64.b64decode(entry["bytes"]) for entry in entries)
+                        if entries
+                        else browser_request.get("postData", "").encode("utf-8") or None
+                    )
+                    raw_key: str = request_key(
+                        {
+                            "url": target,
+                            "method": browser_request["method"],
+                            "role": "browser_http",
+                            "form": {"body_hash": hashlib.sha256(body).hexdigest()} if body else None,
+                        }
+                    )
+                    previous = facts.get(event.get("redirectedRequestId"))
+                    row = await self._exchange_with_retry(
+                        target,
+                        browser_request["method"],
+                        body,
+                        raw_key,
+                        "content",
+                        {
+                            "rendered_acquisition_id": identity,
+                            "resource_type": rtype,
+                        },
+                        previous,
+                        "redirect" if previous else None,
+                        headers=req_headers,
+                    )
                 facts[request_id] = row["id"]
                 if row["state"] != "archived":
                     raise WlhError(row["error"] or "network_failed")
                 if row["outcome"] not in {"ok", "redirect"}:
                     raise WlhError(row["error"] or "network_failed")
+                if rtype == "Script" and method == "GET":
+                    self.script_cache[target] = row
                 raw_bytes = self.transport.objects.get(row["archive_ref"])
                 while (
                     row["state"] == "archived"
@@ -222,7 +235,7 @@ class Browser:
                         "content",
                         {
                             "rendered_acquisition_id": identity,
-                            "resource_type": event["resourceType"],
+                            "resource_type": rtype,
                         },
                         row["id"],
                         "redirect",
@@ -234,6 +247,8 @@ class Browser:
                     if row["outcome"] not in {"ok", "redirect"}:
                         raise WlhError(row["error"] or "network_failed")
                     raw_bytes = self.transport.objects.get(row["archive_ref"])
+                if rtype == "Document" and row["outcome"] == "ok":
+                    main_doc_done = True
                 # Transport archives decoded HTTP entity bytes. Chromium must not decode
                 # them again; preserve semantic headers, including redirects and cookies.
                 headers: list[dict[str, str]] = [
@@ -252,7 +267,19 @@ class Browser:
                     },
                 )
             except WlhError as exc:
-                if not facts or event.get("redirectedRequestId") in facts:
+                if (rtype == "Document" and not main_doc_done) or exc.code in {
+                    "request_budget_exceeded",
+                    "response_byte_budget_exceeded",
+                    "time_budget_exceeded",
+                    "document_budget_exceeded",
+                    "stale_attempt",
+                    "inactive_attempt",
+                    "run_not_started",
+                    "interrupted",
+                    "post_replay_semantics_required",
+                    "browser_method_not_supported",
+                    "robots_disallowed",
+                }:
                     errors.append(exc.code)
                 with contextlib.suppress(Exception):
                     await session.send(
@@ -263,7 +290,8 @@ class Browser:
                 errors.append("interrupted")
                 raise
             except Exception:
-                errors.append("network_failed")
+                if rtype == "Document" and not main_doc_done:
+                    errors.append("network_failed")
                 with contextlib.suppress(Exception):
                     await session.send(
                         "Fetch.failRequest", {"requestId": request_id, "errorReason": "Failed"}
@@ -298,216 +326,49 @@ class Browser:
             while pending:
                 self.budget.active()
                 await asyncio.gather(*tuple(pending))
+            for _ in range(3):
+                with contextlib.suppress(Exception):
+                    await page.wait_for_load_state("networkidle", timeout=5000)
+                while pending:
+                    self.budget.active()
+                    await asyncio.gather(*tuple(pending))
             self.budget.active()
             if errors:
                 raise WlhError(errors[0])
             html = await page.content()
             status = response.status if response else None
             actual = page.url
-            if "handlerToanVanDuThao" in html and (
-                m_lan := re.search(r"let\s+lanDuThaoId\s*=\s*['\"]([^'\"]+)['\"]", html)
-            ):
-                lan_id = m_lan.group(1)
-                m_tt = re.search(r"let\s+TrangThaiThongQua\s*=\s*(\d+)", html)
-                tt = m_tt.group(1) if m_tt else "0"
-                sub_urls = [
-                    f"{actual}?handler=ToanVanDuThao&lanDuThaoId={lan_id}&trangThaiThongQua={tt}",
-                    f"{actual}?handler=Files&FileAttachmentType=DuThaoLuat_LanDuThaoLuat&LtsEntityIds={lan_id}",
-                ]
-                parts: list[str] = []
-                for raw_sub_url in sub_urls:
-                    try:
-                        sub_url = guard(self.config, raw_sub_url)
-                        await self.transport.robots.check(sub_url, self.transport.fetch_policy)
-                        sub_key = request_key(
-                            {"url": sub_url, "method": "GET", "role": "browser_http"}
-                        )
-                        sub_row = await self._exchange_with_retry(
-                            sub_url,
-                            "GET",
-                            None,
-                            sub_key,
-                            "content",
-                            {
-                                "rendered_acquisition_id": identity,
-                                "resource_type": "Fetch",
-                            },
-                            None,
-                            None,
-                        )
-                        if sub_row["state"] == "archived" and sub_row["outcome"] == "ok":
-                            sub_bytes = self.transport.objects.get(sub_row["archive_ref"])
-                            while (
-                                sub_row["state"] == "archived"
-                                and sub_row["outcome"] == "ok"
-                                and sub_row.get("mime_type") == "text/html"
-                                and len(sub_bytes) <= 16384
-                                and (loopback := self._detect_html_loopback(sub_url, sub_bytes))
-                            ):
-                                sub_url = guard(self.config, loopback)
-                                await self.transport.robots.check(
-                                    sub_url, self.transport.fetch_policy
-                                )
-                                hop_key = request_key(
-                                    {"url": sub_url, "method": "GET", "role": "browser_http"}
-                                )
-                                sub_row = await self._exchange_with_retry(
-                                    sub_url,
-                                    "GET",
-                                    None,
-                                    hop_key,
-                                    "content",
-                                    {
-                                        "rendered_acquisition_id": identity,
-                                        "resource_type": "Fetch",
-                                    },
-                                    sub_row["id"],
-                                    "redirect",
-                                )
-                                if sub_row["state"] != "archived" or sub_row["outcome"] != "ok":
-                                    break
-                                sub_bytes = self.transport.objects.get(sub_row["archive_ref"])
-                            if sub_row["state"] == "archived" and sub_row["outcome"] == "ok":
-                                parts.append(sub_bytes.decode("utf-8", errors="replace"))
-                    except WlhError as exc:
-                        if exc.code in {"stale_attempt", "inactive_attempt", "run_not_started"}:
-                            raise
-                if parts:
-                    extra_html = "\n".join(parts)
-                    if re.search(r'<div\b[^>]*\bid=["\']nav-home["\'][^>]*>', html, re.I):
-                        html = re.sub(
-                            r'(<div\b[^>]*\bid=["\']nav-home["\'][^>]*>)',
-                            lambda m: m.group(1) + "\n" + extra_html,
-                            html,
-                            count=1,
-                            flags=re.I,
-                        )
-                    elif "</body>" in html:
-                        html = html.replace(
-                            "</body>", f'<div id="nav-home">{extra_html}</div></body>', 1
-                        )
+            max_pages = int(self.config.get("adapter_options", {}).get("max_pages", 1))
+            if max_pages > 1:
+                page_links: list[str] = list(
+                    dict.fromkeys(re.findall(r"<a\b[^>]*>.*?</a>", html, flags=re.I | re.S))
+                )
+                for _ in range(max_pages - 1):
+                    if await page.locator(".next-page").count() <= 0:
+                        break
+                    with contextlib.suppress(Exception):
+                        await page.locator(".next-page").first.click(timeout=5000)
+                        await page.wait_for_timeout(1500)
+                        await page.wait_for_load_state("networkidle", timeout=5000)
+                    while pending:
+                        self.budget.active()
+                        await asyncio.gather(*tuple(pending))
+                    self.budget.active()
+                    if errors:
+                        raise WlhError(errors[0])
+                    cur_html = await page.content()
+                    for tag in re.findall(r"<a\b[^>]*>.*?</a>", cur_html, flags=re.I | re.S):
+                        if tag not in page_links:
+                            page_links.append(tag)
+                html = await page.content()
+                if page_links:
+                    has_more = await page.locator(".next-page").count() > 0
+                    trunc_attr = " data-wlh-truncated='page_limit_exceeded'" if has_more else ""
+                    extra = f"<div data-wlh-pages='true'{trunc_attr}>" + "".join(page_links) + "</div>"
+                    if "</body>" in html:
+                        html = html.replace("</body>", f"{extra}</body>", 1)
                     else:
-                        html += f'<div id="nav-home">{extra_html}</div>'
-            if "/zhengce/xxgk/gjgzk/" in actual:
-                try:
-                    api_url = guard(
-                        self.config,
-                        "https://sousuoht.www.gov.cn/athena/forward/BD8730CDDA12515E2D9E1B21AA11C0D6",
-                    )
-                    await self.transport.robots.check(api_url, self.transport.fetch_policy)
-                    api_body = json.dumps(
-                        {
-                            "code": "18258ab0ac9",
-                            "preference": None,
-                            "searchFields": [
-                                {
-                                    "fieldName": "f_202321807875",
-                                    "searchWord": "部门规章",
-                                    "searchType": "TERM",
-                                    "withHighLight": True,
-                                },
-                                {"fieldName": "f_202321360426", "searchWord": "", "withHighLight": True},
-                                {"fieldName": "f_202321758948", "searchWord": "", "withHighLight": True},
-                                {"fieldName": "f_202321423473", "searchType": "TERM", "withHighLight": True},
-                                {"fieldName": "f_202321159816", "searchWord": "", "searchType": "TERM"},
-                                {"fieldName": "f_20232380533", "searchType": "TERM", "withHighLight": True},
-                                {"fieldName": "f_202328191239", "withHighLight": True, "searchType": "TERM"},
-                                {"fieldName": "f_20221110222856", "withHighLight": True, "searchType": "TERM"},
-                            ],
-                            "sorts": [{}, {"sortField": "f_202321915922", "sortOrder": "DESC"}],
-                            "resultFields": [
-                                "f_202355832506",
-                                "f_20232124962",
-                                "f_202321124775",
-                                "f_202321159816",
-                                "f_202321360426",
-                                "f_202321423473",
-                                "f_202321758948",
-                                "f_202321807875",
-                                "f_202321864401",
-                                "f_202321915922",
-                                "f_202323394765",
-                                "f_202328191239",
-                                "f_202344311304",
-                                "f_2023425676953",
-                                "f_2023425808265",
-                                "f_202321136868",
-                                "f_20232380533",
-                                "f_20232151076",
-                                "doc_pub_url",
-                            ],
-                            "trackTotalHits": "true",
-                            "tableName": "t_1860c735d31",
-                            "pageSize": 15,
-                            "pageNo": 1,
-                            "granularity": "ALL",
-                        },
-                        ensure_ascii=False,
-                    ).encode("utf-8")
-                    api_key = request_key(
-                        {
-                            "url": api_url,
-                            "method": "POST",
-                            "role": "browser_http",
-                            "form": {"body_hash": hashlib.sha256(api_body).hexdigest()},
-                        }
-                    )
-                    api_headers = {
-                        "Referer": "https://www.gov.cn/",
-                        "athenaappname": "%E8%A7%84%E7%AB%A0%E5%BA%93",
-                        "athenaappkey": (
-                            "E%2FQRus35opRkACauSyCo2t37RrSeSLi6meog4HmvjhLtUuXR%2BkVXD59MNLxT681E"
-                            "IZh7vCOScxRJlO%2BJHQQBpdkZxuR%2FzsW8r%2FDMc9ze4Gwehp9oDvQMpwnS53QbtYPl"
-                            "%2B5lpYi5wEFSef0uGt%2F4hXfxiw1dIvlqAc7ioMJeSM6o%3D"
-                        ),
-                        "Content-Type": "application/json;charset=UTF-8",
-                    }
-                    api_row = await self._exchange_with_retry(
-                        api_url,
-                        "POST",
-                        api_body,
-                        api_key,
-                        "content",
-                        {
-                            "rendered_acquisition_id": identity,
-                            "resource_type": "XHR",
-                        },
-                        None,
-                        None,
-                        headers=api_headers,
-                    )
-                    if api_row["state"] == "archived" and api_row["outcome"] == "ok":
-                        api_bytes = self.transport.objects.get(api_row["archive_ref"])
-                        api_json = json.loads(api_bytes.decode("utf-8", errors="replace"))
-                        if isinstance(api_json, dict):
-                            res_obj = cast(dict[str, Any], api_json).get("result")
-                            data_obj = (
-                                cast(dict[str, Any], res_obj).get("data")
-                                if isinstance(res_obj, dict)
-                                else None
-                            )
-                            items_list = (
-                                cast(dict[str, Any], data_obj).get("list")
-                                if isinstance(data_obj, dict)
-                                else None
-                            )
-                            if isinstance(items_list, list):
-                                injected = "".join(
-                                    f'<div class="depart_m"><a href="{cast(dict[str, Any], it)["doc_pub_url"]}">{cast(dict[str, Any], it).get("f_202321360426", "")}</a></div>'
-                                    for it in cast(list[Any], items_list)
-                                    if isinstance(it, dict)
-                                    and cast(dict[str, Any], it).get("doc_pub_url")
-                                )
-                                if injected:
-                                    if "</body>" in html:
-                                        html = html.replace("</body>", f"{injected}</body>", 1)
-                                    else:
-                                        html += injected
-                except WlhError as exc:
-                    if exc.code in {"stale_attempt", "inactive_attempt", "run_not_started"}:
-                        raise
-                except (ValueError, KeyError, TypeError):
-                    pass
+                        html += extra
             data = html.encode("utf-8")
             if len(data) > self.config["budget"]["response_bytes"]:
                 return self.recorder.finish(

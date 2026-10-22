@@ -20,7 +20,7 @@ documents:
   detail_url_patterns: ['^https://decisions\.scc-csc\.ca/scc-csc/scc-csc/en/item/\d+/index\.do\?iframe=true$']
   attachment_url_pattern: '^https://decisions\.scc-csc\.ca/scc-csc/scc-csc/en/item/\d+/.*\.(?:pdf|docx?)$'
   detail_body: always
-  content_xpath: '//div[contains(@class, "documentcontent")] | //div[@id="decisia-main-content"]'
+  content_xpath: '//div[contains(@class, "documentcontent")]'
   fields:
     title: {xpath: '(//h3[contains(@class, "title")])[1] | //title'}
     document_number: {xpath: '//div[contains(@class, "metadata")]', regex: 'Neutral citation\s*(20\d{2}\s+SCC\s+\d+)'}
