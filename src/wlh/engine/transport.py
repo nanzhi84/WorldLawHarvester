@@ -264,6 +264,7 @@ class Transport:
             ssl_ctx.load_verify_locations(cadata=EXTRA_INTERMEDIATE_CAS_PEM)
             self.session = aiohttp.ClientSession(
                 headers={"User-Agent": self.config["user_agent"]},
+                cookie_jar=aiohttp.CookieJar(unsafe=True),
                 trust_env=(os.environ.get("WLH_ALLOW_LOOPBACK") != "1"),
                 connector=aiohttp.TCPConnector(
                     limit=self.config["concurrency"],

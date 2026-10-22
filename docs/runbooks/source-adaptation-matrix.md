@@ -545,8 +545,8 @@
 | <a id="dd-148"></a>dd-148 | 其他 | [中国香港商标检索](https://esearch.ipd.gov.hk/nis-pos-view/#/tm/quicksearch?lang=en) | P2 | `web`（浏览器渲染/动态接口） | [ ] | 动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。 |
 | <a id="dd-161"></a>dd-161 | 财务报告 | [香港交易所披露易（HKEXnews）](https://www.hkexnews.hk/index_c.htm) | P2 | `web`（浏览器渲染/动态接口） | [ ] | 动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。 |
 | <a id="dd-505"></a>dd-505 | 法律法规 | [电子版香港法例（Hong Kong e-Legislation, HKeL）](https://www.elegislation.gov.hk/) | P0 | `web` | [ ] | 具法律地位的香港官方成文法数据库，支持按章号（Cap.）与版本日期获取 PDF。 |
-| <a id="dd-506"></a>dd-506 | 案例 | [香港司法机构法律参考资料系统（LRS）](https://legalref.judiciary.hk/) | P0 | `web` / `worldwidelaw_bridge` | [ ] | **实测受阻（http_500 / zero_targets_discovered）**：香港司法机构 legalref.judiciary.hk 检索与最新判案书后端 JSP 接口（newjudgments.jsp、ps.jsp、searchbox_result.jsp）均返回 HTTP 500 GovHK 系统内部错误。 |
-| <a id="dd-507"></a>dd-507 | 税务资料 | [香港税务局（IRD）释义及执行指引（DIPN）](https://www.ird.gov.hk/) | P1 | `web` | [ ] | **实测受阻（network_failed / ClientConnectorDNSError）**：香港税务局 www.ird.gov.hk 在当前实网环境 DNS 解析失败（nodename nor servname provided）。 |
+| <a id="dd-506"></a>dd-506 | 案例 | [香港司法机构法律参考资料系统（LRS）](https://legalref.judiciary.hk/) | P0 | `web`（[`dd-506.yaml`](../../sources/dd-506.yaml)） | [x] | 已落库 sources/dd-506.yaml（web 适配器，直连判案书详情端点 ju_body.jsp?DIS=158000 绕开故障检索 JSP），实网 collect -> reparse 跑通（HCAL 371/2021，High Court of the Hong Kong Special Administrative Region，2024-02-06）。 |
+| <a id="dd-507"></a>dd-507 | 税务资料 | [香港税务局（IRD）释义及执行指引（DIPN）](https://www.ird.gov.hk/) | P1 | `web`（[`dd-507.yaml`](../../sources/dd-507.yaml)） | [x] | 已落库 sources/dd-507.yaml（web 适配器），实网 collect -> reparse 跑通（香港税务局 DIPN No. 3《Profits tax - Apportionment of expenses》及 dipn03.pdf 原件归档）。 |
 | <a id="dd-508"></a>dd-508 | 法律法规 | [澳门印务局（Imprensa Oficial）公报与法例](https://www.io.gov.mo/) | P1 | `web` / `worldwidelaw_bridge` | [ ] | **实测受阻（network_failed / TimeoutError）**：澳门印务局 www.io.gov.mo 与 bo.io.gov.mo 实网 TCP 连接超时（15s TimeoutError）。 |
 
 ### 1.3 中国台湾 (Taiwan)
@@ -570,18 +570,18 @@
 | <a id="dd-496"></a>dd-496 | 案例 | [LuatVietnam 判决库](https://luatvietnam.vn/ban-an/) | P0 | `web`（受控检索） | [x] | 已落库 sources/dd-496.yaml（web 适配器），实网 collect -> reparse 跑通（Quyết định số 39/2026/QĐST-HNGĐ，提取案号、审理法院与裁判日期）。 |
 | <a id="dd-497"></a>dd-497 | 法律法规 | [Thư Viện Pháp Luật 法规库](https://thuvienphapluat.vn/page/tim-van-ban.aspx) | P0 | `web`（受控检索） | [ ] | **实测受阻（http_403 / blocked_response）**：thuvienphapluat.vn 全站启用 Cloudflare Turnstile 强交互挑戰（HTTP 403 Just a moment... cf-chl-），阻断自动化采集。 |
 | <a id="dd-498"></a>dd-498 | 案例 | [Thư Viện Pháp Luật 判决库](https://thuvienphapluat.vn/banan/) | P0 | `web`（受控检索） | [ ] | **实测受阻（http_403 / blocked_response）**：thuvienphapluat.vn/banan/ 启用 Cloudflare Turnstile 强交互挑战（HTTP 403 Just a moment...），阻断自动化采集。 |
-| <a id="dd-512"></a>dd-512 | 法律法规 | [越南国会法律文书系统（Văn bản quy phạm pháp luật Quốc hội）](https://quochoi.vn/tintuc/Pages/van-ban-phap-luat.aspx) | P0 | `web` | [ ] | **实测受阻（zero_targets_discovered / http_404）**：quochoi.vn 入口返回 177B JS Cookie 挑战（sbc=1794137160），带 Cookie 后 /tintuc/Pages/van-ban-phap-luat.aspx 返回 HTTP 404，vanban.quochoi.vn 无静态法条列表链接。 |
+| <a id="dd-512"></a>dd-512 | 法律法规 | [越南国会法律文书系统（Văn bản quy phạm pháp luật Quốc hội）](https://quochoi.vn/tintuc/Pages/van-ban-phap-luat.aspx) | P0 | `web`（[`dd-512.yaml`](../../sources/dd-512.yaml)） | [x] | 已落库 sources/dd-512.yaml（web 适配器 + rendered_dom 受控浏览器模式，由 Browser 处理 JS document.cookie 自跳桩，对接国会法律草案与法案库 duthaoonline.quochoi.vn），实网 collect -> reparse 跑通（Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng）。 |
 | <a id="dd-513"></a>dd-513 | 法律法规 | [越南政府门户政策与法规建设专栏（Xây dựng chính sách, pháp luật）](https://xaydungchinhsach.chinhphu.vn/) | P0 | `web` | [x] | 已落库 sources/dd-513.yaml（web 适配器，补充 GlobalSign RSA OV SSL CA 2018 中间证书修复附件 CDN TLS 链），实网 collect -> reparse 跑通（Chỉ thị số 37/CT-TTg 及 PDF 原件归档）。 |
-| <a id="dd-514"></a>dd-514 | 案例 | [越南最高人民法院判例门户（Án lệ TANDTC）](https://anle.toaan.gov.vn/) | P0 | `web` | [ ] | **实测受阻（network_failed / TimeoutError）**：anle.toaan.gov.vn 源站 TCP 连接超时（15s TimeoutError），无法建立 HTTP 会话。 |
+| <a id="dd-514"></a>dd-514 | 案例 | [越南最高人民法院判例门户（Án lệ TANDTC）](https://anle.toaan.gov.vn/) | P0 | `web`（[`dd-514.yaml`](../../sources/dd-514.yaml)） | [x] | 已落库 sources/dd-514.yaml（web 适配器 + rendered_dom 受控浏览器模式，由 Browser 处理 Oracle WebCenter _afrLoop 自跳重定向），实网 collect -> reparse 跑通（Án lệ số 84/2026/AL，Hội đồng Thẩm phán Tòa án nhân dân tối cao，2026-05-29）。 |
 | <a id="dd-515"></a>dd-515 | 案例 | [越南最高人民法院电子门户公开判决库（Công bố bản án, quyết định）](https://congbobanan.toaan.gov.vn/) | P0 | `web`（浏览器渲染/验证码识别） | [ ] | **实测受阻（network_failed / ClientConnectorError）**：congbobanan.toaan.gov.vn 源站连接被重置/拒绝且详情页存在强验证码与会话门禁。 |
-| <a id="dd-516"></a>dd-516 | 税务资料 | [越南财政部 / 税务总局法规与公文库（Bộ Tài chính / Tổng cục Thuế）](https://gdt.gov.vn/) | P0 | `web` | [ ] | **实测受阻（network_failed / zero_targets_discovered）**：gdt.gov.vn 源站 TCP 连接超时（TimeoutError）；mof.gov.vn 门户为纯前端异步空壳（<div id="app"></div>），无静态法规详情链接。 |
+| <a id="dd-516"></a>dd-516 | 税务资料 | [越南财政部 / 税务总局法规与公文库（Bộ Tài chính / Tổng cục Thuế）](https://gdt.gov.vn/) | P0 | `web`（[`dd-516.yaml`](../../sources/dd-516.yaml)） | [x] | 已落库 sources/dd-516.yaml（web 适配器，对接财政部税务政策解答与公文门户 portal.mof.gov.vn/hoidapcstc，增强 content_xpath 作用域内非阻塞判定以忽略导航栏隐藏登录弹窗），实网 collect -> reparse 跑通（Nghị định số 20/2026/NĐ-CP 企业所得税免税适用指引，Bộ Tài chính (Cục Thuế)）。 |
 
 ### 1.5 日本 (Japan)
 
 | Source ID | ⁠  资⁠料⁠类⁠型  ⁠ | 来⁠源⁠名⁠称        ⁠ | ⁠ 优⁠先⁠级 ⁠ | 推⁠荐⁠适⁠配⁠器      ⁠ | ⁠ 状⁠态 ⁠ | 备⁠注⁠与⁠实⁠测⁠结⁠论 |
 | :--- | :---: | :--- | :---: | :--- | :---: | :--- |
 | <a id="dd-143"></a>dd-143 | 其他 | [日本专利信息平台](https://www.j-platpat.inpit.go.jp/) | P2 | `web`（浏览器渲染/动态接口） | [ ] | 动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。 |
-| <a id="dd-517"></a>dd-517 | 法律法规 | [e-Gov 法令检索 / 法令 API v2（デジタル庁）](https://laws.e-gov.go.jp/) | P0 | `structured_xml`（e-Gov API v2） | [ ] | **实测受阻（http_403）**：日本 e-Gov 法令 API v2（laws.e-gov.go.jp/api/2/）对当前实网环境返回 HTTP 403 Forbidden。 |
+| <a id="dd-517"></a>dd-517 | 法律法规 | [e-Gov 法令检索 / 法令 API v2（デジタル庁）](https://laws.e-gov.go.jp/) | P0 | `structured_xml`（[`dd-517.yaml`](../../sources/dd-517.yaml)） | [x] | 已落库 sources/dd-517.yaml（structured_xml 适配器，对接公开免鉴权 laws.e-gov.go.jp/api/1/lawdata/ 官方 XML 接口并支持和历发布日期转换），实网 collect -> reparse 跑通（行政手続法，平成五年法律第八十八号，1993-11-12）。 |
 | <a id="dd-518"></a>dd-518 | 政策文件 | [互联网版官报（インターネット版官報）](https://www.kanpo.go.jp/) | P1 | `web` | [ ] | 官方公开直连，免费公开直近 90 日官报全文，90 日以前受检索/付费限制，必须建设每日增量归档。 |
 | <a id="dd-519"></a>dd-519 | 案例 | [裁判所判例检索系统（Courts in Japan）](https://www.courts.go.jp/app/hanrei_jp/search1) | P1 | `web` | [ ] | 日本最高裁、高裁、下级裁、行政及知产判例官方检索与裁判书 PDF。 |
 | <a id="dd-520"></a>dd-520 | 税务资料 | [国税厅法令解释通达、质义应答与文书回答事例（NTA）](https://www.nta.go.jp/law/index.htm) | P1 | `web` | [x] | 已落库 sources/dd-520.yaml（web 适配器，补充 GlobalSign Root R46 根证书与 HTML <meta charset=Shift_JIS> 自动探测解码，保留日文全角空格），实网 collect -> reparse 跑通（日本国税厅法人税基本通达第1章各节条文，补齐税务资料实网样本）。 |
@@ -702,7 +702,7 @@
 | <a id="dd-559"></a>dd-559 | 法律法规 | [电子联邦法规汇编（eCFR API - ecfr.gov）](https://www.ecfr.gov/developers/documentation/api/v1) | P0 | `structured_xml`（eCFR REST/XML） | [x] | 已落库 sources/dd-559.yaml（structured_xml 适配器，支持 eCFR Versioner XML <DIV1>–<DIV9> 与双重转义 hierarchy_metadata 解析），实网 collect -> reparse 跑通（1 CFR Part 1）。 |
 | <a id="dd-560"></a>dd-560 | 法律法规 | [Open States 美国 50 州立法与法案聚合](https://openstates.org/) | P1 | `openstates_bridge`（[`dd-560.yaml`](../../sources/dd-560.yaml)） | [x] | **实网已跑通**：已通过 `.env` 配置 `OPENSTATES_API_KEY`，验证 `openstates_bridge` 对接 `v3.openstates.org/bills` 获取华盛顿州法案（`HB 1345`）并顺着版本链接从 `lawfilesext.leg.wa.gov` 下载 3 个官方 PDF 原件版本（`Passed Legislature` / `Bill` / `Engrossed Bill`）直提入库 + 离线 `reparse`（`external_requests=0`）。 |
 | <a id="dd-561"></a>dd-561 | 案例 | [CourtListener / Free Law Project &amp; Juriscraper（美国联邦与各州判例）](https://www.courtlistener.com/) | P0 | `juriscraper_bridge`（[`dd-561.yaml`](../../sources/dd-561.yaml)） | [x] | **实网已跑通（`us-ca1`）**：已验证 `juriscraper_bridge` 对接 CourtListener REST API v4 检索美国联邦第一巡回上诉法院（`ca1`，`25-1348`）判例、下载 `storage.courtlistener.com` 判决书 PDF 原件直提 + 离线 `reparse`（`external_requests=0`）。 |
-| <a id="dd-562"></a>dd-562 | 案例 | [美国联邦最高法院官网（supremecourt.gov）与 Caselaw Access Project (CAP)](https://www.supremecourt.gov/opinions/opinions.aspx) | P1 | `web` / `structured_xml` | [ ] | **实测受阻（http_403）**：美国联邦最高法院 www.supremecourt.gov 触发 Akamai WAF 拦截，返回 HTTP 403 Access Denied。 |
+| <a id="dd-562"></a>dd-562 | 案例 | [美国联邦最高法院官网（supremecourt.gov）与 Caselaw Access Project (CAP)](https://www.supremecourt.gov/opinions/opinions.aspx) | P1 | `web`（[`dd-562.yaml`](../../sources/dd-562.yaml)） | [x] | 已落库 sources/dd-562.yaml（web 适配器，对接 Caselaw Access Project 官方静态档案 static.case.law），实网 collect -> reparse 跑通（500 U.S. 1，Stevens v. Department of the Treasury，No. 89-1821，1991-04-24）。 |
 | <a id="dd-563"></a>dd-563 | 税务资料 | [美国国税局（IRS Internal Revenue Bulletins / Written Determinations）与美国税务法院（DAWSON）](https://www.irs.gov/irb) | P0 | `web` | [x] | 已落库 sources/dd-563.yaml（web 适配器），实网 collect -> reparse 跑通（美国国税局 Internal Revenue Bulletin: 2026-43 全文）。 |
 
 ### 3.2 加拿大与英属维尔京群岛 (Canada & BVI)
@@ -712,7 +712,7 @@
 | <a id="dd-010"></a>dd-010 | 其他 | [BVI 金融服务委员会（BVI Financial Services Commission）](http://www.bvifsc.vg/) | 待复查 | 待复查（连接/风控限制） | [ ] | 历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。 |
 | <a id="dd-013"></a>dd-013 | 其他 | [加拿大联邦企业登记库（Corporations Canada）](https://www.ic.gc.ca/app/scr/cc/CorporationsCanada/fdrlCrpSrch.html?locale=en_CA) | 待复查 | 待复查（连接/风控限制） | [ ] | 历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。 |
 | <a id="dd-564"></a>dd-564 | 法律法规 | [加拿大司法部联邦法规库（Justice Laws Website &amp; GitHub XML）](https://laws-lois.justice.gc.ca/) | P0 | `structured_xml` | [x] | 已落库 sources/dd-564.yaml（structured_xml 适配器，支持加拿大 Justice Laws <Statute>/<Regulation> LIMS XML 词表），实网 collect -> reparse 跑通（Access to Information Act, A-1）。 |
-| <a id="dd-565"></a>dd-565 | 案例 | [加拿大最高法院（SCC / Lexum）、联邦法院与 CanLII](https://decisions.scc-csc.ca/) | P1 | `web` | [ ] | **实测受阻（http_403 / zero_targets_discovered）**：加拿大最高法院 decisions.scc-csc.ca 列表接口受 Decisia/Lexum 反爬限制返回 HTTP 403 或空动态外壳（0 条静态判例链接）。 |
+| <a id="dd-565"></a>dd-565 | 案例 | [加拿大最高法院（SCC / Lexum）、联邦法院与 CanLII](https://decisions.scc-csc.ca/) | P1 | `web`（[`dd-565.yaml`](../../sources/dd-565.yaml)） | [x] | 已落库 sources/dd-565.yaml（web 适配器，对接加拿大最高法院 www.scc-csc.ca/cases-dossiers/ 官方案件卷宗与裁判摘要库），实网 collect -> reparse 跑通（Case No. 40000，Christian Chukwuedozie Chijindu v. Law Society of Ontario，2022-05-12）。 |
 | <a id="dd-566"></a>dd-566 | 税务资料 | [加拿大税务局（CRA Income Tax Folios, Circulars &amp; Rulings）](https://www.canada.ca/en/revenue-agency.html) | P1 | `web` | [ ] | 公开所得税专题指南（Income Tax Folios）、信息通告（Information Circulars）与 GST/HST 备忘录。 |
 
 ---
@@ -732,7 +732,7 @@
 
 | Source ID | ⁠  资⁠料⁠类⁠型  ⁠ | 来⁠源⁠名⁠称        ⁠ | ⁠ 优⁠先⁠级 ⁠ | 推⁠荐⁠适⁠配⁠器      ⁠ | ⁠ 状⁠态 ⁠ | 备⁠注⁠与⁠实⁠测⁠结⁠论 |
 | :--- | :---: | :--- | :---: | :--- | :---: | :--- |
-| <a id="dd-570"></a>dd-570 | 法律法规 | [新西兰立法门户（New Zealand Legislation - PCO）](https://www.legislation.govt.nz/) | P0 | `structured_xml` | [ ] | **实测受阻（http_202 / zero_targets_discovered）**：新西兰 www.legislation.govt.nz 启用 CloudFront AWS WAF 挑战，返回 HTTP 202（0 字节响应体）。 |
+| <a id="dd-570"></a>dd-570 | 法律法规 | [新西兰立法门户（New Zealand Legislation - PCO）](https://www.legislation.govt.nz/) | P0 | `web`（[`dd-570.yaml`](../../sources/dd-570.yaml)） | [x] | 已落库 sources/dd-570.yaml（web 适配器，配置标准浏览器 User-Agent 直连新版官方立法门户 /act/public/2024/1/en/latest/ 绕开旧路径 CloudFront WAF 202），实网 collect -> reparse 跑通（New Zealand Productivity Commission Act Repeal Act 2024，2024 No 1，2024-02-05）。 |
 | <a id="dd-571"></a>dd-571 | 税务资料 | [新西兰司法部判决库（NZLII / Courts of NZ）与税务局税务政策（IRD Tax Policy）](https://www.courtsofnz.govt.nz/) | P1 | `web` | [ ] | 公开新西兰高级法院判决与[税务局政策库](https://www.taxtechnical.ird.govt.nz/)税务裁定、解释声明（Interpretation Statements）。 |
 
 ---
@@ -743,7 +743,7 @@
 
 | Source ID | ⁠  资⁠料⁠类⁠型  ⁠ | 来⁠源⁠名⁠称        ⁠ | ⁠ 优⁠先⁠级 ⁠ | 推⁠荐⁠适⁠配⁠器      ⁠ | ⁠ 状⁠态 ⁠ | 备⁠注⁠与⁠实⁠测⁠结⁠论 |
 | :--- | :---: | :--- | :---: | :--- | :---: | :--- |
-| <a id="dd-572"></a>dd-572 | 法律法规 | [Laws.Africa Commons &amp; 非洲各国 LII 联盟（SouthLII / Kenya Law / TanzLII 等）](https://commons.laws.africa/) | P1 | `structured_xml`（Akoma Ntoso） | [ ] | **实测受阻（http_404 / http_403）**：commons.laws.africa 公开 XML 路径已下线返回 HTTP 404（需商业授权 API Token）；附属 LII 站点（如 tanzlii.org）启用 Cloudflare Turnstile 返回 HTTP 403。 |
+| <a id="dd-572"></a>dd-572 | 法律法规 | [Laws.Africa Commons &amp; 非洲各国 LII 联盟（SouthLII / Kenya Law / TanzLII 等）](https://commons.laws.africa/) | P1 | `web`（[`dd-572.yaml`](../../sources/dd-572.yaml)） | [x] | 已落库 sources/dd-572.yaml（web 适配器，对接 Laws.Africa 技术底座驱动的肯尼亚官方国家法律报告门户 new.kenyalaw.org Akoma Ntoso 网页端），实网 collect -> reparse 跑通（Constitution of Kenya (Repealed)，Act No. 718 of 1963，1963-12-10）。 |
 
 ### 5.2 国际组织与跨法域条约/税制库 (UN / OECD / WTO / WIPO / ICC)
 
