@@ -324,20 +324,28 @@ allowed_path_prefixes:
             # c) attachment_url_pattern must match multiple distinct attachment filenames under allowed scope
             att_pat = cfg.documents.attachment_url_pattern or ""
             att_re = re.compile(att_pat, re.I)
-            candidate_pairs: list[tuple[str, str]] = []
+            candidate_triplets: list[tuple[str, str, str]] = []
             for host in cfg.allowed_hosts:
                 prefixes = cfg.host_path_scopes.get(host) or cfg.allowed_path_prefixes
                 for prefix in prefixes:
                     base = f"https://{host}{prefix.rstrip('/')}"
-                    candidate_pairs.append(
-                        (f"{base}/doc_alpha_01.pdf", f"{base}/doc_beta_02.pdf")
+                    candidate_triplets.append(
+                        (
+                            f"{base}/doc_alpha_01.pdf",
+                            f"{base}/doc_beta_02.pdf",
+                            f"{base}/official_annex_03.pdf",
+                        )
                     )
-                    candidate_pairs.append(
-                        (f"{base}/item/100/doc_alpha_01.pdf", f"{base}/item/100/doc_beta_02.pdf")
+                    candidate_triplets.append(
+                        (
+                            f"{base}/item/100/doc_alpha_01.pdf",
+                            f"{base}/item/100/doc_beta_02.pdf",
+                            f"{base}/item/100/official_annex_03.pdf",
+                        )
                     )
             assert any(
-                bool(att_re.search(u1)) and bool(att_re.search(u2))
-                for u1, u2 in candidate_pairs
+                bool(att_re.search(u1)) and bool(att_re.search(u2)) and bool(att_re.search(u3))
+                for u1, u2, u3 in candidate_triplets
             ), (
                 f"{cfg.id} attachment_url_pattern {att_pat!r} must match multiple distinct filenames "
                 "(disabling attachments or locking onto a single filename is forbidden)"
@@ -375,7 +383,12 @@ allowed_path_prefixes:
 
             # e) No prefix in allowed_path_prefixes or host_path_scopes may lock onto a single file extension
             all_prefixes = list(cfg.allowed_path_prefixes)
-            for scoped_prefixes in cfg.host_path_scopes.values():
+            for host, scoped_prefixes in cfg.host_path_scopes.items():
+                if cfg.allowed_path_prefixes != ["/"]:
+                    for prefix in scoped_prefixes:
+                        assert prefix in cfg.allowed_path_prefixes, (
+                            f"{cfg.id} host_path_scopes[{host!r}] prefix {prefix!r} must be present in allowed_path_prefixes"
+                        )
                 all_prefixes.extend(scoped_prefixes)
             for prefix in all_prefixes:
                 assert not prefix.lower().endswith(forbidden_prefix_exts), (
@@ -386,4 +399,12 @@ allowed_path_prefixes:
             if "max_pages" in cfg.adapter_options:
                 assert int(cfg.adapter_options["max_pages"]) >= 2, (
                     f"{cfg.id} adapter_options.max_pages must be >= 2"
+                )
+
+            # g) content_xpath must not truncate multi-block content containers to only the first child element
+            if cfg.documents.content_xpath:
+                assert not re.search(
+                    r"/(?:div|p|section|article)\[\s*1\s*\]\s*$", cfg.documents.content_xpath
+                ), (
+                    f"{cfg.id} content_xpath {cfg.documents.content_xpath!r} must not truncate multi-block content containers to [1]"
                 )

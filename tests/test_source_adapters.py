@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import socket
 import threading
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -39,8 +40,13 @@ def _make_rii_zip_bytes(
     return buf.getvalue()
 
 
+class _IPv6ThreadingHTTPServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
 class _BridgeFixtureHandler(BaseHTTPRequestHandler):
     sample_pdf: bytes = b""
+    secondary_netloc: str = ""
     rii_zip: bytes = _make_rii_zip_bytes(
         "JURE100055033", "VIII ZR 12/25", "ECLI:DE:BGH:2026:150426UVIIIZR12.25.0"
     )
@@ -736,7 +742,12 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif self.path == "/page/pagenew.aspx?docid=210001":
-            body = """<html><head><meta charset="utf-8"><title>Nghị định 105/2026/NĐ-CP</title></head><body>
+            pdf_href_1 = (
+                f"http://{self.secondary_netloc}/cpp/files/vbpq/2026/04/105-nd.signed.pdf"
+                if self.secondary_netloc
+                else "/cpp/files/vbpq/2026/04/105-nd.signed.pdf"
+            )
+            body = f"""<html><head><meta charset="utf-8"><title>Nghị định 105/2026/NĐ-CP</title></head><body>
             <h4 class="title">Nghị định 105/2026/NĐ-CP quy định về giao dịch điện tử</h4>
             <table>
               <tr><td>Số ký hiệu</td><td>105/2026/NĐ-CP</td></tr>
@@ -745,7 +756,7 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
               <tr><td>Loại văn bản</td><td>Nghị định</td></tr>
               <tr><td>Trích yếu</td><td>Nghị định quy định về giao dịch điện tử</td></tr>
             </table>
-            <a href="/cpp/files/vbpq/2026/04/105-nd.signed.pdf">105-nd.signed.pdf</a>
+            <a href="{pdf_href_1}">105-nd.signed.pdf</a>
             </body></html>""".encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -753,7 +764,12 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif self.path == "/page/pagenew.aspx?docid=210002":
-            body = """<html><head><meta charset="utf-8"><title>Nghị định 106/2026/NĐ-CP</title></head><body>
+            pdf_href_2 = (
+                f"http://{self.secondary_netloc}/cpp/files/vbpq/2026/04/106-nd.signed.pdf"
+                if self.secondary_netloc
+                else "/cpp/files/vbpq/2026/04/106-nd.signed.pdf"
+            )
+            body = f"""<html><head><meta charset="utf-8"><title>Nghị định 106/2026/NĐ-CP</title></head><body>
             <h4 class="title">Nghị định 106/2026/NĐ-CP quy định về chữ ký số</h4>
             <table>
               <tr><td>Số ký hiệu</td><td>106/2026/NĐ-CP</td></tr>
@@ -762,7 +778,7 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
               <tr><td>Loại văn bản</td><td>Nghị định</td></tr>
               <tr><td>Trích yếu</td><td>Nghị định quy định về chữ ký số</td></tr>
             </table>
-            <a href="/cpp/files/vbpq/2026/04/106-nd.signed.pdf">106-nd.signed.pdf</a>
+            <a href="{pdf_href_2}">106-nd.signed.pdf</a>
             </body></html>""".encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -771,6 +787,7 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif self.path.startswith("/api/v1/documents.json"):
             host = self.headers.get("Host", "127.0.0.1")
+            sec_host = self.secondary_netloc or host
             payload = {
                 "count": 1,
                 "results": [
@@ -785,7 +802,7 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
                         "citation": "91 FR 24001",
                         "html_url": f"http://{host}/documents/2026/04/20/2026-08801/cybersecurity-rule",
                         "full_text_xml_url": f"http://{host}/documents/full_text/xml/2026/04/20/2026-08801.xml",
-                        "pdf_url": f"http://{host}/content/pkg/FR-2026-04-20/pdf/2026-08801.pdf",
+                        "pdf_url": f"http://{sec_host}/content/pkg/FR-2026-04-20/pdf/2026-08801.pdf",
                     }
                 ],
             }
@@ -1357,7 +1374,12 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             if "D1N=" not in cookie_hdr:
                 body = b'<html><body><script>document.cookie="D1N=ok123"+"; expires=Thu, 31-Dec-37 23:55:55 GMT; path=/";window.location.reload(true);</script></body></html>'
             else:
-                body = """<!DOCTYPE html><html><head><title>Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng</title></head><body>
+                dt_pdf_1 = (
+                    f"http://{self.secondary_netloc}/uploadFiles/host/local/du-thao-01.pdf"
+                    if self.secondary_netloc
+                    else "/uploadFiles/host/local/du-thao-01.pdf"
+                )
+                body = f"""<!DOCTYPE html><html><head><title>Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng</title></head><body>
                 <div class="col-lg-8 info-dt-l">
                   <h3>Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng</h3>
                   Cơ quan chủ trì soạn thảo: Bộ Quốc phòng
@@ -1366,7 +1388,7 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
                 </div>
                 <div id="nav-home">
                   <p>Lần dự thảo 1 - Ngày đăng: 05/08/2026 - Toàn văn hồ sơ dự án Luật số 45/2026/QH15 sửa đổi bổ sung một số điều về quân sự quốc phòng.</p>
-                  <a href="/uploadFiles/host/local/du-thao-01.pdf">Dự thảo PDF</a>
+                  <a href="{dt_pdf_1}">Dự thảo PDF</a>
                 </div>
                 </body></html>""".encode("utf-8")
             self.send_response(200)
@@ -1379,7 +1401,12 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             if "D1N=" not in cookie_hdr:
                 body = b'<html><body><script>document.cookie="D1N=ok123"+"; expires=Thu, 31-Dec-37 23:55:55 GMT; path=/";window.location.reload(true);</script></body></html>'
             else:
-                body = """<!DOCTYPE html><html><head><title>Luật Hòa giải ở cơ sở (sửa đổi)</title></head><body>
+                dt_pdf_2 = (
+                    f"http://{self.secondary_netloc}/uploadFiles/host/local/du-thao-02.pdf"
+                    if self.secondary_netloc
+                    else "/uploadFiles/host/local/du-thao-02.pdf"
+                )
+                body = f"""<!DOCTYPE html><html><head><title>Luật Hòa giải ở cơ sở (sửa đổi)</title></head><body>
                 <div class="col-lg-8 info-dt-l">
                   <h3>Luật Hòa giải ở cơ sở (sửa đổi)</h3>
                   Cơ quan chủ trì soạn thảo: Bộ Tư pháp
@@ -1388,7 +1415,7 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
                 </div>
                 <div id="nav-home">
                   <p>Lần dự thảo 2 - Ngày đăng: 22/05/2026 - Toàn văn hồ sơ dự án Luật Hòa giải ở cơ sở (sửa đổi).</p>
-                  <a href="/uploadFiles/host/local/du-thao-02.pdf">Dự thảo PDF</a>
+                  <a href="{dt_pdf_2}">Dự thảo PDF</a>
                 </div>
                 </body></html>""".encode("utf-8")
             self.send_response(200)
@@ -1907,7 +1934,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-507", "税务资料", "dipn03"),
             ("dd-512", "法律法规", "Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng"),
             ("dd-514", "案例", "84/2026/AL"),
-            ("dd-516", "税务资料", "20/2026/NĐ-CP"),
+            ("dd-516", "税务资料", "Đề nghị hướng dẫn"),
             ("dd-517", "法律法规", "平成五年法律第八十八号"),
         ],
     )
@@ -1920,6 +1947,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
         expected_substr: str,
     ) -> None:
         """Production `sources/dd-*.yaml` extraction rules collect and offline-reparse cleanly against local fixtures."""
+        import re
         from urllib.parse import urlsplit, urlunsplit
 
         if not _BridgeFixtureHandler.sample_pdf:
@@ -1932,6 +1960,12 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
         port = server.server_address[1]
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
+
+        server_v6 = _IPv6ThreadingHTTPServer(("::1", 0), _BridgeFixtureHandler)
+        port_v6 = server_v6.server_address[1]
+        thread_v6 = threading.Thread(target=server_v6.serve_forever, daemon=True)
+        thread_v6.start()
+        _BridgeFixtureHandler.secondary_netloc = f"[::1]:{port_v6}"
         stopped = False
 
         try:
@@ -1939,6 +1973,10 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             raw_cfg: dict[str, Any] = yaml.safe_load(
                 (repo_root / "sources" / f"{source_id}.yaml").read_text(encoding="utf-8")
             )
+            orig_hosts = list(raw_cfg.get("allowed_hosts", []))
+            primary_host = orig_hosts[0]
+            secondary_hosts = orig_hosts[1:]
+
             rewritten_urls: list[str] = []
             entry_urls: list[str] = raw_cfg["entry_urls"]
             for entry_url in entry_urls:
@@ -1947,28 +1985,46 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                     urlunsplit(("http", f"127.0.0.1:{port}", parts.path, parts.query, ""))
                 )
             raw_cfg["entry_urls"] = rewritten_urls
-            raw_cfg["allowed_hosts"] = ["127.0.0.1"]
+            raw_cfg["allowed_hosts"] = ["127.0.0.1", "::1"] if secondary_hosts else ["127.0.0.1"]
             if "host_path_scopes" in raw_cfg:
-                scoped_prefixes: list[str] = list(raw_cfg.get("allowed_path_prefixes", []))
-                for p_list in raw_cfg.pop("host_path_scopes").values():
+                orig_scopes: dict[str, list[str]] = raw_cfg["host_path_scopes"]
+                new_scopes: dict[str, list[str]] = {}
+                if primary_host in orig_scopes:
+                    new_scopes["127.0.0.1"] = list(orig_scopes[primary_host])
+                sec_scoped: list[str] = []
+                for sec_host in secondary_hosts:
+                    for p in orig_scopes.get(sec_host, []):
+                        if p not in sec_scoped:
+                            sec_scoped.append(p)
+                if sec_scoped:
+                    new_scopes["::1"] = sec_scoped
+                raw_cfg["host_path_scopes"] = new_scopes
+                allowed_prefixes: list[str] = list(raw_cfg.get("allowed_path_prefixes", []))
+                for p_list in new_scopes.values():
                     for p in p_list:
-                        if p not in scoped_prefixes:
-                            scoped_prefixes.append(p)
-                raw_cfg["allowed_path_prefixes"] = scoped_prefixes
+                        if p not in allowed_prefixes:
+                            allowed_prefixes.append(p)
+                raw_cfg["allowed_path_prefixes"] = allowed_prefixes
             raw_cfg["delay"] = 0.0
             if "documents" in raw_cfg:
-                import re
+
+                def _rewrite_pat(pat: str) -> str:
+                    out = pat
+                    for sec_host in secondary_hosts:
+                        out = out.replace(re.escape(sec_host), rf"\[::1\]:{port_v6}")
+                        out = out.replace(sec_host.replace(".", r"\."), rf"\[::1\]:{port_v6}")
+                    out = out.replace(re.escape(primary_host), rf"127\.0\.0\.1:{port}")
+                    out = out.replace(primary_host.replace(".", r"\."), rf"127\.0\.0\.1:{port}")
+                    out = re.sub(r"^\^https?://", "^http://", out)
+                    return out
 
                 if "detail_url_patterns" in raw_cfg["documents"]:
                     raw_cfg["documents"]["detail_url_patterns"] = [
-                        re.sub(r"^\^https?://[^/]+", rf"^http://127\.0\.0\.1:{port}", pat)
-                        for pat in raw_cfg["documents"]["detail_url_patterns"]
+                        _rewrite_pat(pat) for pat in raw_cfg["documents"]["detail_url_patterns"]
                     ]
                 if "attachment_url_pattern" in raw_cfg["documents"]:
-                    raw_cfg["documents"]["attachment_url_pattern"] = re.sub(
-                        r"^\^https?://[^/]+",
-                        rf"^http://127\.0\.0\.1:{port}",
-                        raw_cfg["documents"]["attachment_url_pattern"],
+                    raw_cfg["documents"]["attachment_url_pattern"] = _rewrite_pat(
+                        raw_cfg["documents"]["attachment_url_pattern"]
                     )
 
             replay_yaml = tmp_path / f"{source_id}-replay.yaml"
@@ -2044,6 +2100,42 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         expected_substr in (projected["doc_number"] or "")
                         or expected_substr in (projected["title"] or "")
                     ), f"Expected {expected_substr} in {projected}"
+                    if source_id in {
+                        "dd-492",
+                        "dd-493",
+                        "dd-499",
+                        "dd-507",
+                        "dd-512",
+                        "dd-513",
+                        "dd-560",
+                        "dd-561",
+                        "dd-565",
+                    }:
+                        assert {
+                            r["resource_id"] for r in rows if r["original_hash"] is not None
+                        } == {r["resource_id"] for r in rows}, (
+                            f"Expected captured attachment/original for every resource of {source_id}"
+                        )
+                    if source_id in {"dd-512", "dd-516", "dd-565"}:
+                        from wlh.engine.objects import Objects
+
+                        md_text = (
+                            Objects()
+                            .get(rows[0]["markdown_hash"])
+                            .decode("utf-8", errors="replace")
+                        )
+                        if source_id == "dd-512":
+                            assert "Toàn văn hồ sơ dự án" in md_text
+                        elif source_id == "dd-516":
+                            assert projected["doc_number"] is None
+                            assert "Trả lời:" in md_text
+                        elif source_id == "dd-565":
+                            assert (
+                                md_text.count(
+                                    "Full judgment reasons of the Supreme Court of Canada"
+                                )
+                                == 1
+                            )
                     if source_id in {"dd-550", "dd-558"}:
                         assert rows[0]["original_media_type"] == "application/zip"
                         assert (projected["original_file"] or "").endswith(".zip")
@@ -2063,17 +2155,23 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         assert projected["published_at"] == "2026-10-21"
 
             server.shutdown()
+            server_v6.shutdown()
             thread.join(timeout=2.0)
+            thread_v6.join(timeout=2.0)
             stopped = True
             rp_run = prepare_run(replay_yaml, "reparse")
             rp_res = execute_run(rp_run)
             assert rp_res["status"] == "complete", f"{source_id} reparse failed: {rp_res}"
             assert rp_res["report"]["external_requests"] == 0
         finally:
+            _BridgeFixtureHandler.secondary_netloc = ""
             if not stopped:
                 server.shutdown()
+                server_v6.shutdown()
                 thread.join(timeout=2.0)
+                thread_v6.join(timeout=2.0)
             server.server_close()
+            server_v6.server_close()
 
     def test_collect_with_zero_discovered_targets_fails_with_explicit_error(
         self, initialized_db: dict[str, str], tmp_path: Path

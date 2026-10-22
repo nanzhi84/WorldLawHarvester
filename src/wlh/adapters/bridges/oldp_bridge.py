@@ -54,9 +54,7 @@ class Adapter(RecordAdapter):
             data = rii_xml(data, self.config["budget"]["response_bytes"])
         if data.lstrip().startswith((b"{", b"[")):
             result: list[dict[str, Any]] = []
-            for raw in items(payload(data), ("results", "cases", "data"))[
-                : self.config["budget"]["documents"]
-            ]:
+            for raw in items(payload(data), ("results", "cases", "data")):
                 if raw.get("model") and raw["model"] != "cases.case":
                     continue
                 r = raw.get("fields", raw)
@@ -73,7 +71,10 @@ class Adapter(RecordAdapter):
                         "downloads": [{"url": r["pdf_url"]}] if r.get("pdf_url") else [],
                     }
                 )
-            return result
+            limit = int(self.config["budget"]["documents"])
+            if len(result) > limit:
+                self.truncated = "document_budget_exceeded"
+            return result[:limit]
         if zipped or data.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(
             (b"<?xml", b"<dokument", b"<items")
         ):

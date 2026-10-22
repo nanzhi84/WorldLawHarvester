@@ -18,6 +18,8 @@ class Adapter(RecordAdapter):
             return []
         entries = items(payload(data), ("decisions", "results"))
         limit: int = self.config["budget"]["documents"]
+        if len(entries) > limit:
+            self.truncated = "document_budget_exceeded"
         requests: list[dict[str, Any]] = []
         for r in entries[:limit]:
             if (
@@ -32,6 +34,8 @@ class Adapter(RecordAdapter):
         if data.lstrip().startswith((b"{", b"[")):
             entries = items(payload(data), ("decisions", "results"))
             limit: int = self.config["budget"]["documents"]
+            if len(entries) > limit:
+                self.truncated = "document_budget_exceeded"
             return [
                 {
                     "external_key": str(r.get("decision_id") or r.get("id") or r["docket_number"]),

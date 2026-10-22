@@ -97,6 +97,7 @@ class RecordAdapter(Base):
     ) -> dict[str, Any]:
         if task["payload"].get("role") == "attachment":
             return {"requests": [], "targets": []}
+        self.truncated = None
         data: bytes = ctx.read(acquisition)
         records = self.records(data, acquisition)
         targets: list[dict[str, Any]] = []
@@ -130,8 +131,14 @@ class RecordAdapter(Base):
                     "inputs": inputs,
                 }
             )
-        self.truncated = None
-        requests = self.next_requests(data, acquisition) if ctx.follow_links(task) else []
+        if ctx.follow_links(task):
+            requests = self.next_requests(data, acquisition)
+        else:
+            requests = []
+            if ctx.runtime.mode == "collect":
+                unfollowed = self.next_requests(data, acquisition)
+                if unfollowed:
+                    self.truncated = self.truncated or "max_depth_exceeded"
         return {
             "requests": requests,
             "targets": targets,

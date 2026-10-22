@@ -218,9 +218,14 @@ class Adapter(Base):
             tree, _, _ = parse_html(data, acquisition["charset"])
             seen: set[str] = set()
             for anchor in tree.xpath(
-                "//a[@href] | //a[@onclick] | //frame[@src] | //iframe[@src]"
+                "//a[@href] | //a[@docurl] | //a[@data-url] | //a[@data-href] | //a[@onclick] | //frame[@src] | //iframe[@src]"
             ):
-                raw_href: str | None = anchor.get("href")
+                raw_href: str | None = (
+                    anchor.get("href")
+                    or anchor.get("docurl")
+                    or anchor.get("data-url")
+                    or anchor.get("data-href")
+                )
                 if (
                     not raw_href
                     or raw_href.strip() in ("#", "")
@@ -249,6 +254,10 @@ class Adapter(Base):
                 next_req, truncated = aspnet_next_page(tree, url, page, self.max_pages, self.config)
                 if next_req is not None:
                     requests.append(next_req)
+                if not truncated:
+                    wlh_trunc = tree.xpath("//*[@data-wlh-truncated]/@data-wlh-truncated")
+                    if wlh_trunc:
+                        truncated = str(wlh_trunc[0])
         targets: list[dict[str, Any]] = []
         if detail and (kind in TEXT_KINDS | BINARY_KINDS):
             inputs = [{"request": request, "role": "detail"}]
@@ -297,6 +306,8 @@ class Adapter(Base):
         rule: Any = self.config["documents"]["content_xpath"]
         nodes = tree.xpath(rule) if rule else [tree.body if tree.body is not None else tree]
         nodes = [n for n in nodes if isinstance(n, etree._Element)]
+        node_set = set(nodes)
+        nodes = [n for n in nodes if not any(anc in node_set for anc in n.iterancestors())]
         if not nodes:
             if blocked(etree.tostring(tree, encoding="utf-8"), self.config):
                 raise WlhError("target_content_blocked")
