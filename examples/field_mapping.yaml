@@ -16,7 +16,7 @@ columns:
     zh_label: 解析后文件
     type: string
     nullable: false
-    description: 规范化 Markdown 文件名（{safe_title}_{markdown_hash[:8]}[_{volume_order:02d}].md）
+    description: 规范化 Markdown 文件名（{safe_title}_{source_record_hash[:8]}_{markdown_hash[:8]}[_{volume_order:02d}].md）
 
   - index: 3
     canonical_key: doc_type
@@ -121,18 +121,10 @@ columns:
 
   - index: 16
     canonical_key:
-      - source_id
-      - resource_id
-      - version_id
-      - row_index
-      - role
       - markdown_hash
       - original_hash
-      - original_media_type
-      - locator
-      - extensions
-    zh_label: 附加寻址与血缘字段
+    zh_label: 文件哈希
     type: object
     nullable: false
-    description: 供下游通过 GET /files/{sha256} 按 markdown_hash / original_hash 从 MinIO CAS 拉取字节流及追溯血缘
+    description: 供下游通过 GET /files/{sha256} 按 markdown_hash / original_hash 从 S3 CAS 拉取字节流
 

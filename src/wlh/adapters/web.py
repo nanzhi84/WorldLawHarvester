@@ -59,15 +59,39 @@ def parse_html(data: bytes, charset: str | None) -> tuple[Any, str, str]:
 def clean_url(base: str, href: str | None) -> str | None:
     if not href:
         return None
-    href = href.strip()
-    if href.lower().startswith(("javascript:", "mailto:", "tel:", "data:", "#")):
+    cleaned: str = href.strip()
+    if cleaned.lower().startswith("javascript:") or re.match(r"^[A-Za-z_]\w*\s*\(", cleaned):
+        js_match: re.Match[str] | None = re.search(
+            r"""['"]((?:https?://|/)[^'"]+)['"]""", cleaned
+        )
+        if not js_match:
+            return None
+        cleaned = str(js_match.group(1) or "").strip()
+    if not cleaned or cleaned.lower().startswith(("javascript:", "mailto:", "tel:", "data:", "#")):
         return None
     try:
-        parts: Any = urlsplit(urljoin(base, href))
+        base_parts: Any = urlsplit(base)
+        parts: Any = urlsplit(urljoin(base, cleaned))
         if parts.scheme not in ("http", "https"):
             return None
+        scheme: str = (
+            "https"
+            if parts.scheme == "http"
+            and base_parts.scheme == "https"
+            and parts.netloc == base_parts.netloc
+            else parts.scheme
+        )
+        query: str = (
+            "iframe=true"
+            if base_parts.query == "iframe=true"
+            and parts.netloc == base_parts.netloc
+            and parts.path.endswith("/index.do")
+            and "/item/" in parts.path
+            and not parts.query
+            else parts.query
+        )
         return public_url(
-            urlunsplit((parts.scheme, parts.netloc, parts.path or "/", parts.query, ""))
+            urlunsplit((scheme, parts.netloc, parts.path or "/", query, ""))
         )
     except (WlhError, ValueError):
         return None
@@ -193,8 +217,17 @@ class Adapter(Base):
         if kind == "html":
             tree, _, _ = parse_html(data, acquisition["charset"])
             seen: set[str] = set()
-            for anchor in tree.xpath("//a[@href]"):
-                link: str | None = clean_url(url, anchor.get("href"))
+            for anchor in tree.xpath(
+                "//a[@href] | //a[@onclick] | //frame[@src] | //iframe[@src]"
+            ):
+                raw_href: str | None = anchor.get("href")
+                if (
+                    not raw_href
+                    or raw_href.strip() in ("#", "")
+                    or raw_href.strip().lower().startswith("javascript:void")
+                ):
+                    raw_href = anchor.get("onclick") or anchor.get("src")
+                link: str | None = clean_url(url, raw_href)
                 if not link or link in seen or not self.in_scope(link):
                     continue
                 seen.add(link)
@@ -306,6 +339,8 @@ class Adapter(Base):
         for name, rule in fields.items():
             if rule.get("value") is not None:
                 values[name] = rule["value"]
+            elif not rule.get("xpath") and rule.get("regex"):
+                values[name] = field_value(None, url, rule, is_date=(name in DATE_FIELDS))
         return values, values.get("title") or file_name(url), acquisition["charset"]
 
     def build(self, ctx: Any, target: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:

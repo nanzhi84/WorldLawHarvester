@@ -17,27 +17,36 @@ import yaml
 from .conftest import make_native_pdf
 
 
-def _make_rii_zip_bytes() -> bytes:
+def _make_rii_zip_bytes(
+    doknr: str = "JURE100055033",
+    aktenzeichen: str = "VIII ZR 12/25",
+    ecli: str = "ECLI:DE:BGH:2026:150426UVIIIZR12.25.0",
+) -> bytes:
     buf = io.BytesIO()
-    xml_payload = """<?xml version="1.0" encoding="UTF-8"?>
+    xml_payload = f"""<?xml version="1.0" encoding="UTF-8"?>
 <dokument>
-  <doknr>JURE100055033</doknr>
-  <ecli>ECLI:DE:BGH:2026:150426UVIIIZR12.25.0</ecli>
+  <doknr>{doknr}</doknr>
+  <ecli>{ecli}</ecli>
   <gertyp>BGH</gertyp>
   <entsch-datum>20260415</entsch-datum>
-  <aktenzeichen>VIII ZR 12/25</aktenzeichen>
+  <aktenzeichen>{aktenzeichen}</aktenzeichen>
   <titelzeile>Kaufrechtliche Gewährleistung bei digitalen Produkten</titelzeile>
   <tenor><p>Die Revision der Beklagten gegen das Urteil des Oberlandesgerichts wird zurückgewiesen.</p></tenor>
   <entscheidungsgruende><p>Die zulässige Revision hat in der Sache keinen Erfolg. Der Kläger hat Anspruch auf Schadensersatz.</p></entscheidungsgruende>
 </dokument>""".encode("utf-8")
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("JURE100055033.xml", xml_payload)
+        zf.writestr(f"{doknr}.xml", xml_payload)
     return buf.getvalue()
 
 
 class _BridgeFixtureHandler(BaseHTTPRequestHandler):
     sample_pdf: bytes = b""
-    rii_zip: bytes = _make_rii_zip_bytes()
+    rii_zip: bytes = _make_rii_zip_bytes(
+        "JURE100055033", "VIII ZR 12/25", "ECLI:DE:BGH:2026:150426UVIIIZR12.25.0"
+    )
+    rii_zip_2: bytes = _make_rii_zip_bytes(
+        "JURE100055034", "VIII ZR 13/25", "ECLI:DE:BGH:2026:150426UVIIIZR13.25.0"
+    )
 
     def log_message(self, format: str, *args: object) -> None:
         return
@@ -80,6 +89,17 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
 </akomaNtoso>""".encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path.startswith("/atom.xml"):
+            body = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry><link rel="alternate" type="application/akn+xml" href="/uksc/2024/1/data.xml"/></entry>
+  <entry><link rel="alternate" type="application/akn+xml" href="/uksc/2024/2/data.xml"/></entry>
+</feed>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/atom+xml; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -127,6 +147,61 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/uksc/2024/2/data.xml":
+            body = """<akomaNtoso xmlns="http://docs.oasis-open.org/legaldocml/ns/akn/3.0" xmlns:html="http://www.w3.org/1999/xhtml" xmlns:uk="https://caselaw.nationalarchives.gov.uk/akn">
+  <judgment name="judgment">
+    <meta>
+      <identification source="#tna">
+        <FRBRWork>
+          <FRBRthis value="https://caselaw.nationalarchives.gov.uk/id/uksc/2024/2"/>
+          <FRBRuri value="https://caselaw.nationalarchives.gov.uk/id/uksc/2024/2"/>
+          <FRBRdate date="2024-01-11" name="judgment"/>
+          <FRBRauthor href="#uksc"/>
+          <FRBRcountry value="GB-UKM"/>
+          <FRBRnumber value="2"/>
+          <FRBRname value="Herculito Maritime Ltd v Gunvor International BV"/>
+        </FRBRWork>
+      </identification>
+      <references source="#tna">
+        <TLCOrganization eId="uksc" href="https://www.supremecourt.uk/" showAs="The Supreme Court"/>
+      </references>
+      <proprietary source="#">
+        <uk:court>UKSC</uk:court>
+        <uk:year>2024</uk:year>
+        <uk:number>2</uk:number>
+        <uk:cite>[2024] UKSC 2</uk:cite>
+      </proprietary>
+      <presentation source="#">
+        <html:style>#judgment { font-size: 12pt; }</html:style>
+      </presentation>
+    </meta>
+    <header>
+      <p class="JudgmentReferences"><neutralCitation>[2024] UKSC 2</neutralCitation></p>
+      <p class="JudgmentTitle">JUDGMENT</p>
+    </header>
+    <judgmentBody>
+      <decision>
+        <paragraph eId="para_1"><num>1.</num><content><p>This appeal concerns piracy insurance and general average in maritime law.</p></content></paragraph>
+      </decision>
+    </judgmentBody>
+  </judgment>
+</akomaNtoso>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/gii-toc.xml":
+            body = """<?xml version="1.0" encoding="UTF-8"?>
+<items>
+  <item><title>Grundgesetz</title><link>/gg/xml.zip</link></item>
+  <item><title>Bürgerliches Gesetzbuch</title><link>/bgb/xml.zip</link></item>
+</items>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/gg/xml.zip":
             import io
             import zipfile
@@ -159,6 +234,51 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             body = buf.getvalue()
             self.send_response(200)
             self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/bgb/xml.zip":
+            import io
+            import zipfile
+
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(
+                    "BJNR001950896.xml",
+                    """<?xml version="1.0" encoding="UTF-8" ?><!DOCTYPE dokumente SYSTEM "http://www.gesetze-im-internet.de/dtd/1.01/gii-norm.dtd">
+<dokumente builddate="20260506174650" doknr="BJNR001950896">
+  <norm builddate="20260506174650" doknr="BJNR001950896">
+    <metadaten>
+      <jurabk>BGB</jurabk>
+      <ausfertigung-datum manuell="ja">1896-08-18</ausfertigung-datum>
+      <fundstelle typ="amtlich"><periodikum>RGBl</periodikum><zitstelle>1896, 195</zitstelle></fundstelle>
+      <langue>Bürgerliches Gesetzbuch</langue>
+    </metadaten>
+  </norm>
+  <norm builddate="20260506174650" doknr="BJNR001950896BJNE000102377">
+    <metadaten>
+      <jurabk>BGB</jurabk>
+      <enbez>§ 1</enbez>
+    </metadaten>
+    <textdaten>
+      <text format="XML"><Content><P>Die Rechtsfähigkeit des Menschen beginnt mit der Vollendung der Geburt.</P></Content></text>
+    </textdaten>
+  </norm>
+</dokumente>""",
+                )
+            body = buf.getvalue()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/download.html":
+            body = b"""<!DOCTYPE html><html><head><title>USC Downloads</title></head><body>
+            <a href="/download/releasepoints/us/pl/119/121/xml_usc01@119-121.zip">Title 1</a>
+            <a href="/download/releasepoints/us/pl/119/121/xml_usc02@119-121.zip">Title 2</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -200,6 +320,65 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/download/releasepoints/us/pl/119/121/xml_usc02@119-121.zip":
+            import io
+            import zipfile
+
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(
+                    "usc02.xml",
+                    """<?xml version="1.0" encoding="UTF-8"?>
+<uscDoc xml:lang="en" identifier="/us/usc/t2" xmlns="http://xml.house.gov/schemas/uslm/1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/">
+  <meta>
+    <dc:title>Title 2 - The Congress</dc:title>
+    <dc:type>USCTitle</dc:type>
+    <docNumber>2</docNumber>
+    <dc:publisher>OLRC</dc:publisher>
+    <dcterms:created>2026-09-09T11:00:02</dcterms:created>
+  </meta>
+  <main>
+    <title identifier="/us/usc/t2">
+      <num value="2">Title 2—</num>
+      <heading>THE CONGRESS</heading>
+      <chapter identifier="/us/usc/t2/ch1">
+        <heading>ELECTION OF SENATORS AND REPRESENTATIVES</heading>
+        <section identifier="/us/usc/t2/s1">
+          <heading>Time for election of Senators</heading>
+          <content><p>At the regular election held in any State next preceding the expiration of the term for which any Senator was elected to represent such State in Congress, a Senator shall be elected by the people thereof.</p></content>
+        </section>
+      </chapter>
+    </title>
+  </main>
+</uscDoc>""",
+                )
+            body = buf.getvalue()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/api/versioner/v1/structure/2024-01-01/title-1.json":
+            payload = {
+                "type": "title",
+                "identifier": "1",
+                "children": [
+                    {
+                        "type": "chapter",
+                        "identifier": "I",
+                        "children": [
+                            {"type": "part", "identifier": "1", "reserved": False},
+                            {"type": "part", "identifier": "2", "reserved": False},
+                        ],
+                    }
+                ],
+            }
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/api/versioner/v1/full/2024-01-01/title-1.xml?part=1":
             body = """<?xml version="1.0"?>
 <DIV5 N="1" TYPE="PART" VOLUME="1" hierarchy_metadata="{&amp;quot;path&amp;quot;:&amp;quot;/on/2024-01-01/title-1/part-1&amp;quot;,&amp;quot;citation&amp;quot;:&amp;quot;1 CFR Part 1&amp;quot;}">
@@ -210,6 +389,34 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
     <P>As used in this chapter, unless the context requires otherwise, Administrative Committee means the Administrative Committee of the Federal Register.</P>
   </DIV8>
 </DIV5>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/api/versioner/v1/full/2024-01-01/title-1.xml?part=2":
+            body = """<?xml version="1.0"?>
+<DIV5 N="2" TYPE="PART" VOLUME="1" hierarchy_metadata="{&amp;quot;path&amp;quot;:&amp;quot;/on/2024-01-01/title-1/part-2&amp;quot;,&amp;quot;citation&amp;quot;:&amp;quot;1 CFR Part 2&amp;quot;}">
+  <HEAD>PART 2—GENERAL INFORMATION</HEAD>
+  <AUTH><HED>Authority:</HED><PSPACE>44 U.S.C. 1506; sec. 6, E.O. 10530.</PSPACE></AUTH>
+  <DIV8 N="2.1" TYPE="SECTION" hierarchy_metadata="{&quot;path&quot;:&quot;/on/2024-01-01/title-1/section-2.1&quot;,&quot;citation&quot;:&quot;1 CFR 2.1&quot;}">
+    <HEAD>§ 2.1 Scope and purpose.</HEAD>
+    <P>This part sets forth general information regarding the Administrative Committee of the Federal Register.</P>
+  </DIV8>
+</DIV5>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/eng/XML/Legis.xml":
+            body = """<?xml version="1.0" encoding="UTF-8"?>
+<ActsRegsList>
+  <Acts>
+    <Act><LinkToXML>/eng/XML/A-1.xml</LinkToXML></Act>
+    <Act><LinkToXML>/eng/XML/C-46.xml</LinkToXML></Act>
+  </Acts>
+</ActsRegsList>""".encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/xml; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -226,6 +433,24 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
   <Body>
     <Heading level="1"><TitleText>Short Title</TitleText></Heading>
     <Section><MarginalNote>Short title</MarginalNote><Label>1</Label><Text>This Act may be cited as the Access to Information Act.</Text></Section>
+  </Body>
+</Statute>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/eng/XML/C-46.xml":
+            body = """<?xml version="1.0"?>
+<Statute lims:pit-date="2026-06-14" lims:lastAmendedDate="2026-06-14" lims:current-date="2026-06-14" xml:lang="en" xmlns:lims="http://justice.gc.ca/lims">
+  <Identification>
+    <LongTitle>An Act respecting the Criminal Law</LongTitle>
+    <ShortTitle status="official">Criminal Code</ShortTitle>
+    <Chapter><ConsolidatedNumber official="yes">C-46</ConsolidatedNumber></Chapter>
+  </Identification>
+  <Body>
+    <Heading level="1"><TitleText>Short Title</TitleText></Heading>
+    <Section><MarginalNote>Short title</MarginalNote><Label>1</Label><Text>This Act may be cited as the Criminal Code.</Text></Section>
   </Body>
 </Statute>""".encode("utf-8")
             self.send_response(200)
@@ -262,9 +487,14 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             "/wwl/files/nd55.pdf",
             "/juriscraper/opinions/25-1001.pdf",
             "/cpp/files/vbpq/2026/04/105-nd.signed.pdf",
+            "/cpp/files/vbpq/2026/04/106-nd.signed.pdf",
             "/content/pkg/FR-2026-04-20/pdf/2026-08801.pdf",
             "/Biennium/2025-26/Pdf/Bills/House%20Bills/1091-S.E.pdf",
             "/pdf/2026/07/01/us_v_nemc.pdf",
+            "/uploadFiles/host/local/du-thao-01.pdf",
+            "/uploadFiles/host/local/du-thao-02.pdf",
+            "/scc-csc/scc-csc/en/item/40000/judgment.pdf",
+            "/scc-csc/scc-csc/en/item/40001/judgment.pdf",
         ):
             self.send_response(200)
             self.send_header("Content-Type", "application/pdf")
@@ -348,6 +578,7 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             body = """<html><head><meta charset="utf-8"><title>指导案例列表</title></head><body>
             <div class="list">
               <a href="/shenpan/xiangqing/202601.html">指导性案例220号：甲公司诉乙公司数据权益纠纷案</a>
+              <a href="/shenpan/xiangqing/202602.html">指导性案例221号：丙公司诉丁公司算法商业秘密纠纷案</a>
             </div>
             </body></html>""".encode("utf-8")
             self.send_response(200)
@@ -379,19 +610,38 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/shenpan/xiangqing/202602.html":
+            body = """<html><head><meta charset="utf-8"><title>指导性案例221号</title></head><body>
+            <div class="detail">
+              <div class="title">指导性案例221号：丙公司诉丁公司算法商业秘密纠纷案</div>
+              <ul><li>发布时间：2026-03-16</li></ul>
+              <div class="txt_txt">
+                <p>关键词：民事/侵害商业秘密/算法参数/裁判要点。人民法院认定算法模型参数构成商业秘密时，应当综合审查其非公知性与保密措施。</p>
+              </div>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/":
             body = """<html><head><meta charset="utf-8"></head><body>
             <form method="post" action="/">
               <input type="hidden" name="__VIEWSTATE" value="vs1" />
               <table id="ctrl_grvDocument">
                 <tr><td><a href="/page/pagenew.aspx?docid=210001">Nghị định 105/2026/NĐ-CP</a></td></tr>
+                <tr><td><a href="/page/pagenew.aspx?docid=210002">Nghị định 106/2026/NĐ-CP</a></td></tr>
                 <tr><td><span>1</span></td></tr>
               </table>
             </form>
             <div class="congbao-home">
               <a href="/van-ban/quyet-dinh-48-2026-qd-ttg.htm">Quyết định 48/2026/QĐ-TTg của Thủ tướng Chính phủ</a>
+              <a href="/van-ban/quyet-dinh-49-2026-qd-ttg.htm">Quyết định 49/2026/QĐ-TTg của Thủ tướng Chính phủ</a>
               <a href="/chi-thi-so-37-ct-ttg-tang-cuong-phong-chong-gian-lan-119261021100102474.htm">Chỉ thị số 37/CT-TTg</a>
               <a href="/chung-khoan/thong-tu-145-2026-tt-btc-quy-dinh-dang-ky-449607-d1.html">Thông tư 145/2026/TT-BTC</a>
+              <a href="/dt/luat-sua-doi-bo-sung-mot-so-dieu-cua-09-luat-ve-quan-su-quoc-phong/260805100059615084">Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng</a>
+              <a href="/dt/luat-hoa-giai-o-co-so-sua-doi/260522145512086084">Luật Hòa giải ở cơ sở (sửa đổi)</a>
             </div>
             </body></html>""".encode("utf-8")
             self.send_response(200)
@@ -472,6 +722,19 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/van-ban/quyet-dinh-49-2026-qd-ttg.htm":
+            body = """<html><head><meta charset="utf-8"><title>Quyết định 49/2026/QĐ-TTg</title></head><body>
+            <h1>Quyết định 49/2026/QĐ-TTg của Thủ tướng Chính phủ về an toàn thông tin</h1>
+            <div class="row"><div class="name">Số, ký hiệu:</div><div class="value">49/2026/QĐ-TTg</div></div>
+            <div class="row"><div class="name">Cơ quan ban hành:</div><div class="value">Thủ tướng Chính phủ</div></div>
+            <div class="row"><div class="name">Ngày ban hành:</div><div class="value">13-04-2026</div></div>
+            <a href="/cpp/files/vbpq/2026/04/106-nd.signed.pdf">49-qd.pdf</a>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/page/pagenew.aspx?docid=210001":
             body = """<html><head><meta charset="utf-8"><title>Nghị định 105/2026/NĐ-CP</title></head><body>
             <h4 class="title">Nghị định 105/2026/NĐ-CP quy định về giao dịch điện tử</h4>
@@ -483,6 +746,23 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
               <tr><td>Trích yếu</td><td>Nghị định quy định về giao dịch điện tử</td></tr>
             </table>
             <a href="/cpp/files/vbpq/2026/04/105-nd.signed.pdf">105-nd.signed.pdf</a>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/page/pagenew.aspx?docid=210002":
+            body = """<html><head><meta charset="utf-8"><title>Nghị định 106/2026/NĐ-CP</title></head><body>
+            <h4 class="title">Nghị định 106/2026/NĐ-CP quy định về chữ ký số</h4>
+            <table>
+              <tr><td>Số ký hiệu</td><td>106/2026/NĐ-CP</td></tr>
+              <tr><td>Ngày ban hành</td><td>11-04-2026</td></tr>
+              <tr><td>Cơ quan ban hành</td><td>Chính phủ</td></tr>
+              <tr><td>Loại văn bản</td><td>Nghị định</td></tr>
+              <tr><td>Trích yếu</td><td>Nghị định quy định về chữ ký số</td></tr>
+            </table>
+            <a href="/cpp/files/vbpq/2026/04/106-nd.signed.pdf">106-nd.signed.pdf</a>
             </body></html>""".encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -529,12 +809,29 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/jportal/docs/bsjrs/bsjrs-toc.xml":
+            body = """<?xml version="1.0" encoding="UTF-8"?>
+<items>
+  <item><link>/jportal/docs/bsjrs/jb-JURE100055033.zip</link></item>
+  <item><link>/jportal/docs/bsjrs/jb-JURE100055034.zip</link></item>
+</items>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/jportal/docs/bsjrs/jb-JURE100055033.zip":
             self.send_response(200)
             self.send_header("Content-Type", "application/zip")
             self.send_header("Content-Length", str(len(_BridgeFixtureHandler.rii_zip)))
             self.end_headers()
             self.wfile.write(_BridgeFixtureHandler.rii_zip)
+        elif self.path == "/jportal/docs/bsjrs/jb-JURE100055034.zip":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(len(_BridgeFixtureHandler.rii_zip_2)))
+            self.end_headers()
+            self.wfile.write(_BridgeFixtureHandler.rii_zip_2)
         elif self.path.startswith("/api/decisions"):
             host = self.headers.get("Host", "127.0.0.1")
             payload = {
@@ -643,19 +940,23 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/zhengce/index.htm":
+        elif self.path in ("/zhengce/index.htm", "/zhengce/xxgk/", "/zhengce/xxgk/gjgzk/index.htm"):
             body = b"""<!DOCTYPE html><html><head><title>Zhengce</title></head><body>
-            <a href="/zhengce/content/202610/content_7066001.htm">Policy Detail</a>
+            <a href="/zhengce/content/202610/content_700001.htm">Policy Detail 1</a>
+            <a href="/zhengce/content/2026-10/03/content_700002.htm">Policy Detail 2</a>
             </body></html>"""
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/zhengce/content/202610/content_7066001.htm":
+        elif self.path in (
+            "/zhengce/content/202610/content_7066001.htm",
+            "/zhengce/content/202610/content_700001.htm",
+        ):
             body = """<!DOCTYPE html><html><head>
-            <meta name="firstpublishedtime" content="2026-10-05 09:00:00" />
-            <title>生态保护补偿条例_国务院政策文件库</title>
+            <meta name="firstpublishedtime" content="2026-10-03 09:00:00" />
+            <title>生态保护补偿条例_国务院_中国政府网</title>
             </head><body>
             <table class="xxgk-table">
               <tr><td>标　　题：</td><td>生态保护补偿条例</td><td>发文机关：</td><td>国务院</td></tr>
@@ -664,6 +965,24 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
               <tr><td>成文日期：</td><td>2026年10月03日</td><td>发布日期：</td><td>2026年10月05日</td></tr>
             </table>
             <div id="UCAP-CONTENT"><p>第一条 为了健全生态保护补偿制度，制定本条例。</p></div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/zhengce/content/2026-10/03/content_700002.htm":
+            body = """<!DOCTYPE html><html><head>
+            <meta name="firstpublishedtime" content="2026-10-03 09:00:00" />
+            <title>网络数据安全管理条例_国务院_中国政府网</title>
+            </head><body>
+            <table class="xxgk-table">
+              <tr><td>标　　题：</td><td>网络数据安全管理条例</td><td>发文机关：</td><td>国务院</td></tr>
+              <tr><td>发文字号：</td><td>国令第790号</td><td>来　　源：</td><td>中国政府网</td></tr>
+              <tr><td>主题分类：</td><td>工业、交通\\信息产业</td><td>公文种类：</td><td>行政法规</td></tr>
+              <tr><td>成文日期：</td><td>2026年10月03日</td><td>发布日期：</td><td>2026年10月05日</td></tr>
+            </table>
+            <div id="UCAP-CONTENT"><p>第一条 为了规范网络数据处理活动，保障网络数据安全，制定本条例。</p></div>
             </body></html>""".encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -872,6 +1191,7 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
         elif self.path == "/quick-links/e-tax-guides":
             body = b"""<!DOCTYPE html><html><head><title>IRAS e-Tax Guides</title></head><body>
             <a href="/taxes/corporate-income-tax/income-deductions-for-companies/tax-treatment-of-r-d-expenditure">R&amp;D e-Tax Guide</a>
+            <a href="/taxes/corporate-income-tax/income-deductions-for-companies/tax-treatment-of-ip-rights">IP Rights e-Tax Guide</a>
             </body></html>"""
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -883,6 +1203,18 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             <main id="mainContent">
               <h1>Tax Treatment of Research &amp; Development Expenditure</h1>
               <p>This e-Tax Guide explains the income tax deductibility of research and development expenditure in Singapore.</p>
+            </main>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/taxes/corporate-income-tax/income-deductions-for-companies/tax-treatment-of-ip-rights":
+            body = """<!DOCTYPE html><html><head><title>Tax Treatment of IP Rights</title></head><body>
+            <main id="mainContent">
+              <h1>Tax Treatment of Intellectual Property Rights</h1>
+              <p>This e-Tax Guide explains the writing-down allowances for intellectual property rights under the Income Tax Act.</p>
             </main>
             </body></html>""".encode("utf-8")
             self.send_response(200)
@@ -936,6 +1268,39 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/lrs/common/ju/judgment.jsp":
+            body = b"""<!DOCTYPE html><html><head><title>HK Judiciary Judgments</title></head><body>
+            <a href="/lrs/common/ju/tjpv.jsp">Newly Added Judgments</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/lrs/common/ju/tjpv.jsp":
+            body = b"""<!DOCTYPE html><html><head><title>Judgments List</title></head><body>
+            <a href="javascript:matchpop('/lrs/common/ju/ju_frame.jsp?DIS=158000','matchpage')">Case 1</a>
+            <a href="javascript:matchpop('/lrs/common/ju/ju_frame.jsp?DIS=158001','matchpage')">Case 2</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/lrs/common/ju/ju_frame.jsp?DIS=158000":
+            body = b"""<!DOCTYPE html><html><frameset><frame name="mainFrame" src="/lrs/common/ju/ju_body.jsp?DIS=158000"/></frameset></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/lrs/common/ju/ju_frame.jsp?DIS=158001":
+            body = b"""<!DOCTYPE html><html><frameset><frame name="mainFrame" src="/lrs/common/ju/ju_body.jsp?DIS=158001"/></frameset></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/lrs/common/ju/ju_body.jsp?DIS=158000":
             body = """<!DOCTYPE html><html><head>
             <title>HCAL371/2021 RASHID WASEEM v. TORTURE CLAIMS APPEAL BOARD / NON-REFOULEMENT CLAIMS PETITION OFFICE</title>
@@ -952,10 +1317,27 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/lrs/common/ju/ju_body.jsp?DIS=158001":
+            body = """<!DOCTYPE html><html><head>
+            <title>HCAL372/2021 CHAN TAI MAN v. DIRECTOR OF IMMIGRATION</title>
+            </head><body>
+            <form name="search_body"><table width="100%"><tr><td>
+              <p>HCAL 372/2021</p>
+              <p>[2024] HKCFI 248</p>
+              <p>1. This is an application for leave to apply for judicial review against an immigration detention decision.</p>
+              <p>Sent to the Applicant on 7/2/2024</p>
+            </td></tr></table></form>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/eng/ppr/dip.htm":
             body = """<!DOCTYPE html><html><head><title>IRD : Departmental Interpretation and Practice Notes</title></head><body>
             <table>
               <tr><td>3.</td><td>Profits tax - Apportionment of expenses</td><td>July 2008</td><td><a href="/eng/pdf/dipn03.pdf">PDF</a></td></tr>
+              <tr><td>4.</td><td>Profits tax - Lease inducement payments</td><td>August 2008</td><td><a href="/eng/pdf/dipn04.pdf">PDF</a></td></tr>
             </table>
             </body></html>""".encode("utf-8")
             self.send_response(200)
@@ -963,7 +1345,7 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/eng/pdf/dipn03.pdf":
+        elif self.path in ("/eng/pdf/dipn03.pdf", "/eng/pdf/dipn04.pdf"):
             body = self.sample_pdf
             self.send_response(200)
             self.send_header("Content-Type", "application/pdf")
@@ -977,13 +1359,48 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             else:
                 body = """<!DOCTYPE html><html><head><title>Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng</title></head><body>
                 <div class="col-lg-8 info-dt-l">
-                  Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng
+                  <h3>Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng</h3>
                   Cơ quan chủ trì soạn thảo: Bộ Quốc phòng
                   Cơ quan chủ trì thẩm tra: Ủy ban Quốc phòng, An ninh và Đối ngoại
                   Dự kiến thông qua: Khóa XVI - Kỳ họp không thường lệ thứ Nhất
                 </div>
-                <div id="nav-tabContent">Toàn văn hồ sơ dự án luật sửa đổi bổ sung một số điều về quân sự quốc phòng.</div>
+                <div id="nav-home">
+                  <p>Lần dự thảo 1 - Ngày đăng: 05/08/2026 - Toàn văn hồ sơ dự án Luật số 45/2026/QH15 sửa đổi bổ sung một số điều về quân sự quốc phòng.</p>
+                  <a href="/uploadFiles/host/local/du-thao-01.pdf">Dự thảo PDF</a>
+                </div>
                 </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/dt/luat-hoa-giai-o-co-so-sua-doi/260522145512086084":
+            cookie_hdr = self.headers.get("Cookie", "")
+            if "D1N=" not in cookie_hdr:
+                body = b'<html><body><script>document.cookie="D1N=ok123"+"; expires=Thu, 31-Dec-37 23:55:55 GMT; path=/";window.location.reload(true);</script></body></html>'
+            else:
+                body = """<!DOCTYPE html><html><head><title>Luật Hòa giải ở cơ sở (sửa đổi)</title></head><body>
+                <div class="col-lg-8 info-dt-l">
+                  <h3>Luật Hòa giải ở cơ sở (sửa đổi)</h3>
+                  Cơ quan chủ trì soạn thảo: Bộ Tư pháp
+                  Cơ quan chủ trì thẩm tra: Ủy ban Pháp luật và Tư pháp
+                  Dự kiến thông qua: Khóa XVI - Kỳ họp thứ Hai
+                </div>
+                <div id="nav-home">
+                  <p>Lần dự thảo 2 - Ngày đăng: 22/05/2026 - Toàn văn hồ sơ dự án Luật Hòa giải ở cơ sở (sửa đổi).</p>
+                  <a href="/uploadFiles/host/local/du-thao-02.pdf">Dự thảo PDF</a>
+                </div>
+                </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/webcenter/portal/anle/anle":
+            body = b"""<!DOCTYPE html><html><head><title>Danh sach an le</title></head><body>
+            <a href="/webcenter/portal/anle/chitietanle?dDocName=TAND377305">An le 84/2026/AL</a>
+            <a href="/webcenter/portal/anle/chitietanle?dDocName=TAND377338">An le 85/2026/AL</a>
+            </body></html>"""
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -1012,21 +1429,84 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path in (
+            "/webcenter/portal/anle/chitietanle?dDocName=TAND377338",
+            "/webcenter/portal/anle/chitietanle?dDocName=TAND377338&_afrLoop=987654321&_afrWindowMode=0",
+        ):
+            body = """<!DOCTYPE html><html><head><title>85/2026/AL</title></head><body>
+            <div id="tabContent1">
+              <div id="thuoctinh">
+                Số án lệ 85/2026/AL Tên án lệ Về xác định thẩm quyền giải quyết tranh chấp hợp đồng tín dụng Ngày thông qua 21/05/2026 Ngày công bố 29/05/2026 Quyết định công bố Quyết định 162/QĐ-CA Ngày áp dụng 01/07/2026
+              </div>
+              <p>Nội dung án lệ số 85/2026/AL của Hội đồng Thẩm phán Tòa án nhân dân tối cao.</p>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path in (
+            "/hoidapcstc",
+            "/hoidapcstc/Area/QuestionByArea/77",
+            "/hoidapcstc/Area/QuestionByArea/64",
+        ):
+            body = b"""<!DOCTYPE html><html><head><title>Hoi dap CSTC</title></head><body>
+            <a href="/hoidapcstc/home/cthoidap/166356">Cau hoi 166356</a>
+            <a href="/hoidapcstc/home/cthoidap/166357">Cau hoi 166357</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/hoidapcstc/home/cthoidap/166356":
             body = """<!DOCTYPE html><html><head><title>Hỏi đáp CSTC</title></head><body>
             <div id="login_box" style="display:none;" class="modal"><input type="password" name="pwd" /></div>
             <div class="new-content">
               <div>
+                <div style="float:right">15/10/2026</div>
                 <div>Kính gửi: Bộ Tài chính (Cục Thuế)</div>
-                <div>V/v: Xác định doanh nghiệp nhỏ và vừa để hưởng miễn thuế TNDN 03 năm đầu theo điểm a khoản 3 Điều 7 Nghị định số 20/2026/NĐ-CP</div>
-                <div>Tình huống của doanh nghiệp: Công ty được cấp Giấy chứng nhận đăng ký doanh nghiệp lần đầu vào năm 2024 và đề nghị Bộ Tài chính hướng dẫn chính sách miễn thuế thu nhập doanh nghiệp theo quy định pháp luật thuế hiện hành.</div>
+                <div style="text-align:justify">Kính gửi Bộ Tài chính, Đề nghị hướng dẫn xác định doanh nghiệp nhỏ và vừa để hưởng miễn thuế TNDN 03 năm đầu theo điểm a khoản 3 Điều 7 Nghị định số 20/2026/NĐ-CP.</div>
               </div>
               <div>Trả lời:</div>
-              <div>Hướng dẫn áp dụng miễn thuế thu nhập doanh nghiệp đối với doanh nghiệp nhỏ và vừa.</div>
+              <div>Căn cứ Nghị định số 20/2026/NĐ-CP của Chính phủ, hướng dẫn áp dụng miễn thuế thu nhập doanh nghiệp đối với doanh nghiệp nhỏ và vừa đăng ký lần đầu.</div>
             </div>
             </body></html>""".encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/hoidapcstc/home/cthoidap/166357":
+            body = """<!DOCTYPE html><html><head><title>Hỏi đáp CSTC</title></head><body>
+            <div id="login_box" style="display:none;" class="modal"><input type="password" name="pwd" /></div>
+            <div class="new-content">
+              <div>
+                <div style="float:right">16/10/2026</div>
+                <div>Kính gửi: Bộ Tài chính (Cục Thuế)</div>
+                <div style="text-align:justify">Kính gửi Cục Thuế, Đề nghị hướng dẫn kê khai khấu trừ thuế giá trị gia tăng đầu vào theo Thông tư số 80/2021/TT-BTC đối với hàng hóa xuất khẩu.</div>
+              </div>
+              <div>Trả lời:</div>
+              <div>Căn cứ Thông tư số 80/2021/TT-BTC của Bộ Tài chính, hướng dẫn kê khai và hoàn thuế giá trị gia tăng đối với hàng hóa xuất khẩu.</div>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/api/1/lawlists/2":
+            body = """<?xml version="1.0" encoding="UTF-8"?>
+<DataRoot>
+  <Result><Code>0</Code></Result>
+  <ApplData>
+    <LawNameListInfo><LawId>405AC0000000088</LawId></LawNameListInfo>
+    <LawNameListInfo><LawId>321CONSTITUTION</LawId></LawNameListInfo>
+  </ApplData>
+</DataRoot>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -1052,6 +1532,38 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/api/1/lawdata/321CONSTITUTION":
+            body = """<?xml version="1.0" encoding="UTF-8"?>
+            <DataRoot><Result><Code>0</Code></Result><ApplData><LawFullText>
+            <Law Era="Showa" Year="21" Num="000" PromulgateMonth="11" PromulgateDay="03" LawType="Constitution" Lang="ja">
+              <LawNum>昭和二十一年憲法</LawNum>
+              <LawBody>
+                <LawTitle>日本国憲法</LawTitle>
+                <MainProvision>
+                  <Chapter Num="1"><ChapterTitle>第一章　天皇</ChapterTitle>
+                    <Article Num="1"><ArticleTitle>第一条</ArticleTitle>
+                      <Paragraph Num="1"><ParagraphNum/><ParagraphSentence><Sentence>天皇は、日本国の象徴であり日本国民統合の象徴であつて、この地位は、主権の存する日本国民の総意に基く。</Sentence></ParagraphSentence></Paragraph>
+                    </Article>
+                  </Chapter>
+                </MainProvision>
+              </LawBody>
+            </Law>
+            </LawFullText></ApplData></DataRoot>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/us/500/html/":
+            body = b"""<!DOCTYPE html><html><head><title>U.S. Reports Volume 500</title></head><body>
+            <a href="/us/500/html/0001-01.html">Case 1</a>
+            <a href="/us/500/html/0013-01.html">Case 2</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/us/500/html/0001-01.html":
             body = """<!DOCTYPE html><html><head><title>Stevens v. Department of the Treasury</title></head><body>
             <section class="casebody">
@@ -1062,6 +1574,79 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
               </section>
               <article class="opinion"><p>Justice Blackmun delivered the opinion of the Court concerning the Age Discrimination in Employment Act of 1967.</p></article>
             </section>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/us/500/html/0013-01.html":
+            body = """<!DOCTYPE html><html><head><title>Eastern Airlines, Inc. v. Floyd</title></head><body>
+            <section class="casebody">
+              <section class="head-matter">
+                <h4 class="parties">EASTERN AIRLINES, INC. v. FLOYD et al.</h4>
+                <p class="docketnumber">No. 89-1598.</p>
+                <p class="decisiondate">Decided April 17, 1991</p>
+              </section>
+              <article class="opinion"><p>Justice Marshall delivered the opinion of the Court regarding Warsaw Convention liability for mental injury.</p></article>
+            </section>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path in (
+            "/judgments-jugements/cb/",
+            "/scc-csc/scc-csc/en/2026/nav_date.do?iframe=true",
+        ):
+            body = b"""<!DOCTYPE html><html><head><title>SCC Decisions</title></head><body>
+            <main>
+              <a href="/scc-csc/scc-csc/en/item/40000/index.do?iframe=true">Christian Chukwuedozie Chijindu v. Law Society of Ontario</a>
+              <a href="/scc-csc/scc-csc/en/item/40001/index.do?iframe=true">R. v. Bissonnette</a>
+            </main>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path in (
+            "/judgments-jugements/cb/2026/40000/",
+            "/scc-csc/scc-csc/en/item/40000/index.do?iframe=true",
+        ):
+            body = """<!DOCTYPE html><html><head><title>Christian Chukwuedozie Chijindu v. Law Society of Ontario</title></head><body>
+            <div id="decisia-main-content">
+              <h3 class="title">Christian Chukwuedozie Chijindu v. Law Society of Ontario</h3>
+              <div class="metadata">
+                <p>Date 2022-05-12 | Neutral citation 2022 SCC 18 | Case number 40000</p>
+              </div>
+              <div class="documentcontent">
+                <p>Full judgment reasons of the Supreme Court of Canada dismissing the appeal.</p>
+                <a href="/scc-csc/scc-csc/en/item/40000/judgment.pdf">PDF</a>
+              </div>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path in (
+            "/judgments-jugements/cb/2026/40001/",
+            "/scc-csc/scc-csc/en/item/40001/index.do?iframe=true",
+        ):
+            body = """<!DOCTYPE html><html><head><title>R. v. Bissonnette</title></head><body>
+            <div id="decisia-main-content">
+              <h3 class="title">R. v. Bissonnette</h3>
+              <div class="metadata">
+                <p>Date 2022-05-27 | Neutral citation 2022 SCC 23 | Case number 40001</p>
+              </div>
+              <div class="documentcontent">
+                <p>Full judgment reasons of the Supreme Court of Canada on the constitutionality of consecutive parole ineligibility periods.</p>
+                <a href="/scc-csc/scc-csc/en/item/40001/judgment.pdf">PDF</a>
+              </div>
+            </div>
             </body></html>""".encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1082,6 +1667,16 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path.startswith("/items/"):
+            body = b"""<!DOCTYPE html><html><head><title>NZ Legislation Browse</title></head><body>
+            <a href="/act/public/2024/1/en/latest/">New Zealand Productivity Commission Act Repeal Act 2024</a>
+            <a href="/act/public/2024/2/en/latest/">Digital Identity Services Trust Framework Act 2024</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/act/public/2024/1/en/latest/":
             body = """<!DOCTYPE html><html><head><title>New Zealand Productivity Commission Act Repeal Act 2024</title></head><body>
             <h1>New Zealand Productivity Commission Act Repeal Act 2024</h1>
@@ -1095,6 +1690,29 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/act/public/2024/2/en/latest/":
+            body = """<!DOCTYPE html><html><head><title>Digital Identity Services Trust Framework Act 2024</title></head><body>
+            <h1>Digital Identity Services Trust Framework Act 2024</h1>
+            <div id="legislation">
+              <p>Public Act 2024 No 2 Date of assent 10 February 2024</p>
+              <p>1 Title: This Act is the Digital Identity Services Trust Framework Act 2024.</p>
+            </div>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/legislation/":
+            body = b"""<!DOCTYPE html><html><head><title>Kenya Legislation</title></head><body>
+            <a href="/akn/ke/act/1963/718/eng@1963-12-10">Constitution of Kenya (Repealed)</a>
+            <a href="/akn/ke/act/2016/31/eng@2022-12-31">Access to Information Act</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/akn/ke/act/1963/718/eng@1963-12-10":
             body = """<!DOCTYPE html><html><head><title>Constitution of Kenya (Repealed)</title></head><body>
             <main>
@@ -1102,6 +1720,20 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
               <h2>Act No. 718 of 1963</h2>
               <dl><dt>Date</dt><dd>10 December 1963</dd></dl>
               <div class="akn-akomaNtoso"><p>Whereas Kenya is an independent Sovereign Republic under the Constitution of Kenya.</p></div>
+            </main>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/akn/ke/act/2016/31/eng@2022-12-31":
+            body = """<!DOCTYPE html><html><head><title>Access to Information Act</title></head><body>
+            <main>
+              <h1>Access to Information Act</h1>
+              <h2>Act No. 31 of 2016</h2>
+              <dl><dt>Date</dt><dd>10 September 2016</dd></dl>
+              <div class="akn-akomaNtoso"><p>An Act of Parliament to give effect to Article 35 of the Constitution of Kenya on access to information.</p></div>
             </main>
             </body></html>""".encode("utf-8")
             self.send_response(200)
@@ -1268,11 +1900,11 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-562", "案例", "89-1821"),
             ("dd-563", "税务资料", "2026-16"),
             ("dd-564", "法律法规", "A-1"),
-            ("dd-565", "案例", "40000"),
+            ("dd-565", "案例", "2022 SCC 18"),
             ("dd-570", "法律法规", "2024 No 1"),
             ("dd-572", "法律法规", "Act No. 718 of 1963"),
             ("dd-506", "案例", "HCAL 371/2021"),
-            ("dd-507", "税务资料", "DIPN No. 3"),
+            ("dd-507", "税务资料", "dipn03"),
             ("dd-512", "法律法规", "Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng"),
             ("dd-514", "案例", "84/2026/AL"),
             ("dd-516", "税务资料", "20/2026/NĐ-CP"),
@@ -1316,16 +1948,28 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                 )
             raw_cfg["entry_urls"] = rewritten_urls
             raw_cfg["allowed_hosts"] = ["127.0.0.1"]
-            raw_cfg["allowed_path_prefixes"] = ["/"]
-            raw_cfg.pop("host_path_scopes", None)
+            if "host_path_scopes" in raw_cfg:
+                scoped_prefixes: list[str] = list(raw_cfg.get("allowed_path_prefixes", []))
+                for p_list in raw_cfg.pop("host_path_scopes").values():
+                    for p in p_list:
+                        if p not in scoped_prefixes:
+                            scoped_prefixes.append(p)
+                raw_cfg["allowed_path_prefixes"] = scoped_prefixes
             raw_cfg["delay"] = 0.0
-            if "documents" in raw_cfg and "detail_url_patterns" in raw_cfg["documents"]:
+            if "documents" in raw_cfg:
                 import re
 
-                raw_cfg["documents"]["detail_url_patterns"] = [
-                    re.sub(r"^\^https?://[^/]+", rf"^http://127\.0\.0\.1:{port}", pat)
-                    for pat in raw_cfg["documents"]["detail_url_patterns"]
-                ]
+                if "detail_url_patterns" in raw_cfg["documents"]:
+                    raw_cfg["documents"]["detail_url_patterns"] = [
+                        re.sub(r"^\^https?://[^/]+", rf"^http://127\.0\.0\.1:{port}", pat)
+                        for pat in raw_cfg["documents"]["detail_url_patterns"]
+                    ]
+                if "attachment_url_pattern" in raw_cfg["documents"]:
+                    raw_cfg["documents"]["attachment_url_pattern"] = re.sub(
+                        r"^\^https?://[^/]+",
+                        rf"^http://127\.0\.0\.1:{port}",
+                        raw_cfg["documents"]["attachment_url_pattern"],
+                    )
 
             replay_yaml = tmp_path / f"{source_id}-replay.yaml"
             replay_yaml.write_text(
@@ -1340,6 +1984,30 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             c_res = execute_run(c_run)
             assert c_res["status"] == "complete", f"{source_id} collect failed: {c_res}"
 
+            multi_resource_sources = {
+                "dd-017",
+                "dd-492",
+                "dd-493",
+                "dd-502",
+                "dd-506",
+                "dd-507",
+                "dd-512",
+                "dd-514",
+                "dd-516",
+                "dd-517",
+                "dd-527",
+                "dd-548",
+                "dd-550",
+                "dd-551",
+                "dd-558",
+                "dd-559",
+                "dd-562",
+                "dd-564",
+                "dd-565",
+                "dd-570",
+                "dd-572",
+            }
+
             with psycopg.connect(initialized_db["WLH_DATABASE_URL"]) as conn:
                 from psycopg.rows import dict_row
 
@@ -1352,12 +2020,25 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         JOIN wlh.resource r ON r.id = v.resource_id
                         JOIN wlh.frontier f ON f.id = r.frontier_id
                         WHERE f.source_id = %s
-                        ORDER BY d.row_index
+                        ORDER BY d.row_index, r.id
                         """,
                         (source_id,),
                     ).fetchall()
                     assert len(rows) >= 1, f"Expected document_row for {source_id}"
-                    projected = project_canonical(rows[0])
+                    if source_id in multi_resource_sources:
+                        assert len({r["resource_id"] for r in rows}) >= 2, (
+                            f"Expected at least 2 distinct resources discovered from list/index for {source_id}"
+                        )
+                    projected_rows = [project_canonical(r) for r in rows]
+                    projected = next(
+                        (
+                            p
+                            for p in projected_rows
+                            if expected_substr in (p["doc_number"] or "")
+                            or expected_substr in (p["title"] or "")
+                        ),
+                        projected_rows[0],
+                    )
                     assert projected["doc_type"] == expected_doc_type
                     assert (
                         expected_substr in (projected["doc_number"] or "")

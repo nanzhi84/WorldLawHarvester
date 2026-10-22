@@ -207,9 +207,31 @@ callers:
                 items_default = data_default["items"]
                 assert len(items_default) == 3
 
+                from wlh.projections.canonical import COLUMNS
+
+                for item in items_default:
+                    assert tuple(item.keys()) == COLUMNS
+                    for hidden_key in (
+                        "source_id",
+                        "resource_id",
+                        "version_id",
+                        "row_index",
+                        "role",
+                        "original_media_type",
+                        "locator",
+                        "extensions",
+                    ):
+                        assert hidden_key not in item
+
                 vol1, vol2, annex = items_default[0], items_default[1], items_default[2]
+                rec8 = vol1["source_record_hash"][:8]
                 assert vol1["volume_order"] == 1
-                assert vol1["markdown_file"].endswith("_01.md")
+                assert vol1["markdown_file"].endswith(
+                    f"_{rec8}_{vol1['markdown_hash'][:8]}_01.md"
+                )
+                assert vol1["original_file"].endswith(
+                    f"_{rec8}_{vol1['original_hash'][:8]}_01.pdf"
+                )
                 assert vol1["doc_number"] == "100/2026/ND-CP"
                 assert vol1["issuer"] == "Government"
                 assert vol1["published_at"] == "2026-05-01"
@@ -222,10 +244,15 @@ callers:
                 )
 
                 assert vol2["volume_order"] == 2
-                assert vol2["markdown_file"].endswith("_02.md")
+                assert vol2["markdown_file"].endswith(
+                    f"_{rec8}_{vol2['markdown_hash'][:8]}_02.md"
+                )
 
                 assert annex["volume_order"] is None
                 assert annex["title"] == "Tariff Schedule Annex"
+                assert annex["markdown_file"].endswith(
+                    f"_{rec8}_{annex['markdown_hash'][:8]}.md"
+                )
                 assert annex["doc_number"] is None
                 assert annex["issuer"] is None
 
@@ -236,8 +263,22 @@ callers:
                 data_can = await resp_can.json()
                 items_can = data_can["items"]
                 assert items_can == items_default
-                assert items_can[0]["role"] == "volume"
-                assert items_can[2]["role"] == "independent_attachment"
+
+                # Verify keyset cursor pagination still works with streamlined payload
+                paged_items = []
+                cursor = None
+                for _ in range(3):
+                    url = "/results?source_id=dd-902&limit=1"
+                    if cursor:
+                        url += f"&cursor={cursor}"
+                    resp_p = await client.get(url, headers=headers)
+                    assert resp_p.status == 200
+                    page_data = await resp_p.json()
+                    assert len(page_data["items"]) == 1
+                    paged_items.extend(page_data["items"])
+                    cursor = page_data["next_cursor"]
+                assert paged_items == items_default
+                assert cursor is None
 
                 for sha_key in ("markdown_hash", "original_hash"):
                     file_sha = vol1[sha_key]

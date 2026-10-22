@@ -127,7 +127,7 @@ class Budget(Strict):
     requests: int = Field(default=100, ge=1, le=100000)
     seconds: int = Field(default=120, ge=1, le=86400)
     response_bytes: int = Field(default=10485760, ge=1024, le=MAX_ORIGINAL_BYTES)
-    documents: int = Field(default=10000, ge=1, le=1000000)
+    documents: int = Field(default=10, ge=1, le=1000000)
 
 
 class FetchConfig(Strict):

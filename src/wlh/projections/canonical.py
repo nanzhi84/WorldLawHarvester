@@ -7,14 +7,12 @@ from datetime import date, datetime
 from typing import Any
 
 COLUMNS = (
-    "source_id",
-    "resource_id",
-    "version_id",
-    "row_index",
-    "role",
-    "volume_order",
     "title",
+    "markdown_file",
     "doc_type",
+    "acquired_at",
+    "original_file",
+    "volume_order",
     "doc_number",
     "issuer",
     "published_at",
@@ -24,14 +22,8 @@ COLUMNS = (
     "source_name",
     "detail_url",
     "source_record_hash",
-    "acquired_at",
-    "markdown_file",
     "markdown_hash",
-    "original_file",
     "original_hash",
-    "original_media_type",
-    "locator",
-    "extensions",
 )
 
 
