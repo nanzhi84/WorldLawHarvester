@@ -1,0 +1,27 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-448
+id: dd-448
+adapter: web
+scope: "国家电影局电影备案立项公示列表与单期备案立项表格详情最小切片"
+entry_urls: ["https://www.chinafilm.gov.cn/xxgk/gsxx/dybalx/"]
+allowed_hosts: ["www.chinafilm.gov.cn"]
+allowed_path_prefixes: ["/xxgk/gsxx/dybalx/"]
+archive_approved: true
+user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+robots: false
+delay: 0.5
+fetch: {max_depth: 1, retries: 2}
+budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "电影备案公示"
+  document_type: "通知公告"
+  language: "zh"
+  jurisdiction: "CN"
+documents:
+  detail_url_patterns: ['^https://www\.chinafilm\.gov\.cn/xxgk/gsxx/dybalx/\d{6}/t\d{8}_\d+\.html$']
+  detail_body: always
+  content_xpath: '//div[contains(@class,"m3editor") or contains(@class,"hmc4Table")]'
+  fields:
+    title: {xpath: '//meta[@name="ArticleTitle"]/@content|//title'}
+    document_number: {xpath: '//div[contains(@class,"hmc4Table")]', regex: '(影剧备字〔\d{4}〕第\d+号)'}
+    issuer: {value: "国家电影局"}
+    published_at: {xpath: '//meta[@name="PubDate"]/@content', regex: '^(\d{4}-\d{2}-\d{2})'}

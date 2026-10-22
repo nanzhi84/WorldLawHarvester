@@ -1,0 +1,17 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-558
+id: dd-558
+adapter: structured_xml
+entry_urls: ["https://uscode.house.gov/download/releasepoints/us/pl/119/121/xml_usc01@119-121.zip"]
+allowed_hosts: ["uscode.house.gov"]
+allowed_path_prefixes: ["/download/releasepoints/"]
+archive_approved: true
+scope: 美国法典第一编指定发布版本 USLM XML 压缩包的有界采集。
+robots: true
+delay: 0.5
+budget: {requests: 10, documents: 1, seconds: 300, response_bytes: 52428800}
+fetch: {mode: http, max_depth: 0, page_timeout_ms: 60000}
+metadata:
+  source_name: "美国众议院《美国法典》官方法律修订办公室（OLRC）"
+  document_type: "法律法规"
+  language: "en"
+  jurisdiction: "US"

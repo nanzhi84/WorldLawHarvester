@@ -1,0 +1,26 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-501
+id: dd-501
+adapter: web
+scope: "中华人民共和国国务院公报指定单期目录（2026年第9号，总第1920号）与正文最小切片"
+entry_urls: ["https://www.gov.cn/gongbao/2026/issue_13046/"]
+allowed_hosts: ["www.gov.cn"]
+allowed_path_prefixes: ["/gongbao/"]
+archive_approved: true
+robots: true
+delay: 0.5
+fetch: {max_depth: 1, retries: 2}
+budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "中华人民共和国国务院公报"
+  document_type: "政策文件"
+  language: "zh"
+  jurisdiction: "CN"
+  # priority: P1
+documents:
+  detail_url_patterns: ['^https://www\.gov\.cn/gongbao/\d{4}/issue_\d+/\d{6}/content_\d+\.htm(l)?$']
+  detail_body: always
+  content_xpath: '//div[@id="UCAP-CONTENT" or contains(@class,"padd-zyygwj")]'
+  fields:
+    title: {xpath: '//title', regex: '^([^_]+)'}
+    document_number: {xpath: '//div[@id="UCAP-CONTENT"]', regex: '([^\s，。；：]+〔\d{4}〕\d+号|中华人民共和国[^，。；：\s]+令（第\d+号）)'}
+    published_at: {xpath: '//meta[@name="firstpublishedtime"]/@content', regex: '^(\d{4}-\d{2}-\d{2})'}

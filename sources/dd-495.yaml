@@ -1,0 +1,42 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-495
+id: dd-495
+adapter: web
+entry_urls: ["https://luatvietnam.vn/"]
+allowed_hosts: ["luatvietnam.vn"]
+allowed_path_prefixes: ["/"]
+archive_approved: true
+scope: LuatVietnam 法规库公开法律法规正文及附件的有界采集；不含判决库，不代表全历史覆盖。
+robots: true
+delay: 0.5
+budget:
+  requests: 40
+  documents: 1
+  seconds: 600
+  response_bytes: 52428800
+fetch:
+  mode: http
+  max_depth: 1
+  page_timeout_ms: 60000
+metadata:
+  source_name: "LuatVietnam 法规库"
+  document_type: "法律法规"
+  language: "vi"
+  jurisdiction: "VN"
+documents:
+  detail_url_patterns:
+    - '^https://luatvietnam\.vn/(?!ban-an/)[^/?#]+/[a-z0-9-]+-\d+-d1\.html$'
+  detail_body: always
+  content_xpath: '//div[contains(@class,"the-document-entry") or @id="thuoctinh"]'
+  fields:
+    title:
+      xpath: '(//h1)[1]'
+    document_number:
+      xpath: '//tr[td[contains(.,"Số hiệu:")]]/td[2]'
+    issuer:
+      xpath: '//tr[td[contains(.,"Cơ quan ban hành:")]]/td[2]'
+    published_at:
+      xpath: '//tr[td[contains(.,"Ngày ban hành:")]]/td[2]'
+ocr:
+  engine: br-ocr-v1
+  languages: vie
+  dpi: 96

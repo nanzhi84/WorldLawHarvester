@@ -65,7 +65,7 @@ def html_to_markdown(html, base_url=None, content_xpath=None):
     def render(node):
         if not isinstance(node.tag, str):
             return ""
-        tag = etree.QName(node).localname.lower()
+        tag = node.tag.split("}")[-1].split(":")[-1].lower()
         if tag in {"script", "style", "noscript", "template", "head", "nav", "footer", "form"}:
             return ""
         if tag == "table":

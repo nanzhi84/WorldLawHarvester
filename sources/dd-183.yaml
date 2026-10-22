@@ -1,0 +1,26 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-183
+id: dd-183
+adapter: web
+scope: "财政部预算司地方债管理专题栏目政策法规列表与详情最小切片"
+entry_urls: ["https://yss.mof.gov.cn/zhuantilanmu/dfzgl/"]
+allowed_hosts: ["yss.mof.gov.cn"]
+allowed_path_prefixes: ["/zhuantilanmu/dfzgl/"]
+archive_approved: true
+robots: false
+delay: 0.5
+fetch: {max_depth: 1, retries: 2}
+budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "地方债管理"
+  document_type: "政策文件"
+  language: "zh"
+  jurisdiction: "CN"
+documents:
+  detail_url_patterns: ['^https://yss\.mof\.gov\.cn/zhuantilanmu/dfzgl/[a-z]+/\d{6}/t\d{8}_\d+\.htm(l)?$']
+  detail_body: always
+  content_xpath: '//div[contains(@class,"my_doccontent") or contains(@class,"TRS_Editor")]'
+  fields:
+    title: {xpath: '//meta[@name="ArticleTitle"]/@content|//title'}
+    document_number: {xpath: '//div[contains(@class,"my_doccontent") or contains(@class,"TRS_Editor")]', regex: '(财预〔\d{4}〕\d+号)'}
+    issuer: {xpath: '//meta[@name="ContentSource"]/@content'}
+    published_at: {xpath: '//meta[@name="PubDate"]/@content', regex: '^(\d{4}-\d{2}-\d{2})'}

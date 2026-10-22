@@ -1,0 +1,27 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-455
+id: dd-455
+adapter: web
+scope: "国家新闻出版署游戏审批结果公示栏目与审批信息详情表格最小切片"
+entry_urls: ["https://www.nppa.gov.cn/bsfw/jggs/yxspjg/"]
+allowed_hosts: ["www.nppa.gov.cn"]
+allowed_path_prefixes: ["/bsfw/jggs/yxspjg/"]
+archive_approved: true
+user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+robots: false
+delay: 0.5
+fetch: {max_depth: 1, retries: 2}
+budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "电子游戏审批"
+  document_type: "通知公告"
+  language: "zh"
+  jurisdiction: "CN"
+documents:
+  detail_url_patterns: ['^https://www\.nppa\.gov\.cn/bsfw/jggs/yxspjg/[a-z]+/\d{6}/t\d{8}_\d+\.html$']
+  detail_body: always
+  content_xpath: '//div[contains(@class,"m3pageCon") or contains(@class,"m3pageEdit")]'
+  fields:
+    title: {xpath: '//h2[contains(@class,"m3page_t")]|//title'}
+    document_number: {xpath: '//div[contains(@class,"m3pageEdit")]', regex: '(国新出审〔\d{4}〕\d+号)'}
+    issuer: {value: "国家新闻出版署"}
+    published_at: {xpath: '//div[contains(@class,"m3page_funs")]', regex: '(\d{4}-\d{2}-\d{2})'}

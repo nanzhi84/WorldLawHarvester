@@ -6,27 +6,39 @@ documents whose attachment links are required inputs (volumes or independent
 attachments); other pages are navigation only.
 """
 
+from __future__ import annotations
+
 import re
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import PurePosixPath
+from typing import Any, cast
 from urllib.parse import parse_qs, unquote, urljoin, urlsplit, urlunsplit
 
 import lxml.etree as etree
-from lxml import html
+from lxml import html  # type: ignore[import-untyped]
 
 from wlh.adapters import Base
+from wlh.adapters.web_pagination import aspnet_next_page
 from wlh.core import WlhError, canonical, digest, public_url
 from wlh.engine.scope import guard
 from wlh.engine.transport import blocked
 from wlh.extraction.markdown import html_to_markdown, text_to_markdown
 from wlh.extraction.office import detect_real_format
 
-TEXT_KINDS = {"html", "txt"}
-BINARY_KINDS = {"pdf", "doc", "docx", "rtf", "xls", "xlsx", "zip"}
+etree: Any
+html: Any
+TEXT_KINDS: set[str] = {"html", "txt"}
+BINARY_KINDS: set[str] = {"pdf", "doc", "docx", "rtf", "xls", "xlsx", "zip"}
 
 
-def decode(data, charset):
-    for encoding in (charset, "utf-8"):
+def decode(data: bytes, charset: str | None) -> tuple[str, str]:
+    detected: str | None = charset
+    if not detected:
+        match: re.Match[bytes] | None = re.search(br'<meta\b[^>]*charset=["\']?\s*([a-zA-Z0-9._-]+)', data[:4096], re.I)
+        if match:
+            detected = match.group(1).decode("ascii", errors="ignore")
+    for encoding in (detected, "utf-8"):
         if encoding:
             try:
                 return data.decode(encoding), encoding
@@ -35,23 +47,23 @@ def decode(data, charset):
     return data.decode("utf-8", errors="replace"), "utf-8-replace"
 
 
-def parse_html(data, charset):
+def parse_html(data: bytes, charset: str | None) -> tuple[Any, str, str]:
     text, encoding = decode(data, charset)
     try:
-        tree = html.document_fromstring(text)
+        tree: Any = html.document_fromstring(text)
     except (etree.ParserError, ValueError):
         raise WlhError("html_unparseable") from None
     return tree, text, encoding
 
 
-def clean_url(base, href):
+def clean_url(base: str, href: str | None) -> str | None:
     if not href:
         return None
     href = href.strip()
     if href.lower().startswith(("javascript:", "mailto:", "tel:", "data:", "#")):
         return None
     try:
-        parts = urlsplit(urljoin(base, href))
+        parts: Any = urlsplit(urljoin(base, href))
         if parts.scheme not in ("http", "https"):
             return None
         return public_url(
@@ -61,39 +73,55 @@ def clean_url(base, href):
         return None
 
 
-def file_name(url):
-    parts = urlsplit(url)
+def file_name(url: str) -> str:
+    parts: Any = urlsplit(url)
     query_name = parse_qs(parts.query).get("file_name", [""])[0]
     name = PurePosixPath(query_name or unquote(parts.path)).name
     return name or "file"
 
 
-DATE_FIELDS = {"published_at", "effective_at", "expired_at"}
+DATE_FIELDS: set[str] = {"published_at", "effective_at", "expired_at"}
 
 
-def parse_date(value, fmt=None):
-    text = value.strip()
+def parse_date(value: str, fmt: str | None = None) -> str | None:
+    text = re.sub(r"\s+", " ", value).strip()
     if not text:
         return None
-    formats = (fmt,) if fmt else ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y")
-    for candidate in formats:
+    if fmt:
         try:
-            return datetime.strptime(text if fmt else text[:10], candidate).date().isoformat()
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            raise WlhError("document_date_unparseable") from None
+    zh_match: re.Match[str] | None = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", text)
+    if zh_match:
+        try:
+            y, m, d = (int(part) for part in zh_match.groups())
+            return datetime(y, m, d).date().isoformat()
+        except ValueError:
+            raise WlhError("document_date_unparseable") from None
+    for candidate in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(text[:10], candidate).date().isoformat()
+        except ValueError:
+            continue
+    for candidate in ("%d %B %Y", "%d %b %Y", "%B %d, %Y", "%b %d, %Y"):
+        try:
+            return datetime.strptime(text, candidate).date().isoformat()
         except ValueError:
             continue
     raise WlhError("document_date_unparseable")
 
 
-def field_value(tree, text, rule, *, is_date=False):
+def field_value(tree: Any, text: str | None, rule: Mapping[str, Any], *, is_date: bool = False) -> Any:
     if rule.get("value") is not None:
         return rule["value"]
-    value = text
+    value: Any = text
     if rule.get("xpath"):
-        found = tree.xpath(rule["xpath"])
+        found: Any = tree.xpath(rule["xpath"])
         if isinstance(found, list):
             if not found:
                 return None
-            first = found[0]
+            first: Any = cast(list[Any], found)[0]
             value = first if isinstance(first, str) else first.text_content()
         elif isinstance(found, str):
             value = found
@@ -103,9 +131,10 @@ def field_value(tree, text, rule, *, is_date=False):
             value = str(found)
     if value is None:
         return None
-    value = re.sub(r"\s+", " ", str(value)).strip()
+    # Preserve ideographic spaces in source metadata.
+    value = re.sub(r"[^\S\u3000]+", " ", str(value)).strip()
     if rule.get("regex"):
-        match = re.search(rule["regex"], value)
+        match: re.Match[str] | None = re.search(cast(str, rule["regex"]), value)
         if not match:
             return None
         value = match.groupdict().get("value") or (match.group(1) if match.groups() else match[0])
@@ -116,73 +145,38 @@ def field_value(tree, text, rule, *, is_date=False):
     return value.strip() or None
 
 
-def _aspnet_next_page(tree, url, page, max_pages, config):
-    forms = tree.xpath('//form[@method="post" or @method="POST"]')
-    if not forms:
-        return None, None
-    form = forms[0]
-    events = []
-    for href in form.xpath(".//a/@href"):
-        match = re.search(r"__doPostBack\('([^']+)','(Page\$[^']+)'\)", href)
-        if match:
-            events.append(match.groups())
-    following = next((e for e in events if e[1] == f"Page${page + 1}"), None)
-    if following is None:
-        return None, None
-    if page >= max_pages:
-        return None, "page_limit_exceeded"
-    fields = {}
-    for node in form.xpath(".//input[@name] | .//select[@name] | .//textarea[@name]"):
-        if node.tag == "select":
-            options = node.xpath("./option[@selected]") or node.xpath("./option")[:1]
-            fields[node.get("name")] = options[0].get("value", "") if options else ""
-        elif node.get("type", "").lower() not in {"submit", "button", "image", "checkbox", "radio"}:
-            fields[node.get("name")] = node.get("value", "")
-    action = guard(config, urljoin(url, form.get("action", "")))
-    target, argument = following
-    return {
-        "url": action,
-        "method": "POST",
-        "idempotent": True,
-        "form": dict(fields, __EVENTTARGET=target, __EVENTARGUMENT=argument),
-        "role": "page",
-        "depth": 0,
-        "meta": {"page": page + 1},
-    }, None
-
-
 class Adapter(Base):
-    CONTRACT = "wlh.adapter.web.v3"
-    PLANNING_OPTIONS = ("max_pages",)
+    CONTRACT: str = "wlh.adapter.web.v3"
+    PLANNING_OPTIONS: tuple[str, ...] = ("max_pages",)
 
     @staticmethod
-    def validate_options(options):
+    def validate_options(options: Mapping[str, Any]) -> None:
         allowed = {"max_pages"}
         if set(options) - allowed:
             raise ValueError("unexpected_adapter_options")
-        pages = options.get("max_pages", 1)
+        pages: Any = options.get("max_pages", 1)
         if type(pages) is not int or not 1 <= pages <= 10000:
             raise ValueError("invalid_max_pages")
 
-    def __init__(self, config):
+    def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        self.max_pages = config["adapter_options"].get("max_pages", 1)
+        self.max_pages: int = config["adapter_options"].get("max_pages", 1)
         rules = config["documents"]
-        self.details = [re.compile(p) for p in rules["detail_url_patterns"]]
-        self.attachment = re.compile(rules["attachment_url_pattern"])
-        self.volume = re.compile(rules["volume_pattern"]) if rules["volume_pattern"] else None
+        self.details: list[re.Pattern[str]] = [re.compile(p) for p in rules["detail_url_patterns"]]
+        self.attachment: re.Pattern[str] = re.compile(rules["attachment_url_pattern"])
+        self.volume: re.Pattern[str] | None = re.compile(rules["volume_pattern"]) if rules["volume_pattern"] else None
 
-    def is_detail(self, url):
+    def is_detail(self, url: str) -> bool:
         return not self.details or any(p.search(url) for p in self.details)
 
-    def in_scope(self, url):
+    def in_scope(self, url: str) -> bool:
         try:
             guard(self.config, url)
             return True
         except WlhError:
             return False
 
-    def parse(self, ctx, task, acquisition):
+    def parse(self, ctx: Any, task: Mapping[str, Any], acquisition: Mapping[str, Any]) -> dict[str, Any]:
         request = task["payload"]
         if acquisition["outcome"] != "ok":
             return {"requests": [], "targets": []}
@@ -193,13 +187,14 @@ class Adapter(Base):
         kind = detect_real_format(data, "html" if acquisition["mime_type"] == "text/html" else "")
         url = acquisition["actual_url"] or acquisition["request_url"]
         detail = self.is_detail(url)
-        requests, attachments = [], []
-        truncated = None
+        requests: list[dict[str, Any]] = []
+        attachments: list[dict[str, Any]] = []
+        truncated: str | None = None
         if kind == "html":
             tree, _, _ = parse_html(data, acquisition["charset"])
-            seen = set()
+            seen: set[str] = set()
             for anchor in tree.xpath("//a[@href]"):
-                link = clean_url(url, anchor.get("href"))
+                link: str | None = clean_url(url, anchor.get("href"))
                 if not link or link in seen or not self.in_scope(link):
                     continue
                 seen.add(link)
@@ -217,13 +212,11 @@ class Adapter(Base):
                     ):
                         requests.append({"url": link, "role": "page", "depth": task["depth"] + 1})
             if not detail and ctx.follow_links(task):
-                page = (request.get("meta") or {}).get("page", 1)
-                next_req, truncated = _aspnet_next_page(
-                    tree, url, page, self.max_pages, self.config
-                )
+                page = cast(Mapping[str, Any], request.get("meta") or {}).get("page", 1)
+                next_req, truncated = aspnet_next_page(tree, url, page, self.max_pages, self.config)
                 if next_req is not None:
                     requests.append(next_req)
-        targets = []
+        targets: list[dict[str, Any]] = []
         if detail and (kind in TEXT_KINDS | BINARY_KINDS):
             inputs = [{"request": request, "role": "detail"}]
             for item in attachments:
@@ -255,7 +248,7 @@ class Adapter(Base):
             **({"truncated": truncated} if truncated else {}),
         }
 
-    def deliverable_text(self, ctx, data, kind, acquisition):
+    def deliverable_text(self, ctx: Any, data: bytes, kind: str, acquisition: Mapping[str, Any]) -> tuple[str, dict[str, Any] | None, list[str]]:
         if kind == "html":
             tree, text, _ = parse_html(data, acquisition["charset"])
             return self.html_markdown(tree, acquisition), None, ["markdown", "quality"]
@@ -267,8 +260,8 @@ class Adapter(Base):
             return result["markdown"], result, result["parsers"]
         raise WlhError("unsupported_document_type")
 
-    def html_markdown(self, tree, acquisition):
-        rule = self.config["documents"]["content_xpath"]
+    def html_markdown(self, tree: Any, acquisition: Mapping[str, Any]) -> str:
+        rule: Any = self.config["documents"]["content_xpath"]
         nodes = tree.xpath(rule) if rule else [tree.body if tree.body is not None else tree]
         nodes = [n for n in nodes if isinstance(n, etree._Element)]
         if not nodes:
@@ -280,17 +273,15 @@ class Adapter(Base):
         base = acquisition["actual_url"] or acquisition["request_url"]
         return html_to_markdown("<html><body>" + fragment + "</body></html>", base)
 
-    def detail_values(self, data, kind, acquisition, url):
+    def detail_values(self, data: bytes, kind: str, acquisition: Mapping[str, Any], url: str) -> tuple[dict[str, Any], str | None, str | None]:
         """Declared field rules on the archived detail input; subclasses map source tables."""
         fields = self.config["documents"]["fields"]
-        values = {}
+        values: dict[str, Any] = {}
         if kind == "html":
             tree, _, encoding = parse_html(data, acquisition["charset"])
             for name, rule in fields.items():
-                values[name] = field_value(
-                    tree, tree.text_content(), rule, is_date=(name in DATE_FIELDS)
-                )
-            h1 = next(
+                values[name] = field_value(tree, tree.text_content(), rule, is_date=(name in DATE_FIELDS))
+            h1: str | None = next(
                 (
                     re.sub(r"\s+", " ", node.text_content()).strip()
                     for node in tree.xpath("//h1")
@@ -298,7 +289,7 @@ class Adapter(Base):
                 ),
                 None,
             )
-            page_title = next(
+            page_title: str | None = next(
                 (
                     re.sub(r"\s+", " ", node.text_content()).strip()
                     for node in tree.xpath("//title")
@@ -306,14 +297,14 @@ class Adapter(Base):
                 ),
                 None,
             )
-            title = values.get("title") or h1 or page_title
+            title: str | None = values.get("title") or h1 or page_title
             return values, title, encoding
         for name, rule in fields.items():
             if rule.get("value") is not None:
                 values[name] = rule["value"]
         return values, values.get("title") or file_name(url), acquisition["charset"]
 
-    def build(self, ctx, target, inputs):
+    def build(self, ctx: Any, target: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         detail, attachments = inputs[0], inputs[1:]
         acquisition = detail["acquisition"]
         data = ctx.read(acquisition)
@@ -324,7 +315,7 @@ class Adapter(Base):
         meta = dict(self.config["metadata"])
         url = acquisition["actual_url"] or acquisition["request_url"]
         values, title, encoding = self.detail_values(data, kind, acquisition, url)
-        candidate_inputs = [
+        candidate_inputs: list[dict[str, Any]] = [
             {
                 "acquisition_id": acquisition["id"],
                 "archive_ref": acquisition["archive_ref"],
@@ -334,12 +325,14 @@ class Adapter(Base):
                 "base_url": public_url(url),
             }
         ]
-        deliverables, parsers = [], {"markdown"}
-        quality_fail = []
+        deliverables: list[dict[str, Any]] = []
+        parsers = {"markdown"}
+        quality_fail: list[str] = []
 
         def add(
-            data, kind, item_acquisition, input_index, role, title=None, order=None, source_url=None
-        ):
+            data: bytes, kind: str, item_acquisition: Mapping[str, Any], input_index: int,
+            role: str, title: str | None = None, order: int | None = None, source_url: str | None = None,
+        ) -> None:
             markdown, result, used = self.deliverable_text(ctx, data, kind, item_acquisition)
             parsers.update(used)
             report = (result or {}).get("quality") or ctx.text_quality(markdown)
@@ -380,7 +373,7 @@ class Adapter(Base):
                 }
             )
 
-        files = []
+        files: list[dict[str, Any]] = []
         for item in attachments:
             att = item["acquisition"]
             body = ctx.read(att)
@@ -392,7 +385,7 @@ class Adapter(Base):
             source = public_url(att["actual_url"] or att["request_url"])
             text = item.get("text") or ""
             label = text if self.config["documents"]["attachment_title"] == "link_text" else ""
-            match = (
+            match: re.Match[str] | None = (
                 (self.volume.search(text) or self.volume.search(file_name(source)))
                 if self.volume
                 else None
@@ -449,7 +442,7 @@ class Adapter(Base):
                 f["url"],
             )
         for position, f in enumerate(others):
-            role = (
+            role: str = (
                 "primary"
                 if not use_body and not volumes and position == 0
                 else "independent_attachment"
@@ -477,7 +470,7 @@ class Adapter(Base):
         for name in ("document_number", "issuer", "status"):
             if values.get(name):
                 meta[name] = values[name]
-        dates = {
+        dates: dict[str, Any] = {
             k: values[k] for k in ("published_at", "effective_at", "expired_at") if values.get(k)
         }
         return [
@@ -492,7 +485,7 @@ class Adapter(Base):
         ]
 
     @staticmethod
-    def input_for(file, role, order):
+    def input_for(file: Mapping[str, Any], role: str, order: int | None) -> dict[str, Any]:
         acquisition = file["acquisition"]
         return {
             "acquisition_id": acquisition["id"],

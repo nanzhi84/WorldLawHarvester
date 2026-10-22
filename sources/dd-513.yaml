@@ -1,0 +1,44 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-513
+id: dd-513
+adapter: web
+entry_urls: ["https://xaydungchinhsach.chinhphu.vn/"]
+allowed_hosts: ["xaydungchinhsach.chinhphu.vn", "xdcs.cdnchinhphu.vn"]
+allowed_path_prefixes: ["/"]
+archive_approved: true
+scope: 越南政府门户政策与法规建设专栏公开文书及附件的有界采集；不代表全历史覆盖。
+robots: true
+delay: 0.5
+budget:
+  requests: 40
+  documents: 1
+  seconds: 600
+  response_bytes: 134217728
+fetch:
+  mode: http
+  max_depth: 1
+  page_timeout_ms: 60000
+metadata:
+  source_name: "越南政府门户政策与法规建设专栏（Xây dựng chính sách, pháp luật）"
+  document_type: "法律法规"
+  language: "vi"
+  jurisdiction: "VN"
+documents:
+  detail_url_patterns:
+    - '^https://xaydungchinhsach\.chinhphu\.vn/[a-z0-9-]+-\d{15,}\.htm$'
+  detail_body: always
+  content_xpath: '//div[@data-role="content"]'
+  fields:
+    title:
+      xpath: '(//h1[@data-role="title"] | //h1)[1]'
+    document_number:
+      xpath: '(//h1[@data-role="title"] | //*[@data-role="sapo"])[1]'
+      regex: '\b\d+(?:/\d{4})?/[A-ZĐa-zđ0-9-]+'
+    issuer:
+      value: 'Chính phủ'
+    published_at:
+      xpath: '//*[@data-role="publishdate"]'
+      regex: '\d{2}/\d{2}/\d{4}'
+ocr:
+  engine: br-ocr-v1
+  languages: vie
+  dpi: 96

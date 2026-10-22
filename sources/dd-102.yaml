@@ -1,0 +1,27 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-102
+id: dd-102
+adapter: web
+scope: "国家外汇管理局外汇行政处罚信息查询列表（北京分局）与处罚决定详情最小切片"
+entry_urls: ["https://www.safe.gov.cn/www/illegal?siteid=beijing"]
+allowed_hosts: ["www.safe.gov.cn"]
+allowed_path_prefixes: ["/www/illegal"]
+archive_approved: true
+robots: true
+delay: 0.5
+fetch: {max_depth: 1, retries: 2}
+budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "外汇局（行政处罚与监管信息公开）"
+  document_type: "通知公告"
+  language: "zh"
+  jurisdiction: "CN"
+  # priority: P2
+documents:
+  detail_url_patterns: ['^https://www\.safe\.gov\.cn/www/illegal/listQuery\?saffno=[0-9a-f]+$']
+  detail_body: always
+  content_xpath: '//div[contains(@class,"cfxx_jg") or contains(@class,"right_list_con")]'
+  fields:
+    title: {xpath: '//tr[(th|td)[contains(.,"行政处罚决定书文号")]]/td[last()]'}
+    document_number: {xpath: '//tr[(th|td)[contains(.,"行政处罚决定书文号")]]/td[last()]'}
+    issuer: {xpath: '//tr[(th|td)[contains(.,"作出处罚决定的行政机关名称")]]/td[last()]'}
+    published_at: {xpath: '//tr[(th|td)[contains(.,"处罚决定日期")]]/td[last()]'}

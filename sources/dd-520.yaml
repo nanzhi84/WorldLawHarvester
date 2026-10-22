@@ -1,0 +1,25 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-520
+id: dd-520
+adapter: web
+scope: "日本国税厅（NTA）法人税基本通达第1编第1章目录与节次条文详情最小切片"
+entry_urls: ["https://www.nta.go.jp/law/tsutatsu/kihon/hojin/01.htm"]
+allowed_hosts: ["www.nta.go.jp"]
+allowed_path_prefixes: ["/law/tsutatsu/kihon/hojin/"]
+archive_approved: true
+robots: true
+delay: 0.5
+fetch: {max_depth: 1, retries: 2}
+budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "国税厅法令解释通达、质义应答与文书回答事例（NTA）"
+  document_type: "税务资料"
+  language: "ja"
+  jurisdiction: "JP"
+  # priority: P1
+documents:
+  detail_url_patterns: ['^https://www\.nta\.go\.jp/law/tsutatsu/kihon/hojin/\d+/\d+_\d+\.htm$']
+  detail_body: always
+  content_xpath: '//div[@id="bodyArea" or @id="contents"]'
+  fields:
+    title: {xpath: '(//h1)[1]'}
+    issuer: {value: "国税庁"}

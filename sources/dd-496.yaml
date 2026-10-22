@@ -1,0 +1,42 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-496
+id: dd-496
+adapter: web
+entry_urls: ["https://luatvietnam.vn/ban-an/"]
+allowed_hosts: ["luatvietnam.vn"]
+allowed_path_prefixes: ["/ban-an/"]
+archive_approved: true
+scope: LuatVietnam 判决库 /ban-an/ 路径下公开裁判文书及附件的有界采集；不代表全历史覆盖。
+robots: true
+delay: 0.5
+budget:
+  requests: 40
+  documents: 1
+  seconds: 600
+  response_bytes: 52428800
+fetch:
+  mode: http
+  max_depth: 1
+  page_timeout_ms: 60000
+metadata:
+  source_name: "LuatVietnam 判决库"
+  document_type: "案例"
+  language: "vi"
+  jurisdiction: "VN"
+documents:
+  detail_url_patterns:
+    - '^https://luatvietnam\.vn/ban-an/[a-z0-9-]+-\d+-d1[12]\.html$'
+  detail_body: always
+  content_xpath: '//div[@id="noidung" or @id="thuoctinh"]'
+  fields:
+    title:
+      xpath: '(//h1)[1]'
+    document_number:
+      xpath: '//tr[(th|td)[contains(.,"Số hiệu:")]]/td[last()]'
+    issuer:
+      xpath: '//tr[(th|td)[contains(.,"Tòa án xét xử:")]]/td[last()]'
+    published_at:
+      xpath: '//tr[(th|td)[contains(.,"Ngày ban hành:")]]/td[last()]'
+ocr:
+  engine: br-ocr-v1
+  languages: vie
+  dpi: 96

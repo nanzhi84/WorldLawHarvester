@@ -1,0 +1,26 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-563
+id: dd-563
+adapter: web
+scope: "美国国税局（IRS）Internal Revenue Bulletins (IRB) 索引页与最新单期公报全文最小切片"
+entry_urls: ["https://www.irs.gov/irb"]
+allowed_hosts: ["www.irs.gov"]
+allowed_path_prefixes: ["/irb"]
+archive_approved: true
+robots: true
+delay: 0.5
+fetch: {max_depth: 1, retries: 2}
+budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "美国国税局（IRS Internal Revenue Bulletins / Written Determinations）与美国税务法院（DAWSON）"
+  document_type: "税务资料"
+  language: "en"
+  jurisdiction: "US"
+  # priority: P1
+documents:
+  detail_url_patterns: ['^https://www\.irs\.gov/irb/\d{4}-\d+_[iI][rR][bB]$']
+  detail_body: always
+  content_xpath: '//div[@id="block-pup-irs-barrio-content" or @id="main"]'
+  fields:
+    title: {xpath: '(//h1)[1]'}
+    document_number: {xpath: '(//h1)[1]', regex: '(\d{4}-\d+)'}
+    issuer: {value: "Internal Revenue Service (IRS)"}

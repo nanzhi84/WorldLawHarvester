@@ -1,0 +1,25 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-527
+id: dd-527
+adapter: web
+scope: "新加坡国内税务局（IRAS）e-Tax Guides 列表与企业所得税专题指南最小切片"
+entry_urls: ["https://www.iras.gov.sg/quick-links/e-tax-guides"]
+allowed_hosts: ["www.iras.gov.sg"]
+allowed_path_prefixes: ["/quick-links/e-tax-guides", "/taxes/corporate-income-tax/", "/docs/default-source/e-tax/"]
+archive_approved: true
+robots: true
+delay: 0.5
+fetch: {max_depth: 1, retries: 2}
+budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "新加坡国内税务局（IRAS）e-Tax Guides"
+  document_type: "税务资料"
+  language: "en"
+  jurisdiction: "SG"
+  # priority: P1
+documents:
+  detail_url_patterns: ['^https://www\.iras\.gov\.sg/taxes/corporate-income-tax/income-deductions-for-companies/[^/?#]+$']
+  detail_body: always
+  content_xpath: '//main[@id="mainContent"]|//div[@id="mainContent"]'
+  fields:
+    title: {xpath: '(//h1)[1]'}
+    issuer: {value: "Inland Revenue Authority of Singapore (IRAS)"}

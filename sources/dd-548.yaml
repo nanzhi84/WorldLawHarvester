@@ -1,0 +1,17 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-548
+id: dd-548
+adapter: structured_xml
+entry_urls: ["https://caselaw.nationalarchives.gov.uk/uksc/2024/1/data.xml"]
+allowed_hosts: ["caselaw.nationalarchives.gov.uk"]
+allowed_path_prefixes: ["/uksc/"]
+archive_approved: true
+scope: 英国最高法院指定判例 XML 的有界采集。
+robots: true
+delay: 0.5
+budget: {requests: 10, documents: 1, seconds: 300, response_bytes: 52428800}
+fetch: {mode: http, max_depth: 0, page_timeout_ms: 60000}
+metadata:
+  source_name: "英国国家档案馆判例法库（Find Case Law）"
+  document_type: "案例"
+  language: "en"
+  jurisdiction: "GB"

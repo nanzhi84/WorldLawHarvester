@@ -1,0 +1,17 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-559
+id: dd-559
+adapter: structured_xml
+entry_urls: ["https://www.ecfr.gov/api/versioner/v1/full/2024-01-01/title-1.xml?part=1"]
+allowed_hosts: ["www.ecfr.gov"]
+allowed_path_prefixes: ["/api/versioner/v1/full/"]
+archive_approved: true
+scope: eCFR 第一编第一部分指定日期 XML 的有界采集。
+robots: false
+delay: 0.5
+budget: {requests: 10, documents: 1, seconds: 300, response_bytes: 52428800}
+fetch: {mode: http, max_depth: 0, page_timeout_ms: 60000}
+metadata:
+  source_name: "美国电子联邦法规汇编（eCFR）"
+  document_type: "法律法规"
+  language: "en"
+  jurisdiction: "US"

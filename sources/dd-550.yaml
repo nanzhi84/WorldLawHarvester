@@ -1,0 +1,17 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-550
+id: dd-550
+adapter: structured_xml
+entry_urls: ["https://www.gesetze-im-internet.de/gg/xml.zip"]
+allowed_hosts: ["www.gesetze-im-internet.de"]
+allowed_path_prefixes: ["/gg/"]
+archive_approved: true
+scope: 德国基本法官方 XML 压缩包的有界采集。
+robots: true
+delay: 0.5
+budget: {requests: 10, documents: 1, seconds: 300, response_bytes: 52428800}
+fetch: {mode: http, max_depth: 0, page_timeout_ms: 60000}
+metadata:
+  source_name: "德国联邦法律门户（Gesetze im Internet）"
+  document_type: "法律法规"
+  language: "de"
+  jurisdiction: "DE"

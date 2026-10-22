@@ -1,0 +1,30 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-549
+id: dd-549
+adapter: web
+scope: "英国上级裁判所税务与衡平分庭（Upper Tribunal Tax and Chancery Chamber）最新判决最小切片"
+entry_urls: ["https://www.gov.uk/tax-and-chancery-tribunal-decisions"]
+allowed_hosts: ["www.gov.uk", "assets.publishing.service.gov.uk"]
+allowed_path_prefixes: ["/tax-and-chancery-tribunal-decisions", "/media/"]
+host_path_scopes:
+  www.gov.uk: ["/tax-and-chancery-tribunal-decisions"]
+  assets.publishing.service.gov.uk: ["/media/"]
+archive_approved: true
+robots: true
+delay: 0.5
+fetch: {max_depth: 1, retries: 2}
+budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "英国税务海关总署内部手册（HMRC Internal Manuals）与税务裁判所判决"
+  document_type: "税务资料"
+  language: "en"
+  jurisdiction: "GB"
+  # priority: P1
+documents:
+  detail_url_patterns: ['^https://www\.gov\.uk/tax-and-chancery-tribunal-decisions/20\d{2}-ukut-[^/?#]+$']
+  detail_body: always
+  content_xpath: '//main[@id="content"]'
+  fields:
+    title: {xpath: '(//h1)[1]'}
+    document_number: {xpath: '(//h1)[1]', regex: '(\[\d{4}\]\s*UKUT\s*\d+\s*\(TCC\))'}
+    issuer: {xpath: '//dt[contains(.,"From:")]/following-sibling::dd[1]'}
+    published_at: {xpath: '//dt[contains(.,"Published:")]/following-sibling::dd[1]'}

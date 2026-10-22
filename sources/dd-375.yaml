@@ -1,0 +1,26 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-375
+id: dd-375
+adapter: web
+scope: "国家统计局国民经济行业分类国家统计标准公开详情与修改单附件最小切片"
+entry_urls: ["https://www.stats.gov.cn/xxgk/tjbz/gjtjbz/201905/t20190521_1758938.html"]
+allowed_hosts: ["www.stats.gov.cn"]
+allowed_path_prefixes: ["/xxgk/tjbz/gjtjbz/"]
+archive_approved: true
+robots: true
+delay: 0.5
+fetch: {max_depth: 1, retries: 2}
+budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "国民经济行业分类"
+  document_type: "行业标准"
+  language: "zh"
+  jurisdiction: "CN"
+documents:
+  detail_url_patterns: ['^https://www\.stats\.gov\.cn/xxgk/tjbz/gjtjbz/\d{6}/t\d{8}_\d+\.html$']
+  detail_body: always
+  content_xpath: '//div[contains(@class,"TRS_PreAppend") or contains(@class,"TRS_Editor") or contains(@class,"xxgkNbXqCenter")]'
+  fields:
+    title: {xpath: '//h2[contains(@class,"xxgkNbXqTitle")]|//title'}
+    document_number: {xpath: '//div[contains(@class,"TRS_PreAppend") or contains(@class,"TRS_Editor")]', regex: '(国统字〔\d{4}〕\d+号)'}
+    issuer: {xpath: '//div[span[contains(.,"发布机构")]]', regex: '发布机构\s*(.+)$'}
+    published_at: {xpath: '//div[span[contains(.,"成文日期")]]'}

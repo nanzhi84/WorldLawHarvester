@@ -1,0 +1,27 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-040
+id: dd-040
+adapter: web
+scope: "最高人民检察院公报栏目首页与最新公报详情最小切片"
+entry_urls: ["https://www.spp.gov.cn/spp/gjgb/index.shtml"]
+allowed_hosts: ["www.spp.gov.cn"]
+allowed_path_prefixes: ["/spp/gjgb/"]
+archive_approved: true
+robots: false
+delay: 0.5
+fetch: {max_depth: 1, retries: 2}
+budget: {requests: 12, documents: 1, seconds: 120, response_bytes: 33554432}
+metadata:
+  source_name: "最高人民检察院公报"
+  document_type: "政策文件"
+  language: "zh"
+  jurisdiction: "CN"
+  # priority: P2
+documents:
+  detail_url_patterns: ['^https://www\.spp\.gov\.cn/spp/gjgb/\d{6}/t\d{8}_\d+\.shtml$']
+  detail_body: always
+  content_xpath: '//div[@id="fontzoom" or contains(@class,"detail_con")]'
+  fields:
+    title: {xpath: '//div[contains(@class,"detail_tit")]|//title'}
+    document_number: {xpath: '//div[contains(@class,"detail_tit")]', regex: '(\d{4}年第\d+号)'}
+    issuer: {value: "最高人民检察院"}
+    published_at: {xpath: '//div[contains(@class,"detail_extend")]|//meta[@name="firstpublishedtime"]/@content', regex: '(\d{4}-\d{2}-\d{2})'}
