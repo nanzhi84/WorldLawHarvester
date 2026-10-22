@@ -73,7 +73,16 @@ class Adapter(WebAdapter):
             others: list[dict[str, Any]] = [
                 r for r in result["requests"] if not self.is_detail(r["url"])
             ]
-            if len(details) > limit or (len(details) == limit and bool(others)) or len(others) > limit:
+            if (
+                len(details) > limit
+                or (len(details) == limit and bool(others))
+                or len(others) > limit
+            ) and result.get("truncated") in (
+                None,
+                "document_budget_exceeded",
+                "max_depth_exceeded",
+                "page_limit_exceeded",
+            ):
                 result["truncated"] = "document_budget_exceeded"
             result["requests"] = (
                 details[:limit] if len(details) >= limit else details + others[:limit]

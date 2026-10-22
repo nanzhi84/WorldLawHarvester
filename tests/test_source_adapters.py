@@ -2387,32 +2387,77 @@ documents:
         assert parsed.get("truncated") == "http_503"
         assert parsed["targets"] == []
 
-        with pytest.raises(WlhError) as exc_build:
-            adapter.build(
-                fake_ctx,
-                {
-                    "identity": {
-                        "namespace": "url",
-                        "external_key": detail_url,
-                        "public_url": detail_url,
-                        "recheck_locator": {"url": detail_url, "role": "page"},
-                    }
-                },
-                [
+        for body_mode in ("always", "auto", "never"):
+            mode_cfg = dict(dd512_cfg)
+            mode_cfg["documents"] = dict(dd512_cfg["documents"], detail_body=body_mode)
+            mode_adapter = WebAdapter(mode_cfg)
+            with pytest.raises(WlhError) as exc_build:
+                mode_adapter.build(
+                    fake_ctx,
                     {
-                        "acquisition": {
-                            "id": "acq-1",
-                            "archive_ref": "0" * 64,
-                            "mime_type": "text/html",
-                            "charset": "utf-8",
-                            "actual_url": detail_url,
-                            "request_url": detail_url,
-                            "byte_size": len(truncated_detail_html),
+                        "identity": {
+                            "namespace": "url",
+                            "external_key": detail_url,
+                            "public_url": detail_url,
+                            "recheck_locator": {"url": detail_url, "role": "page"},
                         }
-                    }
-                ],
-            )
-        assert exc_build.value.code == "http_503"
+                    },
+                    [
+                        {
+                            "acquisition": {
+                                "id": "acq-1",
+                                "archive_ref": "0" * 64,
+                                "mime_type": "text/html",
+                                "charset": "utf-8",
+                                "actual_url": detail_url,
+                                "request_url": detail_url,
+                                "byte_size": len(truncated_detail_html),
+                            }
+                        },
+                        {
+                            "acquisition": {
+                                "id": "acq-2",
+                                "archive_ref": "1" * 64,
+                                "mime_type": "application/pdf",
+                                "charset": None,
+                                "actual_url": "https://gatewayduthaoonline.quochoi.vn/uploadFiles/host/local/draft.pdf",
+                                "request_url": "https://gatewayduthaoonline.quochoi.vn/uploadFiles/host/local/draft.pdf",
+                                "byte_size": 128,
+                            },
+                            "text": "Toàn văn dự thảo.pdf",
+                        },
+                    ],
+                )
+            assert exc_build.value.code == "http_503"
+
+        from wlh.adapters.bridges.worldwidelaw_bridge import Adapter as WorldWideLawBridge
+
+        dd493_cfg = load_file(repo_root / "sources" / "dd-493.yaml").model_dump()
+        bridge_adapter = WorldWideLawBridge(dd493_cfg)
+        links_html = "".join(
+            f'<a href="https://congbao.chinhphu.vn/noi-dung-van-ban-so-{i:02d}-400{i:02d}">Doc {i}</a>'
+            for i in range(1, 13)
+        )
+        truncated_list_html = (
+            f'<!DOCTYPE html><html data-wlh-truncated="http_503"><body>{links_html}</body></html>'
+        ).encode("utf-8")
+        bridge_ctx = SimpleNamespace(
+            runtime=SimpleNamespace(mode="collect"),
+            read=lambda _acq: truncated_list_html,
+            follow_links=lambda _task: True,
+        )
+        bridge_parsed = bridge_adapter.parse(
+            bridge_ctx,
+            {"payload": {"url": "https://congbao.chinhphu.vn/", "role": "page"}, "depth": 0},
+            {
+                "outcome": "ok",
+                "mime_type": "text/html",
+                "charset": "utf-8",
+                "actual_url": "https://congbao.chinhphu.vn/",
+                "request_url": "https://congbao.chinhphu.vn/",
+            },
+        )
+        assert bridge_parsed.get("truncated") == "http_503"
 
         class _DetailSubrequest503Handler(BaseHTTPRequestHandler):
             def log_message(self, format: str, *args: object) -> None:

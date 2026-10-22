@@ -163,6 +163,9 @@ def extract_detail_fields(
     values: dict[str, Any] = {}
     if kind == "html":
         tree, _, encoding = parse_html(data, acquisition["charset"])
+        wlh_trunc = tree.xpath("//*[@data-wlh-truncated]/@data-wlh-truncated")
+        if wlh_trunc:
+            raise WlhError(str(wlh_trunc[0]))
         for name, rule in fields.items():
             values[name] = field_value(
                 tree, tree.text_content(), rule, is_date=(name in DATE_FIELDS)
