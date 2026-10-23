@@ -164,8 +164,9 @@ class Adapter(RecordAdapter):
                     obj = json.loads(data)
                 except ValueError:
                     raise WlhError("legal_xml_invalid") from None
-                if isinstance(obj, dict) and isinstance(
-                    cast(dict[str, Any], obj).get("children"), list
+                if isinstance(obj, dict) and (
+                    isinstance(cast(dict[str, Any], obj).get("children"), list)
+                    or isinstance(cast(dict[str, Any], obj).get("titles"), list)
                 ):
                     return []
                 raise WlhError("legal_xml_invalid")
@@ -350,6 +351,26 @@ class Adapter(RecordAdapter):
             typed_obj = cast(dict[str, Any], obj)
             children_root = typed_obj.get("children")
             if not isinstance(children_root, list):
+                titles_list = typed_obj.get("titles")
+                if isinstance(titles_list, list):
+                    raw_urls: list[str] = []
+                    for raw_item in cast(list[Any], titles_list):
+                        if not isinstance(raw_item, dict):
+                            continue
+                        typed_item = cast(dict[str, Any], raw_item)
+                        if typed_item.get("reserved"):
+                            continue
+                        num: Any = typed_item.get("number")
+                        raw_date: Any = (
+                            typed_item.get("up_to_date_as_of")
+                            or typed_item.get("latest_issue_date")
+                            or ""
+                        )
+                        date = str(raw_date).strip()
+                        if num is not None and date:
+                            raw_urls.append(urljoin(base, f"structure/{date}/title-{num}.json"))
+                    urls = _normalize_candidate_urls(base, raw_urls, self.config)
+                    return [{"url": u, "role": "page"} for u in urls[:5]]
                 return []
             m = re.search(r"/structure/(\d{4}-\d{2}-\d{2})/title-(\d+)\.json", base)
             date = m.group(1) if m else str(typed_obj.get("up_to_date_as_of") or "").strip()
