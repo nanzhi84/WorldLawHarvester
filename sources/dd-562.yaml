@@ -4,16 +4,14 @@ adapter: web
 scope: "美国联邦最高法院官网（supremecourt.gov）Slip Opinions 列表发现与判决书 PDF 原件有界采集"
 entry_urls:
   - "https://www.supremecourt.gov/opinions/opinions.aspx"
-  - "https://www.supremecourt.gov/opinions/slipopinion/25"
-  - "https://www.supremecourt.gov/opinions/relatingtoorders/25"
 allowed_hosts: ["www.supremecourt.gov"]
 allowed_path_prefixes: ["/opinions/"]
 archive_approved: true
 robots: false
 delay: 0.5
 user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-fetch: {mode: http, max_depth: 1, retries: 2, page_timeout_ms: 60000}
-budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 67108864}
+fetch: {mode: http, max_depth: 3, retries: 2, page_timeout_ms: 60000}
+budget: {requests: 60, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "美国联邦最高法院官网（supremecourt.gov）与 Caselaw Access Project (CAP)"
   document_type: "案例"

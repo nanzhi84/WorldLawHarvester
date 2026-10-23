@@ -1,7 +1,7 @@
 # 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-520
 id: dd-520
 adapter: web
-scope: "日本国税厅（NTA）法人税基本通达第1编第1章目录与节次条文详情最小切片"
+scope: "日本国税厅（NTA）法令解释通达目录发现与法人税基本通达跨章节条文详情有界采集"
 entry_urls: ["https://www.nta.go.jp/law/tsutatsu/kihon/hojin/01.htm"]
 allowed_hosts: ["www.nta.go.jp"]
 allowed_path_prefixes: ["/law/tsutatsu/kihon/hojin/"]
@@ -17,7 +17,7 @@ metadata:
   jurisdiction: "JP"
   # priority: P1
 documents:
-  detail_url_patterns: ['^https://www\.nta\.go\.jp/law/tsutatsu/kihon/hojin/\d+/\d+_\d+\.htm$']
+  detail_url_patterns: ['^https://www\.nta\.go\.jp/law/tsutatsu/kihon/hojin/\d+/[0-9a-z_]+\.htm$']
   detail_body: always
   content_xpath: '//div[@id="bodyArea" or @id="contents"]'
   fields:

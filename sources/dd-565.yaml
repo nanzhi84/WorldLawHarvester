@@ -2,7 +2,7 @@
 id: dd-565
 adapter: web
 scope: "加拿大最高法院（Supreme Court of Canada）Decisia 裁判文书列表发现与判决全文有界采集"
-entry_urls: ["https://decisions.scc-csc.ca/scc-csc/scc-csc/en/2026/nav_date.do?iframe=true"]
+entry_urls: ["https://decisions.scc-csc.ca/scc-csc/scc-csc/en/nav_date.do?iframe=true"]
 allowed_hosts: ["decisions.scc-csc.ca"]
 allowed_path_prefixes: ["/scc-csc/scc-csc/en/"]
 archive_approved: true

@@ -367,7 +367,29 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/api/versioner/v1/structure/2024-01-01/title-1.json":
+        elif self.path == "/api/versioner/v1/titles.json":
+            payload = {
+                "titles": [
+                    {
+                        "number": 1,
+                        "name": "General Provisions",
+                        "latest_amended_on": "2022-12-29",
+                        "latest_issue_date": "2026-08-10",
+                        "up_to_date_as_of": "2026-10-21",
+                        "reserved": False,
+                    }
+                ]
+            }
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path in (
+            "/api/versioner/v1/structure/2024-01-01/title-1.json",
+            "/api/versioner/v1/structure/2026-10-21/title-1.json",
+        ):
             payload = {
                 "type": "title",
                 "identifier": "1",
@@ -388,7 +410,10 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/api/versioner/v1/full/2024-01-01/title-1.xml?part=1":
+        elif self.path in (
+            "/api/versioner/v1/full/2024-01-01/title-1.xml?part=1",
+            "/api/versioner/v1/full/2026-10-21/title-1.xml?part=1",
+        ):
             body = """<?xml version="1.0"?>
 <DIV5 N="1" TYPE="PART" VOLUME="1" hierarchy_metadata="{&amp;quot;path&amp;quot;:&amp;quot;/on/2024-01-01/title-1/part-1&amp;quot;,&amp;quot;citation&amp;quot;:&amp;quot;1 CFR Part 1&amp;quot;}">
   <HEAD>PART 1—DEFINITIONS</HEAD>
@@ -403,7 +428,10 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/api/versioner/v1/full/2024-01-01/title-1.xml?part=2":
+        elif self.path in (
+            "/api/versioner/v1/full/2024-01-01/title-1.xml?part=2",
+            "/api/versioner/v1/full/2026-10-21/title-1.xml?part=2",
+        ):
             body = """<?xml version="1.0"?>
 <DIV5 N="2" TYPE="PART" VOLUME="1" hierarchy_metadata="{&amp;quot;path&amp;quot;:&amp;quot;/on/2024-01-01/title-1/part-2&amp;quot;,&amp;quot;citation&amp;quot;:&amp;quot;1 CFR Part 2&amp;quot;}">
   <HEAD>PART 2—GENERAL INFORMATION</HEAD>
@@ -989,6 +1017,17 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             body = json.dumps(payload).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path in ("/gongbao/", "/gongbao/index.htm", "/gongbao/currentissue.htm"):
+            body = b"""<!DOCTYPE html><html><head><title>Gazette Home</title>
+            <script>location.replace('/gongbao/2026/issue_13046/');</script>
+            </head><body>
+            <a href="/gongbao/2026/issue_13046/">State Council Gazette 2026</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -1784,8 +1823,19 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/opinions/opinions.aspx":
+            body = b"""<!DOCTYPE html><html><head><title>Opinions of the Court</title></head><body>
+            <a href="/opinions/slipopinion/26">Opinions of the Court</a>
+            <a href="/opinions/relatingtoorders/26">Opinions Relating to Orders</a>
+            </body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path in (
-            "/opinions/opinions.aspx",
+            "/opinions/slipopinion/26",
+            "/opinions/relatingtoorders/26",
             "/opinions/slipopinion/25",
             "/opinions/relatingtoorders/25",
         ):
@@ -1815,6 +1865,7 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif self.path in (
             "/judgments-jugements/cb/",
+            "/scc-csc/scc-csc/en/nav_date.do?iframe=true",
             "/scc-csc/scc-csc/en/2026/nav_date.do?iframe=true",
         ):
             body = b"""<!DOCTYPE html><html><head><title>SCC Decisions</title></head><body>

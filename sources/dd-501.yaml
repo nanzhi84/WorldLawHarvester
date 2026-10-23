@@ -1,14 +1,14 @@
 # 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-501
 id: dd-501
 adapter: web
-scope: "中华人民共和国国务院公报指定单期目录（2026年第9号，总第1920号）与正文最小切片"
-entry_urls: ["https://www.gov.cn/gongbao/2026/issue_13046/"]
+scope: "中华人民共和国国务院公报总目录发现最新一期与正文最小切片"
+entry_urls: ["https://www.gov.cn/gongbao/"]
 allowed_hosts: ["www.gov.cn"]
 allowed_path_prefixes: ["/gongbao/"]
 archive_approved: true
 robots: true
 delay: 0.5
-fetch: {max_depth: 1, retries: 4}
+fetch: {mode: rendered_dom, max_depth: 1, retries: 4}
 budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "中华人民共和国国务院公报"
