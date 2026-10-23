@@ -10,14 +10,19 @@ import asyncio
 import base64
 import contextlib
 import hashlib
+import logging
 import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlsplit
 
+from yarl import URL
+
 from wlh.core import WlhError
 from wlh.engine.scope import guard
 from wlh.engine.transport import REDIRECTS, Budget, Recorder, Transport, request_key
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from playwright.async_api import Browser as PlaywrightBrowser
@@ -54,8 +59,6 @@ class Browser:
         if len(data) <= 2048 and "location.reload" in text:
             match = re.search(r'document\.cookie\s*=\s*["\']([^=;"\']+)=([^;"\']+)', text)
             if match and self.transport.session is not None:
-                from yarl import URL
-
                 name, value = match.group(1).strip(), match.group(2).strip()
                 key = (urlsplit(url).hostname or "", name, value)
                 if key not in self.loopback_cookies:
@@ -320,6 +323,32 @@ class Browser:
                 ignore_https_errors=False,
                 service_workers="block",
             )
+            if self.transport.session is not None:
+                try:
+                    target_host = urlsplit(url).hostname or ""
+                    allowed_hosts = set(self.config.get("allowed_hosts", []))
+                    cookies_to_add: list[dict[str, Any]] = []
+                    for cookie in self.transport.session.cookie_jar:
+                        raw_domain = cookie.get("domain") or ""
+                        clean_domain = raw_domain.lstrip(".")
+                        if clean_domain and clean_domain in allowed_hosts:
+                            dom = raw_domain
+                        elif not clean_domain and target_host in allowed_hosts:
+                            dom = target_host
+                        else:
+                            continue
+                        cookies_to_add.append(
+                            {
+                                "name": cookie.key,
+                                "value": cookie.value,
+                                "domain": dom,
+                                "path": cookie.get("path") or "/",
+                            }
+                        )
+                    if cookies_to_add:
+                        await context.add_cookies(cookies_to_add)
+                except Exception as exc:
+                    logger.debug("Failed to inject cookies into browser context for %s: %s", url, exc)
             page = await context.new_page()
             session = await context.new_cdp_session(page)
             # Fetch.requestPaused reports every redirect hop. Playwright route handlers
@@ -437,8 +466,21 @@ class Browser:
             if pending:
                 await asyncio.gather(*tuple(pending), return_exceptions=True)
             if context is not None:
-                with contextlib.suppress(Exception):
-                    await context.close()
+                try:
+                    if self.transport.session is not None:
+                        allowed_hosts = set(self.config.get("allowed_hosts", []))
+                        browser_cookies = await context.cookies()
+                        for c in browser_cookies:
+                            domain = c.get("domain", "").lstrip(".")
+                            if domain in allowed_hosts:
+                                self.transport.session.cookie_jar.update_cookies(
+                                    {c["name"]: c["value"]}, URL(f"https://{domain}")
+                                )
+                except Exception as exc:
+                    logger.debug("Failed to collect cookies from browser context for %s: %s", url, exc)
+                finally:
+                    with contextlib.suppress(Exception):
+                        await context.close()
         ok = status is not None and 200 <= status < 300 and status not in REDIRECTS
         return self.recorder.finish(
             identity,

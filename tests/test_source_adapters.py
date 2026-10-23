@@ -510,6 +510,21 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(_BridgeFixtureHandler.sample_pdf)))
             self.end_headers()
             self.wfile.write(_BridgeFixtureHandler.sample_pdf)
+        elif self.path.startswith("/vanban/"):
+            cookie_hdr = self.headers.get("Cookie", "")
+            if "D1N=" not in cookie_hdr:
+                body = b'<html><body><script>document.cookie="D1N=ok123"+"; expires=Thu, 31-Dec-37 23:55:55 GMT; path=/";window.location.reload(true);</script></body></html>'
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/pdf")
+                self.send_header("Content-Length", str(len(_BridgeFixtureHandler.sample_pdf)))
+                self.end_headers()
+                self.wfile.write(_BridgeFixtureHandler.sample_pdf)
         elif self.path == "/juriscraper/ca1-opinions.json":
             payload = {
                 "court_id": "ca1",
@@ -669,7 +684,7 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
                 inner = """<div class="congbao-home">
               <a href="/chung-khoan/thong-tu-145-2026-tt-btc-quy-dinh-dang-ky-449607-d1.html">Thông tư 145/2026/TT-BTC</a>
             </div>"""
-            elif active == "dd-512":
+            elif active in {"dd-512", "dd-575"}:
                 inner = """<div class="congbao-home">
               <a href="/dt/luat-sua-doi-bo-sung-mot-so-dieu-cua-09-luat-ve-quan-su-quoc-phong/260805100059615084">Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng</a>
               <a href="/dt/luat-hoa-giai-o-co-so-sua-doi/260522145512086084">Luật Hòa giải ở cơ sở (sửa đổi)</a>
@@ -1503,6 +1518,108 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path.startswith("/Pages/danh-sach-van-ban.aspx"):
+            cookie_hdr = self.headers.get("Cookie", "")
+            if "D1N=" not in cookie_hdr:
+                body = b'<html><body><script>document.cookie="D1N=ok123"+"; expires=Thu, 31-Dec-37 23:55:55 GMT; path=/";window.location.reload(true);</script></body></html>'
+            else:
+                body = """<html><head><meta charset="utf-8"><title>Cơ sở dữ liệu Luật Việt Nam - VietLaw</title></head><body>
+                <div class="content_box_left">
+                  <p class="title_content"><a href="/Pages/vbpq-toan-van.aspx?ItemID=29895">Nghị quyết 46/2026/QH16</a></p>
+                </div>
+                <div class="content_box_left">
+                  <p class="title_content"><a href="/Pages/vbpq-toan-van.aspx?ItemID=29894">Nghị quyết 44/2026/QH16</a></p>
+                </div>
+                </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path.startswith("/Pages/vbpq-toan-van.aspx?ItemID=29895"):
+            cookie_hdr = self.headers.get("Cookie", "")
+            if "D1N=" not in cookie_hdr:
+                body = b'<html><body><script>document.cookie="D1N=ok123"+"; expires=Thu, 31-Dec-37 23:55:55 GMT; path=/";window.location.reload(true);</script></body></html>'
+            else:
+                body = """<html><head><meta charset="utf-8"><title>Cơ sở dữ liệu Luật Việt Nam - VietLaw</title></head><body>
+                <div id="left_col">
+                  <div class="box-container">
+                    <div class="box-tab-vb">
+                      <div class="box-map">
+                        <ul>
+                          <li><a href="/">Trang chủ</a></li>
+                          <li><a href="javascript:void(0)">Nghị quyết 46/2026/QH16</a></li>
+                        </ul>
+                      </div>
+                      <div class="header">
+                        <ul>
+                          <li><a href="/vanban/Lists/VBPQConvert/Attachments/29895/NQ_46_QH16.pdf"><span><b>Tải về</b></span></a></li>
+                        </ul>
+                      </div>
+                      <div class="content">
+                        <div class="fulltext">
+                          <div class="vbInfo">
+                            <ul>
+                              <li class="green"><span>Ngày ban hành: </span>24/08/2026</li>
+                              <li class="red"><span>Hiệu lực: </span>Còn hiệu lực</li>
+                            </ul>
+                          </div>
+                          <div class="toanvan">
+                            <p>Toàn văn Nghị quyết số 46/2026/QH16 của Quốc hội về phát triển văn hóa và dân tộc.</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path.startswith("/Pages/vbpq-toan-van.aspx?ItemID=29894"):
+            cookie_hdr = self.headers.get("Cookie", "")
+            if "D1N=" not in cookie_hdr:
+                body = b'<html><body><script>document.cookie="D1N=ok123"+"; expires=Thu, 31-Dec-37 23:55:55 GMT; path=/";window.location.reload(true);</script></body></html>'
+            else:
+                body = """<html><head><meta charset="utf-8"><title>Cơ sở dữ liệu Luật Việt Nam - VietLaw</title></head><body>
+                <div id="left_col">
+                  <div class="box-container">
+                    <div class="box-tab-vb">
+                      <div class="box-map">
+                        <ul>
+                          <li><a href="/">Trang chủ</a></li>
+                          <li><a href="javascript:void(0)">Nghị quyết 44/2026/QH16</a></li>
+                        </ul>
+                      </div>
+                      <div class="header">
+                        <ul>
+                          <li><a href="/vanban/Lists/VBPQConvert/Attachments/29894/NQ_44_QH16.pdf"><span><b>Tải về</b></span></a></li>
+                        </ul>
+                      </div>
+                      <div class="content">
+                        <div class="fulltext">
+                          <div class="vbInfo">
+                            <ul>
+                              <li class="green"><span>Ngày ban hành: </span>24/08/2026</li>
+                              <li class="red"><span>Hiệu lực: </span>Còn hiệu lực</li>
+                            </ul>
+                          </div>
+                          <div class="toanvan">
+                            <p>Toàn văn Nghị quyết số 44/2026/QH16 của Quốc hội khóa 16 về dự án độc lập Ninh Thuận.</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif self.path == "/webcenter/portal/anle/anle":
             body = b"""<!DOCTYPE html><html><head><title>Danh sach an le</title></head><body>
             <a href="/webcenter/portal/anle/chitietanle?dDocName=TAND377305">An le 84/2026/AL</a>
@@ -2016,10 +2133,11 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-572", "法律法规", "Act No. 718 of 1963"),
             ("dd-506", "案例", "HCAL 371/2021"),
             ("dd-507", "税务资料", "dipn03"),
-            ("dd-512", "法律法规", "Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng"),
+            ("dd-512", "法律法规", "46/2026/QH16"),
             ("dd-514", "案例", "84/2026/AL"),
             ("dd-516", "税务资料", "Đề nghị hướng dẫn"),
             ("dd-517", "法律法规", "平成五年法律第八十八号"),
+            ("dd-575", "法律法规", "Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng"),
         ],
     )
     def test_adapted_production_source_configs_collect_and_reparse_against_local_samples(
@@ -2161,6 +2279,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                 "dd-565",
                 "dd-570",
                 "dd-572",
+                "dd-575",
             }
 
             with psycopg.connect(initialized_db["WLH_DATABASE_URL"]) as conn:
@@ -2210,13 +2329,14 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         "dd-561",
                         "dd-562",
                         "dd-565",
+                        "dd-575",
                     }:
                         assert {
                             r["resource_id"] for r in rows if r["original_hash"] is not None
                         } == {r["resource_id"] for r in rows}, (
                             f"Expected captured attachment/original for every resource of {source_id}"
                         )
-                    if source_id in {"dd-512", "dd-516", "dd-565"}:
+                    if source_id in {"dd-512", "dd-516", "dd-565", "dd-575"}:
                         from wlh.engine.objects import Objects
 
                         objs = Objects()
@@ -2225,8 +2345,10 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                             md_text = objs.get(r["markdown_hash"]).decode(
                                 "utf-8", errors="replace"
                             )
-                            if source_id == "dd-512":
+                            if source_id == "dd-575":
                                 assert "Toàn văn hồ sơ dự án" in md_text
+                            elif source_id == "dd-512":
+                                assert "Official Legal Document" in md_text or "Nghị quyết" in md_text
                             elif source_id == "dd-516":
                                 assert r["doc_number"] is None
                                 assert "Đề nghị hướng dẫn" in md_text
@@ -2243,6 +2365,11 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                     if source_id in {"dd-550", "dd-558"}:
                         assert rows[0]["original_media_type"] == "application/zip"
                         assert (projected["original_file"] or "").endswith(".zip")
+                    if source_id == "dd-512":
+                        assert projected["issuer"] == "Quốc hội"
+                        assert projected["published_at"] == "2026-08-24"
+                    if source_id == "dd-575":
+                        assert "Bộ Quốc phòng" in (projected["issuer"] or "")
                     if source_id == "dd-548":
                         assert projected["issuer"] == "The Supreme Court"
                         assert projected["published_at"] == "2024-01-11"
@@ -2359,8 +2486,8 @@ documents:
         from wlh.core import WlhError
 
         repo_root = Path(__file__).resolve().parents[1]
-        dd512_cfg = load_file(repo_root / "sources" / "dd-512.yaml").model_dump()
-        adapter = WebAdapter(dd512_cfg)
+        dd575_cfg = load_file(repo_root / "sources" / "dd-575.yaml").model_dump()
+        adapter = WebAdapter(dd575_cfg)
         truncated_detail_html = (
             '<!DOCTYPE html><html data-wlh-truncated="http_503"><head><title>Draft</title></head><body>'
             '<div class="info-dt-l"><h3>Luật sửa đổi</h3>Cơ quan chủ trì soạn thảo: Bộ Tư pháp</div>'
@@ -2388,8 +2515,8 @@ documents:
         assert parsed["targets"] == []
 
         for body_mode in ("always", "auto", "never"):
-            mode_cfg = dict(dd512_cfg)
-            mode_cfg["documents"] = dict(dd512_cfg["documents"], detail_body=body_mode)
+            mode_cfg = dict(dd575_cfg)
+            mode_cfg["documents"] = dict(dd575_cfg["documents"], detail_body=body_mode)
             mode_adapter = WebAdapter(mode_cfg)
             with pytest.raises(WlhError) as exc_build:
                 mode_adapter.build(
@@ -2430,9 +2557,9 @@ documents:
                 )
             assert exc_build.value.code == "http_503"
 
-            no_xpath_cfg = dict(dd512_cfg)
+            no_xpath_cfg = dict(dd575_cfg)
             no_xpath_cfg["documents"] = dict(
-                dd512_cfg["documents"], detail_body=body_mode, content_xpath=None
+                dd575_cfg["documents"], detail_body=body_mode, content_xpath=None
             )
             no_xpath_adapter = WebAdapter(no_xpath_cfg)
             trunc_and_blocked_html = (
