@@ -1,6 +1,6 @@
 # WorldLawHarvester 首批架构与分阶段实施计划
 
-> **Status:** Proposal · [Issue #1](https://github.com/nanzhi84/WorldLawHarvester/issues/1) · Created 2026-10-21
+> **Status:** Implemented · [Issue #1](https://github.com/nanzhi84/WorldLawHarvester/issues/1) · Created 2026-10-21
 > **Affected Architecture:** [docs/architecture/overview.md](../../architecture/overview.md), [docs/architecture/canonical-legal-model.md](../../architecture/canonical-legal-model.md)
 
 ## 1. 背景与目标 (Context & Goals)

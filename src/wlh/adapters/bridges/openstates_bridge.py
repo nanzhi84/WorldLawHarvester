@@ -10,7 +10,7 @@ from wlh.core import WlhError
 
 
 class Adapter(RecordAdapter):
-    CONTRACT = "wlh.adapter.openstates.v1"
+    CONTRACT = "wlh.adapter.openstates.v5"
     NAMESPACE = "openstates/bill"
 
     def records(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -28,10 +28,17 @@ class Adapter(RecordAdapter):
                         links[0] if links else None,
                     )
                     if preferred:
+                        note = str(document.get("note") or "").strip()
+                        bill_title = str(item["title"]).strip()
+                        dl_title = (
+                            f"{bill_title} ({note})"
+                            if note and note.lower() != bill_title.lower()
+                            else bill_title
+                        )
                         downloads.append(
                             {
                                 "url": preferred["url"],
-                                "title": document.get("note") or item["title"],
+                                "title": dl_title,
                                 "role": "primary" if not downloads else "independent_attachment",
                             }
                         )

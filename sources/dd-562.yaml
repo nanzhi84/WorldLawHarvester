@@ -11,7 +11,7 @@ robots: false
 delay: 0.5
 user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 fetch: {mode: http, max_depth: 3, retries: 2, page_timeout_ms: 60000}
-budget: {requests: 60, documents: 10, seconds: 300, response_bytes: 67108864}
+budget: {requests: 80, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "美国联邦最高法院官网（supremecourt.gov）与 Caselaw Access Project (CAP)"
   document_type: "案例"

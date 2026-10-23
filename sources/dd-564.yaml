@@ -9,7 +9,7 @@ scope: 加拿大司法部联邦法律索引发现及英文 XML 的有界采集�
 robots: true
 delay: 0.5
 budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 52428800}
-fetch: {mode: http, max_depth: 1, page_timeout_ms: 60000}
+fetch: {mode: http, max_depth: 1, retries: 4, retry_backoff_seconds: 2.0, page_timeout_ms: 60000}
 documents:
   detail_url_patterns:
   - ^https://laws-lois\.justice\.gc\.ca/eng/XML/(?!Legis\.xml$)[^/?#]+\.xml$

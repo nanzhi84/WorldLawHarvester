@@ -1,6 +1,6 @@
 # Wave 2 多法域高优来源规模化适配计划（40 源四批次矩阵 · 越南全量 P0 优先）
 
-> **Status:** Proposal · [Issue #2](https://github.com/nanzhi84/WorldLawHarvester/issues/2) · Created 2026-10-22
+> **Status:** Implemented · [Issue #2](https://github.com/nanzhi84/WorldLawHarvester/issues/2) · Created 2026-10-22
 > **Affected Architecture:** [docs/architecture/overview.md](../../architecture/overview.md), [docs/architecture/canonical-legal-model.md](../../architecture/canonical-legal-model.md)
 
 ## 1. 背景与目标 (Context & Goals)

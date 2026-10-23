@@ -1,6 +1,6 @@
 # 源名实对齐、交付数据质量修复与固定入口去时间化
 
-> **Status:** Proposal · [Issue #4](https://github.com/nanzhi84/WorldLawHarvester/issues/4) · Created 2026-10-23
+> **Status:** Implemented · [Issue #4](https://github.com/nanzhi84/WorldLawHarvester/issues/4) · Created 2026-10-23
 > **Affected Architecture:** [docs/architecture/overview.md](../../architecture/overview.md), [docs/architecture/canonical-legal-model.md](../../architecture/canonical-legal-model.md)
 
 ## 1. 背景与目标 (Context & Goals)
@@ -89,5 +89,5 @@
 - [x] `dd-565` / `dd-562` / `dd-520` 去除固定年份、term 或章节，或在台账如实说明保留原因。
 
 #### Batch 4 收尾
-- [ ] 全量已跑通来源实网 `collect -> 离线 reparse`、快照发布与 `GET /results?projection=canonical` 核验。
-- [ ] Issue #1/#2 spec Status 更新为 Implemented，CHANGELOG 补记 Issue #2~#4。
+- [x] 全量已跑通来源实网 `collect -> 离线 reparse`、快照发布与 `GET /results?projection=canonical` 核验。
+- [x] Issue #1/#2 spec Status 更新为 Implemented，CHANGELOG 补记 Issue #2~#4。

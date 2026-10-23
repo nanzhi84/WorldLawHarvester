@@ -4,7 +4,7 @@ adapter: web
 scope: "越南最高人民法院判例门户（Án lệ TANDTC）判例列表发现与全文属性有界采集"
 entry_urls: ["https://anle.toaan.gov.vn/webcenter/portal/anle/anle"]
 allowed_hosts: ["anle.toaan.gov.vn"]
-allowed_path_prefixes: ["/webcenter/portal/anle/"]
+allowed_path_prefixes: ["/webcenter/portal/anle/anle", "/webcenter/portal/anle/chitietanle"]
 archive_approved: true
 robots: false
 delay: 0.5
@@ -17,7 +17,7 @@ metadata:
   language: "vi"
   jurisdiction: "VN"
 documents:
-  detail_url_patterns: ['^https://anle\.toaan\.gov\.vn/webcenter/portal/anle/chitietanle\?dDocName=TAND\d+$']
+  detail_url_patterns: ['^https?://anle\.toaan\.gov\.vn/webcenter/portal/anle/chitietanle\?(?!.*Tab=).*dDocName=TAND\d+.*$']
   detail_body: always
   content_xpath: '//div[@id="tabContent1"]'
   fields:
@@ -26,4 +26,3 @@ documents:
     issuer: {value: "Hội đồng Thẩm phán Tòa án nhân dân tối cao"}
     published_at: {xpath: '//div[@id="thuoctinh"]', regex: 'Ngày công bố\s+(\d{2}/\d{2}/\d{4})'}
     effective_at: {xpath: '//div[@id="thuoctinh"]', regex: 'Ngày áp dụng\s+(\d{2}/\d{2}/\d{4})'}
-

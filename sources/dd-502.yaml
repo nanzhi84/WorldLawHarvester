@@ -12,9 +12,9 @@ host_path_scopes:
 archive_approved: true
 robots: false
 delay: 0.5
-adapter_options: {max_pages: 2}
+adapter_options: {max_pages: 3}
 fetch: {mode: rendered_dom, wait_until: domcontentloaded, max_depth: 1, retries: 2, page_timeout_ms: 60000}
-budget: {requests: 80, documents: 10, seconds: 300, response_bytes: 67108864}
+budget: {requests: 120, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "国家规章库"
   document_type: "法律法规"

@@ -74,7 +74,11 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
 
     pages: list[dict[str, Any]] = []
     for p in raw_pages:
-        is_pure_scan = p["native_text_chars"] < SCAN_TEXT_CHARS and p["ink_ratio"] > SCAN_INK_RATIO
+        is_pure_scan = (
+            p["native_text_chars"] < SCAN_TEXT_CHARS
+            and p["ink_ratio"] > SCAN_INK_RATIO
+            and (not has_normal_text_page or p["embedded_images"] > 0 or p["image_coverage"] > 0)
+        )
         is_signature_scan = (
             not has_normal_text_page
             and total_native < SIGNATURE_DOC_MAX_TEXT_CHARS
