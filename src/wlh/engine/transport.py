@@ -20,6 +20,7 @@ from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import aiohttp
+from yarl import URL
 
 from wlh.core import WlhError, digest, public_url, safe_url, uid
 from wlh.db import connect, fenced, j, locked_run
@@ -246,6 +247,27 @@ class Transport:
         self.pace: asyncio.Lock = asyncio.Lock()
         self.last: float = 0.0
         self.objects: Objects = Objects()
+        self.loopback_cookies: set[tuple[str, str, str]] = set()
+
+    def _detect_html_loopback(self, url: str, data: bytes) -> str | None:
+        if len(data) > 4096:
+            return None
+        text = data.decode("utf-8", errors="replace")
+        if "_afrLoop=" not in url and "AdfLoopbackUtils.runLoopback" in text:
+            match = re.search(r"['\"]_afrLoop['\"]\s*,\s*['\"](\d+)['\"]", text)
+            if match:
+                sep = "&" if "?" in url else "?"
+                return f"{url}{sep}_afrLoop={match.group(1)}&_afrWindowMode=0"
+        if len(data) <= 2048 and "location.reload" in text:
+            match = re.search(r'document\.cookie\s*=\s*["\']([^=;"\']+)=([^;"\']+)', text)
+            if match and self.session is not None:
+                name, value = match.group(1).strip(), match.group(2).strip()
+                key = (urlsplit(url).hostname or "", name, value)
+                if key not in self.loopback_cookies:
+                    self.loopback_cookies.add(key)
+                    self.session.cookie_jar.update_cookies({name: value}, URL(url))
+                    return url
+        return None
 
     async def start(self) -> None:
         if self.session is None:
@@ -406,6 +428,25 @@ class Transport:
                 row = await self.exchange(
                     current, hop_method, hop_form, key, "content", meta, parent, relation
                 )
+                if (
+                    row["state"] == "archived"
+                    and row["outcome"] == "ok"
+                    and int(row.get("byte_size") or 0) <= 4096
+                    and str(row.get("mime_type") or "").startswith("text/html")
+                ):
+                    data = self.objects.get(row["archive_ref"])
+                    loopback = self._detect_html_loopback(current, data)
+                    if loopback:
+                        try:
+                            current = guard(self.config, loopback)
+                            await self.robots.check(current, self.fetch_policy)
+                        except WlhError as exc:
+                            if exc.code in FATAL_ERRORS:
+                                raise
+                            row = dict(row, outcome="blocked", error=exc.code)
+                            break
+                        parent, relation = row["id"], "redirect"
+                        continue
                 if row["state"] != "archived" or row["outcome"] != "redirect":
                     break
                 target = urljoin(current, row.get("location") or "")

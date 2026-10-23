@@ -68,11 +68,11 @@
 ### 实施 Checklist
 
 #### Batch 1 名实对齐
-- [ ] `dd-512` 切换至 `vietlaw.quochoi.vn` 生效法律库，实网 `collect -> reparse` 跑通，落库 `sources/dd-512.yaml`。
-- [ ] `dd-575`（越南国会法律草案征求意见门户 `duthaoonline.quochoi.vn`）登记台账并落库 `sources/dd-575.yaml`，实网跑通。
-- [ ] `dd-509` 实网复测：跑通则适配落库，否则更新受阻证据。
-- [ ] dd-516/556/572/517/570/562/563/565 台账备注如实标注替代源或范围收窄，`CSV -> MD` 同步。
-- [ ] 回放测试补齐 dd-512 / dd-575（及 dd-509，如跑通）。
+- [x] `dd-512` 切换至 `vietlaw.quochoi.vn` 生效法律库，实网 `collect -> reparse` 跑通，落库 `sources/dd-512.yaml`。
+- [x] `dd-575`（越南国会法律草案征求意见门户 `duthaoonline.quochoi.vn`）登记台账并落库 `sources/dd-575.yaml`，实网跑通。
+- [x] `dd-509` 实网复测：跑通则适配落库，否则更新受阻证据。
+- [x] dd-516/556/572/517/570/562/563/565 台账备注如实标注替代源或范围收窄，`CSV -> MD` 同步。
+- [x] 回放测试补齐 dd-512 / dd-575（及 dd-509，如跑通）。
 
 #### Batch 2 数据质量
 - [ ] `dd-455` 每行标题为具体公示标题，不再全部为发布机构名。

@@ -1,0 +1,32 @@
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-575
+id: dd-575
+adapter: web
+scope: "越南国会法律草案征求意见门户（duthaoonline.quochoi.vn）法案列表发现与详情有界采集"
+entry_urls: ["https://duthaoonline.quochoi.vn/"]
+allowed_hosts: ["duthaoonline.quochoi.vn", "gatewayduthaoonline.quochoi.vn"]
+allowed_path_prefixes: ["/", "/dt", "/uploadFiles/host/local/"]
+host_path_scopes:
+  duthaoonline.quochoi.vn: ["/", "/dt"]
+  gatewayduthaoonline.quochoi.vn: ["/uploadFiles/host/local/"]
+archive_approved: true
+robots: false
+delay: 0.5
+user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+fetch: {mode: rendered_dom, wait_until: domcontentloaded, max_depth: 1, retries: 4, page_timeout_ms: 60000}
+budget: {requests: 600, documents: 10, seconds: 600, response_bytes: 67108864}
+parser: {quality_accept_routes: ["accept", "accept_ocr", "accept_with_warning"]}
+metadata:
+  source_name: "越南国会法律草案征求意见门户（Dự thảo online）"
+  document_type: "法律法规"
+  language: "vi"
+  jurisdiction: "VN"
+documents:
+  detail_url_patterns: ['^https://duthaoonline\.quochoi\.vn/dt/[^/]+/\d+$']
+  attachment_url_pattern: '^https://gatewayduthaoonline\.quochoi\.vn/uploadFiles/host/local/.*\.(?:pdf|docx?)$'
+  detail_body: always
+  content_xpath: '//div[contains(@class, "info-dt-l")] | //div[@id="nav-home"]'
+  fields:
+    title: {xpath: '(//div[contains(@class, "info-dt-l")]//h3)[1] | //title'}
+    document_number: {xpath: '//div[@id="nav-home"] | //div[contains(@class, "info-dt-l")]', regex: '((?:Luật|Pháp lệnh|Nghị quyết)\s+số\s+[0-9]+/[0-9]+/QH\d+|Lần\s+dự\s+thảo\s+\d+)'}
+    issuer: {xpath: '//div[contains(@class, "info-dt-l")]', regex: 'Cơ quan chủ trì soạn thảo:\s*(.+?)\s+Cơ quan chủ trì thẩm tra'}
+    published_at: {xpath: '//div[@id="nav-home"]', regex: '(\d{2}/\d{2}/20\d{2})', date_format: "%d/%m/%Y"}
