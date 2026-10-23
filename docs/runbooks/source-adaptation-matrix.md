@@ -60,7 +60,7 @@
 | <a id="dd-037"></a>dd-037 | 通知公告 | [阿里司法拍卖](https://sf.taobao.com/) | P2 | `web`（浏览器渲染/动态接口） | [ ] | 动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。 |
 | <a id="dd-038"></a>dd-038 | 通知公告 | [京东司法拍卖](https://auction.jd.com/sifa.html) | 待复查 | 待复查（连接/风控限制） | [ ] | 历史探测存在连接超时、WAF 或状态码限制，适配前需复测可达性。 |
 | <a id="dd-039"></a>dd-039 | 政策文件 | [最高人民检察院官网](https://www.spp.gov.cn/) | P1 | `web` | [ ] | 静态正文或名单页，可直接编写 `web` XPath 规则适配。 |
-| <a id="dd-040"></a>dd-040 | 政策文件 | [最高人民检察院公报](https://www.spp.gov.cn/spp/gjgb/index.shtml) | P1 | `web` | [x] | 已落库 sources/dd-040.yaml（web 适配器），实网 collect -> reparse 跑通（最高人民检察院公报 2026年第2号（总第211号））。 |
+| <a id="dd-040"></a>dd-040 | 政策文件 | [最高人民检察院公报](https://www.spp.gov.cn/spp/gjgb/index.shtml) | P1 | `web` | [x] | 已落库 sources/dd-040.yaml（web 适配器），实网 collect -> reparse 跑通（最高人民检察院公报 2026年第2号（总第211号））；【数据形态说明 2026-10-23】仅提供期刊目录。 |
 | <a id="dd-041"></a>dd-041 | 案例 | [最高人民检察院指导性案例](https://www.spp.gov.cn/spp/jczdal/index.shtml) | P0 | `web` | [x] | 已落库 sources/dd-041.yaml（web 适配器），实网 collect -> reparse 跑通（最高人民检察院第六十三批指导性案例）。 |
 | <a id="dd-042"></a>dd-042 | 案例 | [12309中国检察网](https://www.12309.gov.cn/) | P2 | `web`（浏览器渲染/动态接口） | [ ] | 动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。 |
 | <a id="dd-043"></a>dd-043 | 案例 | [12309中国检察网（检察文书公开）](https://login.12309.gov.cn:9443/12309/gj/zjxflws/index.shtml) | P2 | `web`（浏览器渲染/动态接口） | [ ] | 动态渲染或异步接口入口，需配合 CDP 受控浏览器或抓包分析。 |

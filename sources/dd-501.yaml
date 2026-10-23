@@ -8,7 +8,7 @@ allowed_path_prefixes: ["/gongbao/"]
 archive_approved: true
 robots: true
 delay: 0.5
-fetch: {max_depth: 1, retries: 2}
+fetch: {max_depth: 1, retries: 4}
 budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "中华人民共和国国务院公报"
@@ -22,5 +22,5 @@ documents:
   content_xpath: '//div[@id="UCAP-CONTENT" or contains(@class,"padd-zyygwj")]'
   fields:
     title: {xpath: '//title', regex: '^([^_]+)'}
-    document_number: {xpath: '//div[@id="UCAP-CONTENT"]', regex: '([^\s，。；：]+〔\d{4}〕\d+号|中华人民共和国[^，。；：\s]+令（第\d+号）)'}
+    document_number: {xpath: '//title | //div[@id="UCAP-CONTENT"]//p', regex: '(?:^|\s)([\u4e00-\u9fa5]{1,8}〔\d{4}〕\d+号|(?:中华人民共和国)?[\u4e00-\u9fa5\s]{2,20}令(?:（第\d+号）|第\d+号))'}
     published_at: {xpath: '//meta[@name="firstpublishedtime"]/@content', regex: '^(\d{4}-\d{2}-\d{2})'}

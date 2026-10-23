@@ -311,7 +311,15 @@ class Transport:
 
     async def fetch_policy(self, url: str) -> tuple[int, bytes]:
         key = request_key({"url": url, "role": "policy"})
-        acquisition = await self.exchange(url, "GET", None, key, "policy", {}, None, None)
+        retries = int(self.config["fetch"]["retries"])
+        acquisition: dict[str, Any] = {}
+        for attempt in range(retries + 1):
+            acquisition = await self.exchange(url, "GET", None, key, "policy", {}, None, None)
+            if acquisition["state"] == "archived":
+                break
+            if attempt == retries:
+                break
+            await asyncio.sleep(self.config["fetch"]["retry_backoff_seconds"] * 2**attempt)
         location = acquisition.get("location")
         if acquisition["state"] == "archived" and acquisition["outcome"] == "redirect" and location:
             # Only operator-approved exact robots destinations; never widens content scope.

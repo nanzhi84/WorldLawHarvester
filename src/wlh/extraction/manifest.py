@@ -14,8 +14,17 @@ from typing import Any
 from wlh.core import WlhError, digest
 from wlh.extraction.markdown import MARKDOWN_CONTRACT
 from wlh.extraction.office import OFFICE_CONTRACT, libreoffice_identity
-from wlh.extraction.pdf_scan import INK_THRESHOLD, PDF_CONTRACT, SCAN_INK_RATIO, SCAN_TEXT_CHARS
-from wlh.extraction.quality import QUALITY_CONTRACT
+from wlh.extraction.pdf_scan import (
+    INK_THRESHOLD,
+    NORMAL_PAGE_TEXT_CHARS,
+    PDF_CONTRACT,
+    SCAN_INK_RATIO,
+    SCAN_TEXT_CHARS,
+    SIGNATURE_DOC_MAX_TEXT_CHARS,
+    SIGNATURE_PAGE_MIN_COVERAGE,
+    SIGNATURE_PAGE_MIN_INK,
+)
+from wlh.extraction.quality import PRIMARY_TCVN3, QUALITY_CONTRACT
 from wlh.extraction.vi_tcvn3 import TCVN3_CONTRACT
 
 MANIFEST_ALGORITHM = "wlh.parser-manifest.v4"
@@ -127,6 +136,10 @@ def manifest(config: Mapping[str, Any]) -> dict[str, Any]:
                 "native_text_chars_lt": SCAN_TEXT_CHARS,
                 "ink_ratio_gt": SCAN_INK_RATIO,
                 "ink_gray_lt": INK_THRESHOLD,
+                "normal_page_text_chars": NORMAL_PAGE_TEXT_CHARS,
+                "signature_doc_max_text_chars": SIGNATURE_DOC_MAX_TEXT_CHARS,
+                "signature_page_min_coverage": SIGNATURE_PAGE_MIN_COVERAGE,
+                "signature_page_min_ink": SIGNATURE_PAGE_MIN_INK,
             },
         },
         "ocr": engine,
@@ -134,6 +147,7 @@ def manifest(config: Mapping[str, Any]) -> dict[str, Any]:
             "contract": QUALITY_CONTRACT,
             "accept_routes": config["parser"]["quality_accept_routes"],
             "profile": "vi" if language.startswith("vi") else "generic",
+            "primary_tcvn3": sorted(PRIMARY_TCVN3),
         },
     }
 

@@ -3,8 +3,8 @@ id: dd-549
 adapter: web
 scope: "英国税务海关总署内部手册（HMRC Internal Manuals）集合目录发现与手册章节详情有界采集"
 entry_urls:
-  - "https://www.gov.uk/hmrc-internal-manuals/admin-law-manual"
-  - "https://www.gov.uk/hmrc-internal-manuals/appeals-reviews-and-tribunals-guidance"
+  - "https://www.gov.uk/hmrc-internal-manuals/admin-law-manual/adml3000"
+  - "https://www.gov.uk/hmrc-internal-manuals/appeals-reviews-and-tribunals-guidance/artg2120"
 allowed_hosts: ["www.gov.uk", "assets.publishing.service.gov.uk"]
 allowed_path_prefixes: ["/hmrc-internal-manuals/", "/media/"]
 host_path_scopes:
@@ -13,7 +13,7 @@ host_path_scopes:
 archive_approved: true
 robots: false
 delay: 0.5
-fetch: {max_depth: 2, retries: 2}
+fetch: {max_depth: 1, retries: 2}
 budget: {requests: 50, documents: 10, seconds: 300, response_bytes: 67108864}
 metadata:
   source_name: "英国税务海关总署内部手册（HMRC Internal Manuals）与税务裁判所判决"
@@ -21,7 +21,8 @@ metadata:
   language: "en"
   jurisdiction: "GB"
 documents:
-  detail_url_patterns: ['^https://www\.gov\.uk/hmrc-internal-manuals/[^/]+/[a-z]{2,10}\d+[a-z0-9-]*$']
+  # 排除章节目录页 *000，以及作为入口的目录页 artg2120
+  detail_url_patterns: ['^https://www\.gov\.uk/hmrc-internal-manuals/[^/]+/[a-z]{2,10}(?!\d*000$|.*2120$)\d{4,5}$']
   detail_body: always
   content_xpath: '//main[@id="content"]'
   fields:

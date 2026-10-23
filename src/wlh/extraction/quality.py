@@ -12,8 +12,9 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-QUALITY_CONTRACT = "wlh.quality.v1"
+QUALITY_CONTRACT = "wlh.quality.v2"
 LEGACY_GARBLED = set("§©®µ¶¸¹º»¼½¾¿")
+PRIMARY_TCVN3 = set("§©®µ¶¸¹º»¿")
 FOREIGN_DIACRITICS = set("āēīōūǖǘǚǜǎěǐǒǔǹńň")
 WARNING_REASONS = {
     "low_ink_blank_page_candidate",
@@ -134,11 +135,13 @@ def quality_check(
         if vietnamese:
             cjk = len(re.findall(r"[\u3400-\u9fff\uf900-\ufaff]", local_text))
             garbled_page = sum(char in LEGACY_GARBLED for char in local_text)
-            if page.get("suspected_scan"):
-                if garbled_page >= 8 and garbled_page / max(ocr_chars, 1) >= 0.03:
+            has_primary_tcvn3 = any(char in PRIMARY_TCVN3 for char in local_text)
+            if has_primary_tcvn3:
+                if page.get("suspected_scan"):
+                    if garbled_page >= 8 and garbled_page / max(ocr_chars, 1) >= 0.03:
+                        reasons.append("legacy_vietnamese_font_garbled")
+                elif garbled_page >= 4 and garbled_page / max(ocr_chars, 1) >= 0.005:
                     reasons.append("legacy_vietnamese_font_garbled")
-            elif garbled_page >= 4 and garbled_page / max(ocr_chars, 1) >= 0.005:
-                reasons.append("legacy_vietnamese_font_garbled")
             if cjk >= 12 and cjk / max(ocr_chars, 1) >= 0.02:
                 reasons.append("non_vietnamese_garbage")
             if sum(char in FOREIGN_DIACRITICS for char in local_text) >= 3:
@@ -204,7 +207,8 @@ def text_check(markdown: str, profile: str = "generic") -> dict[str, Any]:
     garbled = 0
     if profile == "vi":
         garbled = sum(char in LEGACY_GARBLED for char in markdown)
-        if garbled >= 8 and garbled / max(len(markdown), 1) >= 0.002:
+        has_primary = any(char in PRIMARY_TCVN3 for char in markdown)
+        if has_primary and garbled >= 8 and garbled / max(len(markdown), 1) >= 0.002:
             reasons.append("legacy_vietnamese_font_garbled")
     hard = [r for r in reasons if r not in WARNING_REASONS]
     return {

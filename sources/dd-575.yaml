@@ -23,6 +23,7 @@ metadata:
 documents:
   detail_url_patterns: ['^https://duthaoonline\.quochoi\.vn/dt/[^/]+/\d+$']
   attachment_url_pattern: '^https://gatewayduthaoonline\.quochoi\.vn/uploadFiles/host/local/.*\.(?:pdf|docx?)$'
+  attachment_title: file_name
   detail_body: always
   content_xpath: '//div[contains(@class, "info-dt-l")] | //div[@id="nav-home"]'
   fields:

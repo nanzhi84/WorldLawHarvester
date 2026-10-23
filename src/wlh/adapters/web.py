@@ -36,6 +36,27 @@ from wlh.extraction.office import detect_real_format
 etree: Any
 TEXT_KINDS: set[str] = {"html", "txt"}
 BINARY_KINDS: set[str] = {"pdf", "doc", "docx", "rtf", "xls", "xlsx", "zip"}
+GENERIC_ATTACHMENT_LABELS: set[str] = {
+    "tải file đính kèm",
+    "tai file dinh kem",
+    "tải về",
+    "tai ve",
+    "tải văn bản",
+    "tai van ban",
+    "tải xuống",
+    "tai xuong",
+    "download",
+    "attachment",
+    "attachments",
+    "file đính kèm",
+    "file dinh kem",
+    "tệp đính kèm",
+    "tep dinh kem",
+    "xem chi tiết",
+    "xem toàn văn",
+    "đính kèm",
+    "dinh kem",
+}
 
 
 class Adapter(Base):
@@ -360,10 +381,20 @@ class Adapter(Base):
             if att_kind not in BINARY_KINDS | TEXT_KINDS:
                 raise WlhError("unsupported_attachment_type")
             source = public_url(att["actual_url"] or att["request_url"])
-            text = item.get("text") or ""
-            label = text if self.config["documents"]["attachment_title"] == "link_text" else ""
+            text = (item.get("text") or "").strip()
+            use_link_text = (
+                self.config["documents"]["attachment_title"] == "link_text"
+                and text.lower() not in GENERIC_ATTACHMENT_LABELS
+            )
+            base_name = file_name(source)
+            if use_link_text and text:
+                att_title = text
+            elif title:
+                att_title = f"{title} - {base_name}"
+            else:
+                att_title = base_name
             match: re.Match[str] | None = (
-                (self.volume.search(text) or self.volume.search(file_name(source)))
+                (self.volume.search(text) or self.volume.search(base_name))
                 if self.volume
                 else None
             )
@@ -373,7 +404,7 @@ class Adapter(Base):
                     "body": body,
                     "kind": att_kind,
                     "url": source,
-                    "title": label or file_name(source),
+                    "title": att_title,
                     "order": int(match.group(1)) if match else None,
                 }
             )

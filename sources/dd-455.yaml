@@ -21,7 +21,6 @@ documents:
   detail_body: always
   content_xpath: '//div[contains(@class,"m3pageCon") or contains(@class,"m3pageEdit")]'
   fields:
-    title: {xpath: '//h2[contains(@class,"m3page_t")]|//title'}
-    document_number: {xpath: '//div[contains(@class,"m3pageEdit")]', regex: '(国新出审〔\d{4}〕\d+号)'}
+    title: {xpath: '//h2[contains(@class,"m3page_t")] | //div[contains(@class,"m3page_t")] | //h1'}
     issuer: {value: "国家新闻出版署"}
     published_at: {xpath: '//div[contains(@class,"m3page_funs")]', regex: '(\d{4}-\d{2}-\d{2})'}
