@@ -122,7 +122,7 @@ class Adapter(Base):
             return {"requests": [], "targets": []}
         data = ctx.read(acquisition)
         kind = detect_real_format(data, "html" if acquisition["mime_type"] == "text/html" else "")
-        url = acquisition["actual_url"] or acquisition["request_url"]
+        url: str = str(acquisition["actual_url"] or acquisition["request_url"] or "")
         detail = self.is_detail(url)
         requests: list[dict[str, Any]] = []
         attachments: list[dict[str, Any]] = []
@@ -136,6 +136,8 @@ class Adapter(Base):
                     wlh_trunc_code = str(wlh_trunc[0])
                     truncated = truncated or wlh_trunc_code
             seen: set[str] = set()
+            detail_paths: set[str] = set()
+            unexpanded_paths: set[str] = set()
             for anchor in tree.xpath(
                 "//a[@href] | //a[@docurl] | //a[@data-url] | //a[@data-href] | //a[@onclick] | //frame[@src] | //iframe[@src]"
             ):
@@ -155,6 +157,8 @@ class Adapter(Base):
                 if not link or link in seen or not self.in_scope(link):
                     continue
                 seen.add(link)
+                if self.is_detail(link):
+                    detail_paths.add(urlsplit(link).path)
                 if self.attachment.search(unquote(link)) or self.attachment.search(file_name(link)):
                     if self.details and detail:
                         text = re.sub(r"\s+", " ", anchor.text_content()).strip()
@@ -167,10 +171,10 @@ class Adapter(Base):
                         elif (
                             ctx.runtime.mode == "collect"
                             and not detail
-                            and link != url
+                            and urlsplit(link).path != urlsplit(url).path
                             and link not in self.config["entry_urls"]
                         ):
-                            truncated = truncated or "max_depth_exceeded"
+                            unexpanded_paths.add(urlsplit(link).path)
                 elif ctx.follow_links(task):
                     if (
                         not self.details
@@ -180,17 +184,19 @@ class Adapter(Base):
                         requests.append({"url": link, "role": "page", "depth": task["depth"] + 1})
                     elif (
                         not detail
-                        and link != url
+                        and urlsplit(link).path != urlsplit(url).path
                         and link not in self.config["entry_urls"]
                     ):
-                        truncated = truncated or "max_depth_exceeded"
+                        unexpanded_paths.add(urlsplit(link).path)
                 elif (
                     ctx.runtime.mode == "collect"
                     and not detail
-                    and link != url
+                    and urlsplit(link).path != urlsplit(url).path
                     and link not in self.config["entry_urls"]
                 ):
-                    truncated = truncated or "max_depth_exceeded"
+                    unexpanded_paths.add(urlsplit(link).path)
+            if unexpanded_paths - detail_paths:
+                truncated = truncated or "max_depth_exceeded"
             if not detail:
                 page = cast(Mapping[str, Any], request.get("meta") or {}).get("page", 1)
                 if ctx.follow_links(task):
@@ -299,7 +305,7 @@ class Adapter(Base):
         data = ctx.read(acquisition)
         kind = detect_real_format(data, "html" if acquisition["mime_type"] == "text/html" else "")
         meta = dict(self.config["metadata"])
-        url = acquisition["actual_url"] or acquisition["request_url"]
+        url: str = str(acquisition["actual_url"] or acquisition["request_url"] or "")
         values, title, encoding = self.detail_values(data, kind, acquisition, url)
         if (
             kind in TEXT_KINDS

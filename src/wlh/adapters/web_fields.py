@@ -49,7 +49,7 @@ def clean_url(base: str, href: str | None) -> str | None:
     if not href:
         return None
     cleaned: str = href.strip()
-    if cleaned.lower().startswith("javascript:") or re.match(r"^[A-Za-z_]\w*\s*\(", cleaned):
+    if cleaned.lower().startswith("javascript:") or re.match(r"^[A-Za-z_][\w.]*\s*\(", cleaned):
         js_match: re.Match[str] | None = re.search(
             r"""['"]((?:https?://|/)[^'"]+)['"]""", cleaned
         )

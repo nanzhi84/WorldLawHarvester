@@ -176,7 +176,8 @@ class RecordAdapter(Base):
             }
         ]
         units: list[RawUnitSource] = []
-        for item in inputs[1:]:
+        downloads: list[Any] = list(record.get("downloads") or [])
+        for idx, item in enumerate(inputs[1:]):
             acq: Mapping[str, Any] = item["acquisition"]
             data: bytes = ctx.read(acq)
             kind = detect_real_format(data)
@@ -190,7 +191,11 @@ class RecordAdapter(Base):
             else:
                 result = ctx.extract(data, kind)
                 markdown = result["markdown"]
-            unit: dict[str, Any] = item.get("unit") or {}
+            unit: Mapping[str, Any] = (
+                cast(Mapping[str, Any], downloads[idx])
+                if idx < len(downloads) and isinstance(downloads[idx], Mapping)
+                else (item.get("unit") or {})
+            )
             role = cast(
                 Literal["primary", "volume", "independent_attachment"],
                 unit.get("role", "primary" if not units else "independent_attachment"),
