@@ -1312,29 +1312,18 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/hmrc-internal-manuals/admin-law-manual":
-            body = b"""<!DOCTYPE html><html><head><title>Admin Law Manual</title></head><body>
+        elif self.path in (
+            "/hmrc-internal-manuals/admin-law-manual/adml3000",
+            "/hmrc-internal-manuals/admin-law-manual/adml4000",
+            "/hmrc-internal-manuals/admin-law-manual/adml5000",
+            "/hmrc-internal-manuals/appeals-reviews-and-tribunals-guidance/artg2120",
+        ):
+            body = """<!DOCTYPE html><html><head><title>ADML3000 - Collection and Management - HMRC internal manual</title></head><body>
             <main id="content">
               <h1>Admin Law Manual</h1>
-              <a href="/hmrc-internal-manuals/admin-law-manual/adml1000">ADML1000 - Incorrect Advice to Customers</a>
-              <a href="/hmrc-internal-manuals/admin-law-manual/adml1100">ADML1100 - Incorrect Advice to Customers: Background</a>
-            </main>
-            </body></html>"""
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        elif self.path == "/hmrc-internal-manuals/admin-law-manual/adml1000":
-            body = """<!DOCTYPE html><html><head><title>ADML1000 - Incorrect Advice to Customers - HMRC internal manual</title></head><body>
-            <main id="content">
-              <dl>
-                <dt>From:</dt><dd>HM Revenue &amp; Customs</dd>
-                <dt>Published</dt><dd>11 March 2016</dd>
-              </dl>
-              <h1>Admin Law Manual</h1>
-              <h1>ADML1000 - Incorrect Advice to Customers</h1>
-              <p>This manual explains what to do when a customer claims that HM Revenue and Customs has given them incorrect advice.</p>
+              <h1>ADML3000 - Collection and Management</h1>
+              <a href="/hmrc-internal-manuals/admin-law-manual/adml3100">ADML3100 - Collection and Management: Introduction</a>
+              <a href="/hmrc-internal-manuals/admin-law-manual/adml3200">ADML3200 - Collection and Management: Legal Background</a>
             </main>
             </body></html>""".encode("utf-8")
             self.send_response(200)
@@ -1342,16 +1331,33 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/hmrc-internal-manuals/admin-law-manual/adml1100":
-            body = """<!DOCTYPE html><html><head><title>ADML1100 - Incorrect Advice to Customers: Background - HMRC internal manual</title></head><body>
+        elif self.path == "/hmrc-internal-manuals/admin-law-manual/adml3100":
+            body = """<!DOCTYPE html><html><head><title>ADML3100 - Collection and Management: Introduction - HMRC internal manual</title></head><body>
             <main id="content">
               <dl>
                 <dt>From:</dt><dd>HM Revenue &amp; Customs</dd>
                 <dt>Published</dt><dd>11 March 2016</dd>
               </dl>
               <h1>Admin Law Manual</h1>
-              <h1>ADML1100 - Incorrect Advice to Customers: Background</h1>
+              <h1>ADML3100 - Collection and Management: Introduction</h1>
               <p>HMRC aims to provide accurate and timely advice to taxpayers under statutory collection and management powers.</p>
+            </main>
+            </body></html>""".encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path == "/hmrc-internal-manuals/admin-law-manual/adml3200":
+            body = """<!DOCTYPE html><html><head><title>ADML3200 - Collection and Management: Legal Background - HMRC internal manual</title></head><body>
+            <main id="content">
+              <dl>
+                <dt>From:</dt><dd>HM Revenue &amp; Customs</dd>
+                <dt>Published</dt><dd>11 March 2016</dd>
+              </dl>
+              <h1>Admin Law Manual</h1>
+              <h1>ADML3200 - Collection and Management: Legal Background</h1>
+              <p>This section sets out the statutory scope and legal principles governing customer advice remediation.</p>
             </main>
             </body></html>""".encode("utf-8")
             self.send_response(200)
@@ -2105,7 +2111,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-183", "政策文件", "地方政府专项债券用途调整操作指引"),
             ("dd-375", "行业标准", "国统字〔2019〕66号"),
             ("dd-448", "通知公告", "影剧备字〔2026〕第1230号"),
-            ("dd-455", "通知公告", "国新出审〔2026〕2424号"),
+            ("dd-455", "通知公告", "2026年进口网络游戏审批信息"),
             ("dd-492", "法律法规", "105/2026/NĐ-CP"),
             ("dd-493", "法律法规", "48/2026/QĐ-TTg"),
             ("dd-501", "政策文件", "国办发〔2026〕12号"),
@@ -2117,7 +2123,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-520", "税务资料", "第1章　納税義務者"),
             ("dd-527", "税务资料", "Tax Treatment of Research & Development Expenditure"),
             ("dd-548", "案例", "[2024] UKSC 1"),
-            ("dd-549", "税务资料", "ADML1000"),
+            ("dd-549", "税务资料", "ADML3100"),
             ("dd-550", "法律法规", "GG"),
             ("dd-551", "案例", "VIII ZR 12/25"),
             ("dd-556", "案例", "4A_101/2026"),

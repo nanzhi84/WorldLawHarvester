@@ -22,15 +22,19 @@ from wlh.extraction.vi_tcvn3 import normalize_detected_tcvn3
 
 fitz: Any = _fitz
 
-PDF_CONTRACT = "wlh.pdf-scan.v1"
+PDF_CONTRACT = "wlh.pdf-scan.v2"
 SCAN_TEXT_CHARS = 30
 SCAN_INK_RATIO = 0.003
 INK_THRESHOLD = 210
 ANALYSIS_SCALE = 0.5
+NORMAL_PAGE_TEXT_CHARS = 350
+SIGNATURE_DOC_MAX_TEXT_CHARS = 500
+SIGNATURE_PAGE_MIN_COVERAGE = 0.85
+SIGNATURE_PAGE_MIN_INK = 0.01
 
 
 def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
-    pages: list[dict[str, Any]] = []
+    raw_pages: list[dict[str, Any]] = []
     texts: list[str] = []
     try:
         with fitz.open(path) as document:
@@ -42,13 +46,21 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
                 native = len(text.strip())
                 pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5), colorspace=fitz.csGRAY)
                 ink = sum(v < INK_THRESHOLD for v in pix.samples) / len(pix.samples)
-                pages.append(
+                rect = page.rect
+                page_area = max(rect.width * rect.height, 1.0)
+                img_area_total = sum(
+                    r.width * r.height
+                    for img in page.get_images(full=True)
+                    for r in page.get_image_rects(img[0])
+                )
+                image_coverage = min(img_area_total / page_area, 1.0)
+                raw_pages.append(
                     {
                         "page": number,
                         "native_text_chars": native,
                         "embedded_images": len(page.get_images(full=True)),
+                        "image_coverage": round(image_coverage, 4),
                         "ink_ratio": round(ink, 5),
-                        "suspected_scan": native < SCAN_TEXT_CHARS and ink > SCAN_INK_RATIO,
                     }
                 )
                 texts.append(text)
@@ -56,11 +68,27 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
         raise
     except Exception:
         raise WlhError("pdf_invalid_or_encrypted") from None
+
+    total_native = sum(p["native_text_chars"] for p in raw_pages)
+    has_normal_text_page = any(p["native_text_chars"] >= NORMAL_PAGE_TEXT_CHARS for p in raw_pages)
+
+    pages: list[dict[str, Any]] = []
+    for p in raw_pages:
+        is_pure_scan = p["native_text_chars"] < SCAN_TEXT_CHARS and p["ink_ratio"] > SCAN_INK_RATIO
+        is_signature_scan = (
+            not has_normal_text_page
+            and total_native < SIGNATURE_DOC_MAX_TEXT_CHARS
+            and p["image_coverage"] >= SIGNATURE_PAGE_MIN_COVERAGE
+            and p["ink_ratio"] > SIGNATURE_PAGE_MIN_INK
+        )
+        suspected = is_pure_scan or is_signature_scan
+        pages.append(dict(p, suspected_scan=suspected))
+
     return {
         "contract": PDF_CONTRACT,
         "page_count": len(pages),
         "pages": pages,
-        "native_text_chars": sum(p["native_text_chars"] for p in pages),
+        "native_text_chars": total_native,
         "suspected_scan_pages": [p["page"] for p in pages if p["suspected_scan"]],
     }, texts
 

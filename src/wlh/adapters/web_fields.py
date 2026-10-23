@@ -118,7 +118,6 @@ def field_value(
 ) -> Any:
     if rule.get("value") is not None:
         return rule["value"]
-    value: Any = text
     if rule.get("xpath"):
         if tree is None:
             return None
@@ -126,20 +125,38 @@ def field_value(
         if isinstance(found, list):
             if not found:
                 return None
+            if rule.get("regex"):
+                pat = re.compile(cast(str, rule["regex"]))
+                for item in cast(list[Any], found):
+                    val_str: Any = item if isinstance(item, str) else item.text_content()
+                    cleaned = re.sub(r"[^\S\u3000]+", " ", str(val_str)).strip()
+                    match = pat.search(cleaned)
+                    if match:
+                        val = match.groupdict().get("value") or (
+                            match.group(1) if match.groups() else match[0]
+                        )
+                        if not val.strip():
+                            continue
+                        if rule.get("date_format") or is_date:
+                            return parse_date(val, rule.get("date_format"))
+                        return val.strip() or None
+                return None
             first: Any = cast(list[Any], found)[0]
-            value = first if isinstance(first, str) else first.text_content()
+            value: Any = first if isinstance(first, str) else first.text_content()
         elif isinstance(found, str):
             value = found
         elif found is None or isinstance(found, bool):
             return None
         else:
             value = str(found)
+    else:
+        value = text
     if value is None:
         return None
     # Preserve ideographic spaces in source metadata.
     value = re.sub(r"[^\S\u3000]+", " ", str(value)).strip()
     if rule.get("regex"):
-        match: re.Match[str] | None = re.search(cast(str, rule["regex"]), value)
+        match = re.search(cast(str, rule["regex"]), value)
         if not match:
             return None
         value = match.groupdict().get("value") or (

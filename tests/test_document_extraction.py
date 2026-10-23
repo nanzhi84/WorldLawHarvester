@@ -162,3 +162,127 @@ class TestPdfExtractionAndOcrFallback:
         assert info_scan["ocr"]["engine"] == "tesseract"
         assert info_scan["ocr"].get("fallback_from") == "br-ocr-v1"
         assert "ocr" in parsers_scan
+
+    def test_scanned_pdf_with_sparse_signature_text_layer_triggers_ocr_pipeline(
+        self, tmp_path: Path
+    ) -> None:
+        """A scanned PDF with a small digital signature block text layer triggers the OCR pipeline rather than being accepted as pure text."""
+        from typing import Any
+
+        import fitz  # type: ignore[import-untyped]
+
+        from wlh.extraction.pdf_scan import analyze, extract_pdf
+
+        fitz_mod: Any = fitz
+        temp_doc = fitz_mod.open()
+        p = temp_doc.new_page(width=595, height=842)
+        p.insert_textbox(
+            fitz_mod.Rect(50, 80, 545, 760),
+            "OFFICIAL GAZETTE DECREE NO 2026-88\nFull statutory text of the regulation governing maritime security.",
+            fontsize=18,
+            fontname="helv",
+        )
+        pix = p.get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("png")
+        temp_doc.close()
+
+        sig_doc = fitz_mod.open()
+        p2 = sig_doc.new_page(width=595, height=842)
+        p2.insert_image(fitz_mod.Rect(0, 0, 595, 842), stream=img_bytes)
+        p2.insert_textbox(
+            fitz_mod.Rect(50, 750, 500, 800),
+            "Signer: Ministry Office\nSigned at: 2026-10-23 10:00:00\nCertificate ID: 8849-1102",
+            fontsize=10,
+            fontname="helv",
+        )
+        pdf_path = tmp_path / "sig_scan.pdf"
+        sig_doc.save(str(pdf_path))
+        sig_doc.close()
+
+        analysis, _ = analyze(pdf_path)
+        assert analysis["suspected_scan_pages"] == [1]
+
+        ocr_cfg = {
+            "engine": "br-ocr-v1",
+            "languages": "eng",
+            "model": "br-ocr-v1",
+            "timeout_seconds": 30,
+            "poll_seconds": 0.2,
+            "max_pages": 50,
+            "dpi": 150,
+            "max_page_pixels": 20000000,
+            "max_result_bytes": 16777216,
+        }
+        md, info, _, parsers = extract_pdf(pdf_path, ocr_cfg, "latin")
+        assert "OFFICIAL GAZETTE" in md.upper()
+        assert info["method"] == "ocr"
+        assert "ocr" in parsers
+
+    def test_digital_born_pdf_with_cover_image_does_not_trigger_scan_classification(
+        self, tmp_path: Path
+    ) -> None:
+        """A digital-born PDF whose cover page has a large image but has normal text layers is not misclassified as a scan."""
+        from typing import Any
+
+        import fitz  # type: ignore[import-untyped]
+
+        from wlh.extraction.pdf_scan import analyze, extract_pdf
+
+        fitz_mod: Any = fitz
+        doc = fitz_mod.open()
+
+        cover_img = fitz_mod.open()
+        cp = cover_img.new_page(width=595, height=842)
+        cp.insert_textbox(
+            fitz_mod.Rect(100, 200, 500, 400),
+            "MINISTERIAL REPORT 2026\nANNUAL LEGAL GAZETTE",
+            fontsize=24,
+            fontname="helv",
+        )
+        pix = cp.get_pixmap(dpi=150)
+        img_bytes = pix.tobytes("png")
+        cover_img.close()
+
+        p1 = doc.new_page(width=595, height=842)
+        p1.insert_image(fitz_mod.Rect(0, 0, 595, 842), stream=img_bytes)
+        p1.insert_textbox(
+            fitz_mod.Rect(50, 750, 500, 800),
+            "Official Publication of the Department of Legal Affairs",
+            fontsize=12,
+            fontname="helv",
+        )
+
+        p2 = doc.new_page(width=595, height=842)
+        p2.insert_textbox(
+            fitz_mod.Rect(50, 80, 545, 760),
+            "Section 1. Purpose and Scope of this statutory regulation.\n"
+            "This statutory instrument sets forth the standards for open government data compliance.\n"
+            "All public departments shall prepare annual audit reviews and maintain machine-readable archives.\n"
+            "The Director shall inspect all registries and certify the accuracy of public gazette records.\n"
+            "Any inconsistencies between electronic representations and certified source documents must be recorded.",
+            fontsize=14,
+            fontname="helv",
+        )
+        pdf_path = tmp_path / "cover_image_native.pdf"
+        doc.save(str(pdf_path))
+        doc.close()
+
+        analysis, _ = analyze(pdf_path)
+        assert analysis["page_count"] == 2
+        assert analysis["suspected_scan_pages"] == [], "Cover page was wrongly suspected as scan!"
+
+        ocr_cfg = {
+            "engine": "br-ocr-v1",
+            "languages": "eng",
+            "model": "br-ocr-v1",
+            "timeout_seconds": 30,
+            "poll_seconds": 0.2,
+            "max_pages": 50,
+            "dpi": 150,
+            "max_page_pixels": 20000000,
+            "max_result_bytes": 16777216,
+        }
+        md, info, _, parsers = extract_pdf(pdf_path, ocr_cfg, "latin")
+        assert "ocr" not in parsers
+        assert info["method"] == "native"
+        assert "statutory regulation" in md
