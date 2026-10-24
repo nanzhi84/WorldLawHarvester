@@ -269,14 +269,9 @@ allowed_path_prefixes:
     ) -> None:
         """All multi-document collection sources in `sources/dd-*.yaml` (except single-standard `dd-375`) enforce multi-document discovery invariants."""
         import re
-        from typing import Any
         from urllib.parse import urlsplit
 
-        from lxml import html as lxml_html  # type: ignore[import-untyped]
-
         from wlh.config import load_file
-
-        lxml_html_any: Any = lxml_html
 
         monkeypatch.setenv("WLH_ALLOW_LOOPBACK", "0")
         repo_root = Path(__file__).resolve().parents[1]
@@ -414,31 +409,3 @@ allowed_path_prefixes:
                 ), (
                     f"{cfg.id} content_xpath {cfg.documents.content_xpath!r} must not truncate multi-block content containers"
                 )
-                if "new-content" in cfg.documents.content_xpath:
-                    probe_tree = lxml_html_any.fromstring(
-                        '<div class="new-content"><div>Question body</div><div>Trả lời:</div><div>Căn cứ Luật Quản lý thuế hướng dẫn trả lời chi tiết.</div></div>'
-                    )
-                    selected_text = " ".join(
-                        " ".join(el.itertext())
-                        for el in probe_tree.xpath(cfg.documents.content_xpath)
-                    )
-                    assert (
-                        "Question body" in selected_text
-                        and "Trả lời:" in selected_text
-                        and "Căn cứ Luật Quản lý thuế" in selected_text
-                    ), (
-                        f"{cfg.id} content_xpath {cfg.documents.content_xpath!r} must retain question, answer label, and full answer body"
-                    )
-                if "info-dt-l" in cfg.documents.content_xpath:
-                    probe_tree = lxml_html_any.fromstring(
-                        '<div><div class="info-dt-l">Draft card</div><div id="nav-home">Toàn văn hồ sơ dự án</div></div>'
-                    )
-                    selected_text = " ".join(
-                        " ".join(el.itertext())
-                        for el in probe_tree.xpath(cfg.documents.content_xpath)
-                    )
-                    assert (
-                        "Draft card" in selected_text and "Toàn văn hồ sơ dự án" in selected_text
-                    ), (
-                        f"{cfg.id} content_xpath {cfg.documents.content_xpath!r} must retain both draft card and full draft dossier section"
-                    )

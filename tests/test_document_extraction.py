@@ -67,13 +67,12 @@ class TestLegacyVietnameseAndDisguisedOfficeExtraction:
         self, tmp_path: Path
     ) -> None:
         """Files named `.doc` that actually contain HTML or TCVN3 RTF are sniffed and extracted accurately."""
-        from wlh.extraction.office import detect_real_format, extract_office
+        from wlh.extraction.office import extract_office
 
         disguised_html_doc = tmp_path / "disguised_html.doc"
         disguised_html_doc.write_bytes(
             b"<html><body><h1>Circular 01/2026/TT-BTC</h1><p>Tax regulation body text.</p></body></html>"
         )
-        assert detect_real_format(disguised_html_doc.read_bytes(), ".doc") == "html"
         md_html, info_html = extract_office(disguised_html_doc, kind="doc")
         assert "Circular 01/2026/TT-BTC" in md_html
         assert info_html["detected_format"] == "html"
@@ -84,9 +83,9 @@ class TestLegacyVietnameseAndDisguisedOfficeExtraction:
             b"\\f0\\fs24 Lu\\'cbt Doanh nghi\\'d6p s\\'e8 59/2020/QH14 \\'a7i\\'d2u 1 Ph\\'b5m vi \\'aei\\'d2u ch\\'d8nh\\par}"
         )
         disguised_rtf_doc.write_bytes(rtf_bytes)
-        assert detect_real_format(rtf_bytes, ".doc") == "rtf"
-        md_rtf, _ = extract_office(disguised_rtf_doc, kind="doc")
+        md_rtf, info_rtf = extract_office(disguised_rtf_doc, kind="doc")
         assert "Luật Doanh nghiệp" in md_rtf
+        assert info_rtf["detected_format"] == "rtf"
 
 
 class TestPdfExtractionAndOcrFallback:
