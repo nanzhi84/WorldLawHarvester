@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import binascii
 import hashlib
 import hmac
 import json
@@ -13,7 +12,7 @@ from typing import Self
 from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet, InvalidToken
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from wlh.core import MAX_ORIGINAL_BYTES, WlhError, canonical
 
@@ -145,5 +144,5 @@ class Tokens:
             if payload.issued_at != self.cipher.extract_timestamp(value.encode("ascii")):
                 raise ValueError
             return payload
-        except (InvalidToken, UnicodeError, ValueError, ValidationError, binascii.Error):
+        except (InvalidToken, ValueError):
             raise ApiError(status, code) from None

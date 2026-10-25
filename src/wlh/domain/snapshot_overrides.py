@@ -59,5 +59,5 @@ def load(path: str | PathLike[str]) -> list[dict[str, str]]:
         if not isinstance(value, dict) or set(cast(dict[str, Any], value)) != {"overrides"}:
             raise WlhError("invalid_version_overrides")
         return normalize(value["overrides"])
-    except (OSError, ValueError, UnicodeError, RecursionError):
+    except (OSError, ValueError, RecursionError):
         raise WlhError("invalid_version_overrides") from None

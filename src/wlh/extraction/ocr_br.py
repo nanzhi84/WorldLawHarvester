@@ -29,7 +29,7 @@ def br_request(
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             body = response.read(64 * 1024 * 1024 + 1)
-    except (urllib.error.URLError, OSError, TimeoutError):
+    except (urllib.error.URLError, OSError):
         raise WlhError("br_ocr_unavailable") from None
     if len(body) > 64 * 1024 * 1024:
         raise WlhError("pdf_output_too_large")

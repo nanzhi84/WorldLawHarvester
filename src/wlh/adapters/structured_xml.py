@@ -156,7 +156,7 @@ class Adapter(RecordAdapter):
                         data = source.read(max_bytes + 1)
                     if len(data) > max_bytes:
                         raise WlhError("zip_expanded_size_exceeded")
-            except (zipfile.BadZipFile, OSError, ValueError, RuntimeError, NotImplementedError):
+            except (zipfile.BadZipFile, OSError, ValueError, RuntimeError):
                 raise WlhError("zip_invalid") from None
         if not zipped:
             if data.lstrip().startswith(b"{"):

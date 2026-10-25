@@ -327,7 +327,7 @@ class Browser:
                 try:
                     target_host = urlsplit(url).hostname or ""
                     allowed_hosts = set(self.config.get("allowed_hosts", []))
-                    cookies_to_add: list[dict[str, Any]] = []
+                    cookies_to_add: list[Any] = []
                     for cookie in self.transport.session.cookie_jar:
                         raw_domain = cookie.get("domain") or ""
                         clean_domain = raw_domain.lstrip(".")

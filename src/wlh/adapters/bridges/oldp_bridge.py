@@ -39,7 +39,7 @@ def rii_xml(data: bytes, max_bytes: int) -> bytes:
             if len(xml) > max_bytes:
                 raise WlhError("zip_expanded_size_exceeded")
             return xml
-    except (zipfile.BadZipFile, OSError, ValueError, RuntimeError, NotImplementedError):
+    except (zipfile.BadZipFile, OSError, ValueError, RuntimeError):
         raise WlhError("zip_invalid") from None
 
 

@@ -39,7 +39,10 @@ def enqueue(c: DbConn, run_id: str) -> int | None:
     return job.id
 
 
-@app.periodic(cron="* * * * *")
+_periodic: Any = app.periodic(cron="* * * * *")
+
+
+@_periodic
 @app.task(name="wlh.recover", queue="wlh-control", lock="wlh:recover", queueing_lock="wlh:recover")
 async def recover_stalled(timestamp: int = 0) -> dict[str, int]:
     await asyncio.to_thread(recover_unqueued)
@@ -88,7 +91,7 @@ def worker(once: bool = False) -> dict[str, str]:
 
     async def consume() -> None:
         async with app.open_async():
-            await recover_stalled()
+            await recover_stalled(0)
             consumer: Worker = Worker(
                 app=app,
                 queues=["wlh", "wlh-control"],

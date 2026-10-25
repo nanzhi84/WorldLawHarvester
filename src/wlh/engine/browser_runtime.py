@@ -9,7 +9,7 @@ import stat
 import subprocess
 import sys
 import time
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -103,6 +103,6 @@ def identity() -> dict[str, Any]:
             "browser_version": match[1],
             "bundle_sha256": bundle_identity(root, deadline),
         }
-    except (OSError, ValueError, TimeoutError, PackageNotFoundError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError):
         # Never preserve command output, environment variables or local paths.
         return {"status": "unavailable", "driver": driver, "error": "browser_runtime_unavailable"}

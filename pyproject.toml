@@ -52,6 +52,9 @@ include = ["src/**/*.py", "tests/**/*.py", "pyproject.toml"]
 select = ["E4", "E7", "E9", "F", "I"]
 
 [tool.pyright]
-include = ["src/wlh"]
+include = ["src/wlh", "tests"]
+exclude = ["docs/reference", "**/__pycache__", ".venv", "work", "artifacts", "dist"]
+venvPath = "."
+venv = ".venv"
 pythonVersion = "3.12"
 typeCheckingMode = "strict"

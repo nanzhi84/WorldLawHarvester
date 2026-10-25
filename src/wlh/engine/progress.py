@@ -72,7 +72,7 @@ def terminal_report(
     c: DbConn, run: Mapping[str, Any], status: str, reason: str | None
 ) -> dict[str, Any]:
     errors = sorted(set(run["errors"]) | ({reason} if reason else set()))
-    report = dict(run["report"], errors=errors, counts=snapshot(c, run).counts)
+    report: dict[str, Any] = dict(run["report"], errors=errors, counts=snapshot(c, run).counts)
     report.setdefault(
         "coverage",
         {

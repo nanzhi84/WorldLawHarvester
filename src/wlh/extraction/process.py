@@ -115,7 +115,7 @@ def run_extraction(
             value: dict[str, Any] | list[Any] | str | int | float | None = json.loads(
                 output_path.read_bytes()
             )
-        except (ValueError, UnicodeError):
+        except ValueError:
             raise WlhError("extraction_output_invalid") from None
         if not isinstance(value, dict):
             raise WlhError("extraction_output_invalid")

@@ -347,7 +347,7 @@ class Adapter(Base):
 
     def build(self, ctx: Any, target: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         by_role = {item["role"]: item for item in inputs}
-        listing = by_role["listing"]
+        listing: dict[str, Any] = dict(by_role["listing"])
         response: Any = self.load_json(ctx, listing["acquisition"])
         if listing.get("select"):
             wanted = listing["select"]["document_number"]

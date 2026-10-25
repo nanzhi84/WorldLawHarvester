@@ -265,7 +265,7 @@ callers:
                 assert items_can == items_default
 
                 # Verify keyset cursor pagination still works with streamlined payload
-                paged_items = []
+                paged_items: list[dict[str, object]] = []
                 cursor = None
                 for _ in range(3):
                     url = "/results?source_id=dd-902&limit=1"
