@@ -7,7 +7,6 @@ import socket
 import threading
 import zipfile
 from collections.abc import Iterator
-from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -16,21 +15,24 @@ import psycopg
 import pytest
 import yaml
 
-from .conftest import make_native_pdf
+from wlh.core import WlhError
+from wlh.domain.delivery_quality import (
+    assert_delivery_quality,
+    audit_delivery_rows,
+    verify_source_delivery,
+)
+from wlh.fixtures import FixtureRouter, export_source_fixture, load_fixture_manifest
+
+from .conftest import make_native_pdf, run_wlh_cli
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
-
-_D1N_COOKIE_CHALLENGE = (
-    b'<html><body><script>document.cookie="D1N=ok123"'
-    b'+"; expires=Thu, 31-Dec-37 23:55:55 GMT; path=/";'
-    b"window.location.reload(true);</script></body></html>"
-)
 
 
 def _make_rii_zip_bytes(
     doknr: str = "JURE100055033",
     aktenzeichen: str = "VIII ZR 12/25",
     ecli: str = "ECLI:DE:BGH:2026:150426UVIIIZR12.25.0",
+    titelzeile: str = "Kaufrechtliche Gewährleistung bei digitalen Produkten",
 ) -> bytes:
     buf = io.BytesIO()
     xml_payload = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -40,7 +42,7 @@ def _make_rii_zip_bytes(
   <gertyp>BGH</gertyp>
   <entsch-datum>20260415</entsch-datum>
   <aktenzeichen>{aktenzeichen}</aktenzeichen>
-  <titelzeile>Kaufrechtliche Gewährleistung bei digitalen Produkten</titelzeile>
+  <titelzeile>{titelzeile}</titelzeile>
   <tenor><p>Die Revision der Beklagten gegen das Urteil des Oberlandesgerichts wird zurückgewiesen.</p></tenor>
   <entscheidungsgruende><p>Die zulässige Revision hat in der Sache keinen Erfolg. Der Kläger hat Anspruch auf Schadensersatz.</p></entscheidungsgruende>
 </dokument>""".encode("utf-8")
@@ -57,402 +59,6 @@ def _make_fixture_zip_bytes(arcname: str, fixture_rel: str) -> bytes:
     return buf.getvalue()
 
 
-@dataclass(frozen=True)
-class _RouteSpec:
-    fixture: str | None = None
-    binary_attr: str | None = None
-    raw_body: bytes | None = None
-    content_type: str = "text/html; charset=utf-8"
-    encoding: str = "utf-8"
-    template: bool = False
-    requires_d1n_cookie: bool = False
-    status: int = 200
-
-
-_PDF_ROUTE = _RouteSpec(binary_attr="sample_pdf", content_type="application/pdf")
-
-_EXACT_ROUTES: dict[tuple[str, str], _RouteSpec] = {
-    ("*", "/robots.txt"): _RouteSpec(
-        raw_body=b"User-agent: *\nAllow: /\n", content_type="text/plain"
-    ),
-    # Source-specific root ("/") routes
-    ("dd-492", "/"): _RouteSpec(fixture="dd-492/index.html"),
-    ("dd-493", "/"): _RouteSpec(fixture="dd-493/index.html"),
-    ("dd-513", "/"): _RouteSpec(fixture="dd-513/index.html"),
-    ("dd-495", "/"): _RouteSpec(fixture="dd-495/index.html"),
-    ("dd-512", "/"): _RouteSpec(fixture="dd-575/index.html"),
-    ("dd-575", "/"): _RouteSpec(fixture="dd-575/index.html"),
-    ("*", "/"): _RouteSpec(fixture="dd-492/index.html"),
-    # Structured XML & open-source bridge contract fixtures (dd-910..dd-915)
-    ("*", "/xml/akn-act-2026.xml"): _RouteSpec(
-        fixture="dd-910/akn-act-2026.xml", content_type="application/xml; charset=utf-8"
-    ),
-    ("*", "/wwl/congbao-list.html"): _RouteSpec(fixture="dd-911/congbao-list.html"),
-    ("*", "/wwl/detail/cb-2026-01.html"): _RouteSpec(fixture="dd-911/cb-2026-01.html"),
-    ("*", "/juriscraper/ca1-opinions.json"): _RouteSpec(
-        fixture="dd-912/ca1-opinions.json", content_type="application/json"
-    ),
-    ("*", "/oldp/bgh-cases.html"): _RouteSpec(fixture="dd-913/bgh-cases.html"),
-    ("*", "/opencaselaw/ch-bger.html"): _RouteSpec(fixture="dd-914/ch-bger.html"),
-    ("*", "/openstates/bills.json"): _RouteSpec(
-        fixture="dd-915/bills.json", content_type="application/json"
-    ),
-    # Shared PDF binary endpoints
-    ("*", "/wwl/files/nd55.pdf"): _PDF_ROUTE,
-    ("*", "/juriscraper/opinions/25-1001.pdf"): _PDF_ROUTE,
-    ("*", "/cpp/files/vbpq/2026/04/105-nd.signed.pdf"): _PDF_ROUTE,
-    ("*", "/cpp/files/vbpq/2026/04/106-nd.signed.pdf"): _PDF_ROUTE,
-    ("*", "/content/pkg/FR-2026-04-20/pdf/2026-08801.pdf"): _PDF_ROUTE,
-    ("*", "/Biennium/2025-26/Pdf/Bills/House%20Bills/1091-S.E.pdf"): _PDF_ROUTE,
-    ("*", "/pdf/2026/07/01/us_v_nemc.pdf"): _PDF_ROUTE,
-    ("*", "/uploadFiles/host/local/du-thao-01.pdf"): _PDF_ROUTE,
-    ("*", "/uploadFiles/host/local/du-thao-02.pdf"): _PDF_ROUTE,
-    ("*", "/scc-csc/scc-csc/en/item/40000/judgment.pdf"): _PDF_ROUTE,
-    ("*", "/scc-csc/scc-csc/en/item/40001/judgment.pdf"): _PDF_ROUTE,
-    ("*", "/eng/pdf/dipn03.pdf"): _PDF_ROUTE,
-    ("*", "/eng/pdf/dipn04.pdf"): _PDF_ROUTE,
-    # dd-017: SPC guiding cases
-    ("*", "/shenpan/gengduo/77.html"): _RouteSpec(fixture="dd-017/list-77.html"),
-    ("*", "/shenpan/gengduo/76.html"): _RouteSpec(fixture="dd-017/list-76.html"),
-    ("*", "/shenpan/gengduo/empty.html"): _RouteSpec(fixture="dd-017/empty.html"),
-    ("*", "/shenpan/xiangqing/202601.html"): _RouteSpec(fixture="dd-017/detail-202601.html"),
-    ("*", "/shenpan/xiangqing/202602.html"): _RouteSpec(fixture="dd-017/detail-202602.html"),
-    # dd-040 & dd-041: SPP gazette & guiding cases
-    ("*", "/spp/gjgb/index.shtml"): _RouteSpec(fixture="dd-040/gjgb-index.html"),
-    ("*", "/spp/gjgb/202603/t20260319_722354.shtml"): _RouteSpec(
-        fixture="dd-040/t20260319_722354.html"
-    ),
-    ("*", "/spp/jczdal/index.shtml"): _RouteSpec(fixture="dd-041/jczdal-index.html"),
-    ("*", "/spp/jczdal/202509/t20250919_706599.shtml"): _RouteSpec(
-        fixture="dd-041/t20250919_706599.html"
-    ),
-    # dd-102: SAFE penalties
-    ("*", "/www/illegal?siteid=beijing"): _RouteSpec(fixture="dd-102/illegal-beijing.html"),
-    ("*", "/www/illegal/listQuery?saffno=8a8b8c0123456789abcdef"): _RouteSpec(
-        fixture="dd-102/listQuery-saffno.html"
-    ),
-    # dd-183: MOF local government debt
-    ("*", "/zhuantilanmu/dfzgl/"): _RouteSpec(fixture="dd-183/dfzgl-index.html"),
-    ("*", "/zhuantilanmu/dfzgl/zcfg/202111/t20211110_3764807.htm"): _RouteSpec(
-        fixture="dd-183/t20211110_3764807.html"
-    ),
-    # dd-375: NBS statistical standards
-    ("*", "/xxgk/tjbz/gjtjbz/201905/t20190521_1758938.html"): _RouteSpec(
-        fixture="dd-375/t20190521_1758938.html"
-    ),
-    # dd-448: CFA film filing notices
-    ("*", "/xxgk/gsxx/dybalx/"): _RouteSpec(fixture="dd-448/dybalx-index.html"),
-    ("*", "/xxgk/gsxx/dybalx/202610/t20261013_1012172.html"): _RouteSpec(
-        fixture="dd-448/t20261013_1012172.html"
-    ),
-    # dd-455: NPPA game approvals
-    ("*", "/bsfw/jggs/yxspjg/"): _RouteSpec(fixture="dd-455/yxspjg-index.html"),
-    ("*", "/bsfw/jggs/yxspjg/jkwlyxspxx/202601/t20260126_947910.html"): _RouteSpec(
-        fixture="dd-455/t20260126_947910.html"
-    ),
-    # dd-492, dd-493, dd-495, dd-496, dd-513: Vietnam portals
-    ("*", "/page/pagenew.aspx?docid=210001"): _RouteSpec(
-        fixture="dd-492/doc-210001.html", template=True
-    ),
-    ("*", "/page/pagenew.aspx?docid=210002"): _RouteSpec(
-        fixture="dd-492/doc-210002.html", template=True
-    ),
-    ("*", "/van-ban/quyet-dinh-48-2026-qd-ttg.htm"): _RouteSpec(fixture="dd-493/qd-48.html"),
-    ("*", "/van-ban/quyet-dinh-49-2026-qd-ttg.htm"): _RouteSpec(fixture="dd-493/qd-49.html"),
-    (
-        "*",
-        "/chi-thi-so-37-ct-ttg-tang-cuong-phong-chong-gian-lan-119261021100102474.htm",
-    ): _RouteSpec(fixture="dd-513/chi-thi-37.html"),
-    (
-        "*",
-        "/chung-khoan/thong-tu-145-2026-tt-btc-quy-dinh-dang-ky-449607-d1.html",
-    ): _RouteSpec(fixture="dd-495/thong-tu-145.html"),
-    ("*", "/ban-an/"): _RouteSpec(fixture="dd-496/ban-an-list.html"),
-    ("*", "/ban-an/ban-an-1463-2026-ds-pt-2-1460069-d11.html"): _RouteSpec(
-        fixture="dd-496/ban-an-1463.html"
-    ),
-    # dd-499: Federal Register XML
-    ("*", "/documents/full_text/xml/2026/04/20/2026-08801.xml"): _RouteSpec(
-        fixture="dd-499/2026-08801.xml", content_type="application/xml; charset=utf-8"
-    ),
-    # dd-501 & dd-502: State Council gazette & policies
-    ("*", "/gongbao/"): _RouteSpec(fixture="dd-501/gongbao-home.html"),
-    ("*", "/gongbao/index.htm"): _RouteSpec(fixture="dd-501/gongbao-home.html"),
-    ("*", "/gongbao/currentissue.htm"): _RouteSpec(fixture="dd-501/gongbao-home.html"),
-    ("*", "/gongbao/2026/issue_13046/"): _RouteSpec(fixture="dd-501/issue-13046.html"),
-    ("*", "/gongbao/2026/issue_13046/202604/content_7065845.html"): _RouteSpec(
-        fixture="dd-501/content-7065845.html"
-    ),
-    ("*", "/zhengce/index.htm"): _RouteSpec(fixture="dd-502/zhengce-index.html"),
-    ("*", "/zhengce/xxgk/"): _RouteSpec(fixture="dd-502/zhengce-index.html"),
-    ("*", "/zhengce/xxgk/gjgzk/index.htm"): _RouteSpec(fixture="dd-502/zhengce-index.html"),
-    ("*", "/zhengce/content/202610/content_7066001.htm"): _RouteSpec(
-        fixture="dd-502/content-700001.html"
-    ),
-    ("*", "/zhengce/content/202610/content_700001.htm"): _RouteSpec(
-        fixture="dd-502/content-700001.html"
-    ),
-    ("*", "/zhengce/content/2026-10/03/content_700002.htm"): _RouteSpec(
-        fixture="dd-502/content-700002.html"
-    ),
-    # dd-506 & dd-507: HK Judiciary & IRD
-    ("*", "/lrs/common/ju/judgment.jsp"): _RouteSpec(fixture="dd-506/judgment.html"),
-    ("*", "/lrs/common/ju/tjpv.jsp"): _RouteSpec(fixture="dd-506/tjpv.html"),
-    ("*", "/lrs/common/ju/ju_frame.jsp?DIS=158000"): _RouteSpec(
-        fixture="dd-506/ju-frame-158000.html"
-    ),
-    ("*", "/lrs/common/ju/ju_frame.jsp?DIS=158001"): _RouteSpec(
-        fixture="dd-506/ju-frame-158001.html"
-    ),
-    ("*", "/lrs/common/ju/ju_body.jsp?DIS=158000"): _RouteSpec(
-        fixture="dd-506/ju-body-158000.html"
-    ),
-    ("*", "/lrs/common/ju/ju_body.jsp?DIS=158001"): _RouteSpec(
-        fixture="dd-506/ju-body-158001.html"
-    ),
-    ("*", "/eng/ppr/dip.htm"): _RouteSpec(fixture="dd-507/dip.html"),
-    # dd-514: Vietnam Supreme Court precedents
-    ("*", "/webcenter/portal/anle/anle"): _RouteSpec(fixture="dd-514/anle-list.html"),
-    ("*", "/webcenter/portal/anle/chitietanle?dDocName=TAND377305"): _RouteSpec(
-        fixture="dd-514/tand377305-loopback.html"
-    ),
-    (
-        "*",
-        "/webcenter/portal/anle/chitietanle?dDocName=TAND377305&_afrLoop=987654321&_afrWindowMode=0",
-    ): _RouteSpec(fixture="dd-514/tand377305-detail.html"),
-    ("*", "/webcenter/portal/anle/chitietanle?dDocName=TAND377338"): _RouteSpec(
-        fixture="dd-514/tand377338-detail.html"
-    ),
-    (
-        "*",
-        "/webcenter/portal/anle/chitietanle?dDocName=TAND377338&_afrLoop=987654321&_afrWindowMode=0",
-    ): _RouteSpec(fixture="dd-514/tand377338-detail.html"),
-    # dd-516: Vietnam MOF Q&A
-    ("*", "/hoidapcstc"): _RouteSpec(fixture="dd-516/hoidap-list.html"),
-    ("*", "/hoidapcstc/Area/QuestionByArea/77"): _RouteSpec(fixture="dd-516/hoidap-list.html"),
-    ("*", "/hoidapcstc/Area/QuestionByArea/64"): _RouteSpec(fixture="dd-516/hoidap-list.html"),
-    ("*", "/hoidapcstc/home/cthoidap/166356"): _RouteSpec(fixture="dd-516/cthoidap-166356.html"),
-    ("*", "/hoidapcstc/home/cthoidap/166357"): _RouteSpec(fixture="dd-516/cthoidap-166357.html"),
-    # dd-517: Japan e-Gov law API
-    ("*", "/api/1/lawlists/2"): _RouteSpec(
-        fixture="dd-517/lawlists-2.xml", content_type="application/xml; charset=utf-8"
-    ),
-    ("*", "/api/1/lawdata/405AC0000000088"): _RouteSpec(
-        fixture="dd-517/lawdata-405AC0000000088.xml",
-        content_type="application/xml; charset=utf-8",
-    ),
-    ("*", "/api/1/lawdata/321CONSTITUTION"): _RouteSpec(
-        fixture="dd-517/lawdata-321CONSTITUTION.xml",
-        content_type="application/xml; charset=utf-8",
-    ),
-    # dd-520: Japan NTA Shift_JIS tax directives
-    ("*", "/law/tsutatsu/kihon/hojin/01.htm"): _RouteSpec(
-        fixture="dd-520/hojin-01.html", content_type="text/html"
-    ),
-    ("*", "/law/tsutatsu/kihon/hojin/01/01_01.htm"): _RouteSpec(
-        fixture="dd-520/hojin-01-01.html", content_type="text/html", encoding="shift_jis"
-    ),
-    # dd-527: Singapore IRAS e-Tax guides
-    ("*", "/quick-links/e-tax-guides"): _RouteSpec(fixture="dd-527/e-tax-guides.html"),
-    (
-        "*",
-        "/taxes/corporate-income-tax/income-deductions-for-companies/tax-treatment-of-r-d-expenditure",
-    ): _RouteSpec(fixture="dd-527/r-d-expenditure.html"),
-    (
-        "*",
-        "/taxes/corporate-income-tax/income-deductions-for-companies/tax-treatment-of-ip-rights",
-    ): _RouteSpec(fixture="dd-527/ip-rights.html"),
-    # dd-548: UK National Archives caselaw
-    ("*", "/uksc/2024/1/data.xml"): _RouteSpec(
-        fixture="dd-548/uksc-2024-1.xml", content_type="application/xml; charset=utf-8"
-    ),
-    ("*", "/uksc/2024/2/data.xml"): _RouteSpec(
-        fixture="dd-548/uksc-2024-2.xml", content_type="application/xml; charset=utf-8"
-    ),
-    # dd-549: UK HMRC internal manuals
-    ("*", "/government/collections/hmrc-manuals"): _RouteSpec(fixture="dd-549/hmrc-manuals.html"),
-    ("*", "/hmrc-internal-manuals/appeals-reviews-and-tribunals-guidance"): _RouteSpec(
-        fixture="dd-549/hmrc-manuals.html"
-    ),
-    ("*", "/hmrc-internal-manuals/admin-law-manual/adml3000"): _RouteSpec(
-        fixture="dd-549/adml3000.html"
-    ),
-    ("*", "/hmrc-internal-manuals/admin-law-manual/adml4000"): _RouteSpec(
-        fixture="dd-549/adml3000.html"
-    ),
-    ("*", "/hmrc-internal-manuals/admin-law-manual/adml5000"): _RouteSpec(
-        fixture="dd-549/adml3000.html"
-    ),
-    (
-        "*",
-        "/hmrc-internal-manuals/appeals-reviews-and-tribunals-guidance/artg2120",
-    ): _RouteSpec(fixture="dd-549/adml3000.html"),
-    ("*", "/hmrc-internal-manuals/admin-law-manual/adml3100"): _RouteSpec(
-        fixture="dd-549/adml3100.html"
-    ),
-    ("*", "/hmrc-internal-manuals/admin-law-manual/adml3200"): _RouteSpec(
-        fixture="dd-549/adml3200.html"
-    ),
-    # dd-550 & dd-551: Germany Gesetze im Internet & Rechtsprechung im Internet
-    ("*", "/gii-toc.xml"): _RouteSpec(
-        fixture="dd-550/gii-toc.xml", content_type="application/xml; charset=utf-8"
-    ),
-    ("*", "/gg/xml.zip"): _RouteSpec(binary_attr="gg_zip", content_type="application/zip"),
-    ("*", "/bgb/xml.zip"): _RouteSpec(binary_attr="bgb_zip", content_type="application/zip"),
-    ("*", "/jportal/docs/bsjrs/bsjrs-toc.xml"): _RouteSpec(
-        fixture="dd-551/bsjrs-toc.xml", content_type="application/xml; charset=utf-8"
-    ),
-    ("*", "/jportal/docs/bsjrs/jb-JURE100055033.zip"): _RouteSpec(
-        binary_attr="rii_zip", content_type="application/zip"
-    ),
-    ("*", "/jportal/docs/bsjrs/jb-JURE100055034.zip"): _RouteSpec(
-        binary_attr="rii_zip_2", content_type="application/zip"
-    ),
-    # dd-558 & dd-559: US Code & eCFR
-    ("*", "/download.html"): _RouteSpec(fixture="dd-558/download.html"),
-    ("*", "/download/releasepoints/us/pl/119/121/xml_usc01@119-121.zip"): _RouteSpec(
-        binary_attr="usc01_zip", content_type="application/zip"
-    ),
-    ("*", "/download/releasepoints/us/pl/119/121/xml_usc02@119-121.zip"): _RouteSpec(
-        binary_attr="usc02_zip", content_type="application/zip"
-    ),
-    ("*", "/api/versioner/v1/titles.json"): _RouteSpec(
-        fixture="dd-559/titles.json", content_type="application/json"
-    ),
-    ("*", "/api/versioner/v1/structure/2024-01-01/title-1.json"): _RouteSpec(
-        fixture="dd-559/title-1-structure.json", content_type="application/json"
-    ),
-    ("*", "/api/versioner/v1/structure/2026-10-21/title-1.json"): _RouteSpec(
-        fixture="dd-559/title-1-structure.json", content_type="application/json"
-    ),
-    ("*", "/api/versioner/v1/full/2024-01-01/title-1.xml?part=1"): _RouteSpec(
-        fixture="dd-559/title-1-part-1.xml", content_type="application/xml; charset=utf-8"
-    ),
-    ("*", "/api/versioner/v1/full/2026-10-21/title-1.xml?part=1"): _RouteSpec(
-        fixture="dd-559/title-1-part-1.xml", content_type="application/xml; charset=utf-8"
-    ),
-    ("*", "/api/versioner/v1/full/2024-01-01/title-1.xml?part=2"): _RouteSpec(
-        fixture="dd-559/title-1-part-2.xml", content_type="application/xml; charset=utf-8"
-    ),
-    ("*", "/api/versioner/v1/full/2026-10-21/title-1.xml?part=2"): _RouteSpec(
-        fixture="dd-559/title-1-part-2.xml", content_type="application/xml; charset=utf-8"
-    ),
-    # dd-562: US Supreme Court slip opinions
-    ("*", "/opinions/opinions.aspx"): _RouteSpec(fixture="dd-562/opinions-root.html"),
-    ("*", "/opinions/slipopinion/26"): _RouteSpec(fixture="dd-562/slipopinion.html"),
-    ("*", "/opinions/relatingtoorders/26"): _RouteSpec(fixture="dd-562/slipopinion.html"),
-    ("*", "/opinions/slipopinion/25"): _RouteSpec(fixture="dd-562/slipopinion.html"),
-    ("*", "/opinions/relatingtoorders/25"): _RouteSpec(fixture="dd-562/slipopinion.html"),
-    ("*", "/opinions/25pdf/26a388_q86b.pdf"): _RouteSpec(
-        binary_attr="scotus_pdf_1", content_type="application/pdf"
-    ),
-    ("*", "/opinions/25pdf/24-43_2b35.pdf"): _RouteSpec(
-        binary_attr="scotus_pdf_2", content_type="application/pdf"
-    ),
-    # dd-563: IRS Internal Revenue Bulletins
-    ("*", "/irb"): _RouteSpec(fixture="dd-563/irb-index.html"),
-    ("*", "/irb/2026-16_IRB"): _RouteSpec(fixture="dd-563/2026-16_IRB.html"),
-    # dd-564: Justice Laws Canada XML
-    ("*", "/eng/XML/Legis.xml"): _RouteSpec(
-        fixture="dd-564/Legis.xml", content_type="application/xml; charset=utf-8"
-    ),
-    ("*", "/eng/XML/A-1.xml"): _RouteSpec(
-        fixture="dd-564/A-1.xml", content_type="application/xml; charset=utf-8"
-    ),
-    ("*", "/eng/XML/C-46.xml"): _RouteSpec(
-        fixture="dd-564/C-46.xml", content_type="application/xml; charset=utf-8"
-    ),
-    # dd-565: Supreme Court of Canada decisions
-    ("*", "/judgments-jugements/cb/"): _RouteSpec(fixture="dd-565/scc-list.html"),
-    ("*", "/scc-csc/scc-csc/en/nav_date.do?iframe=true"): _RouteSpec(
-        fixture="dd-565/scc-list.html"
-    ),
-    ("*", "/scc-csc/scc-csc/en/2026/nav_date.do?iframe=true"): _RouteSpec(
-        fixture="dd-565/scc-list.html"
-    ),
-    ("*", "/judgments-jugements/cb/2026/40000/"): _RouteSpec(fixture="dd-565/scc-40000.html"),
-    ("*", "/scc-csc/scc-csc/en/item/40000/index.do?iframe=true"): _RouteSpec(
-        fixture="dd-565/scc-40000.html"
-    ),
-    ("*", "/judgments-jugements/cb/2026/40001/"): _RouteSpec(fixture="dd-565/scc-40001.html"),
-    ("*", "/scc-csc/scc-csc/en/item/40001/index.do?iframe=true"): _RouteSpec(
-        fixture="dd-565/scc-40001.html"
-    ),
-    ("*", "/cases-dossiers/search-recherche/40000/"): _RouteSpec(
-        fixture="dd-565/scc-case-40000.html"
-    ),
-    # dd-570: New Zealand legislation
-    ("*", "/act/public/2024/1/en/latest/"): _RouteSpec(fixture="dd-570/nz-act-2024-1.html"),
-    ("*", "/act/public/2024/2/en/latest/"): _RouteSpec(fixture="dd-570/nz-act-2024-2.html"),
-    # dd-572: Kenya Law AKN HTML
-    ("*", "/legislation/"): _RouteSpec(fixture="dd-572/ke-legislation.html"),
-    ("*", "/akn/ke/act/1963/718/eng@1963-12-10"): _RouteSpec(fixture="dd-572/ke-act-1963-718.html"),
-    ("*", "/akn/ke/act/2016/31/eng@2022-12-31"): _RouteSpec(fixture="dd-572/ke-act-2016-31.html"),
-    # dd-575: Vietnam National Assembly legislative drafts
-    (
-        "*",
-        "/dt/luat-sua-doi-bo-sung-mot-so-dieu-cua-09-luat-ve-quan-su-quoc-phong/260805100059615084",
-    ): _RouteSpec(fixture="dd-575/draft-1.html", template=True, requires_d1n_cookie=True),
-    ("*", "/dt/luat-hoa-giai-o-co-so-sua-doi/260522145512086084"): _RouteSpec(
-        fixture="dd-575/draft-2.html", template=True, requires_d1n_cookie=True
-    ),
-    # dd-997: Detail subrequest 503 contract test
-    ("dd-997", "/dt"): _RouteSpec(fixture="dd-997/list.html"),
-    ("dd-997", "/dt/law-draft/260805100059615084"): _RouteSpec(fixture="dd-997/detail.html"),
-    ("dd-997", "/dt/api/dossier"): _RouteSpec(
-        raw_body=b'{"error":"service_unavailable"}',
-        content_type="application/json",
-        status=503,
-    ),
-}
-
-_PREFIX_ROUTES: list[tuple[str, _RouteSpec]] = [
-    (
-        "/atom.xml",
-        _RouteSpec(fixture="dd-548/atom.xml", content_type="application/atom+xml; charset=utf-8"),
-    ),
-    (
-        "/vanban/",
-        _RouteSpec(
-            binary_attr="sample_pdf", content_type="application/pdf", requires_d1n_cookie=True
-        ),
-    ),
-    (
-        "/api/v1/documents.json",
-        _RouteSpec(
-            fixture="dd-499/documents.json", content_type="application/json", template=True
-        ),
-    ),
-    (
-        "/api/decisions",
-        _RouteSpec(
-            fixture="dd-556/decisions.json", content_type="application/json", template=True
-        ),
-    ),
-    (
-        "/bills?jurisdiction=wa",
-        _RouteSpec(fixture="dd-560/bills-wa.json", content_type="application/json", template=True),
-    ),
-    (
-        "/api/rest/v4/search/",
-        _RouteSpec(fixture="dd-561/search.json", content_type="application/json", template=True),
-    ),
-    (
-        "/Pages/danh-sach-van-ban.aspx",
-        _RouteSpec(fixture="dd-512/danh-sach-van-ban.html", requires_d1n_cookie=True),
-    ),
-    (
-        "/Pages/vbpq-toan-van.aspx?ItemID=29895",
-        _RouteSpec(fixture="dd-512/item-29895.html", requires_d1n_cookie=True),
-    ),
-    (
-        "/Pages/vbpq-toan-van.aspx?ItemID=29894",
-        _RouteSpec(fixture="dd-512/item-29894.html", requires_d1n_cookie=True),
-    ),
-    ("/items/", _RouteSpec(fixture="dd-570/nz-items.html")),
-]
-
-
 class _IPv6ThreadingHTTPServer(ThreadingHTTPServer):
     address_family = socket.AF_INET6
 
@@ -467,56 +73,53 @@ class _BridgeFixtureHandler(BaseHTTPRequestHandler):
         "JURE100055033", "VIII ZR 12/25", "ECLI:DE:BGH:2026:150426UVIIIZR12.25.0"
     )
     rii_zip_2: bytes = _make_rii_zip_bytes(
-        "JURE100055034", "VIII ZR 13/25", "ECLI:DE:BGH:2026:150426UVIIIZR13.25.0"
+        "JURE100055034",
+        "VIII ZR 13/25",
+        "ECLI:DE:BGH:2026:150426UVIIIZR13.25.0",
+        titelzeile="Mietrechtliche Kündigung wegen Zahlungsverzugs",
     )
     gg_zip: bytes = _make_fixture_zip_bytes("BJNR000010949.xml", "dd-550/BJNR000010949.xml")
     bgb_zip: bytes = _make_fixture_zip_bytes("BJNR001950896.xml", "dd-550/BJNR001950896.xml")
     usc01_zip: bytes = _make_fixture_zip_bytes("usc01.xml", "dd-558/usc01.xml")
     usc02_zip: bytes = _make_fixture_zip_bytes("usc02.xml", "dd-558/usc02.xml")
+    router: FixtureRouter | None = None
 
     def log_message(self, format: str, *args: object) -> None:
         return
 
-    def _resolve_route(self) -> _RouteSpec | None:
-        spec = _EXACT_ROUTES.get((self.active_source_id, self.path)) or _EXACT_ROUTES.get(
-            ("*", self.path)
-        )
-        if spec is not None:
-            return spec
-        for prefix, prefix_spec in _PREFIX_ROUTES:
-            if self.path.startswith(prefix):
-                return prefix_spec
-        return None
-
-    def _render_route(self, spec: _RouteSpec) -> tuple[bytes, str]:
-        if spec.requires_d1n_cookie and "D1N=" not in self.headers.get("Cookie", ""):
-            return _D1N_COOKIE_CHALLENGE, "text/html; charset=utf-8"
-        if spec.raw_body is not None:
-            return spec.raw_body, spec.content_type
-        if spec.binary_attr is not None:
-            payload: bytes = getattr(self, spec.binary_attr) or self.sample_pdf
-            return payload, spec.content_type
-        assert spec.fixture is not None
-        text = (FIXTURES_DIR / spec.fixture).read_text(encoding="utf-8")
-        if spec.template:
-            host = self.headers.get("Host", "127.0.0.1")
-            sec_host = self.secondary_netloc or host
-            secondary_base = f"http://{self.secondary_netloc}" if self.secondary_netloc else ""
-            text = (
-                text.replace("{host}", host)
-                .replace("{sec_host}", sec_host)
-                .replace("{secondary_base}", secondary_base)
+    @classmethod
+    def _get_router(cls) -> FixtureRouter:
+        if cls.router is None:
+            cls.router = FixtureRouter(
+                FIXTURES_DIR,
+                binary_providers={
+                    "sample_pdf": cls.sample_pdf,
+                    "scotus_pdf_1": cls.scotus_pdf_1,
+                    "scotus_pdf_2": cls.scotus_pdf_2,
+                    "rii_zip": cls.rii_zip,
+                    "rii_zip_2": cls.rii_zip_2,
+                    "gg_zip": cls.gg_zip,
+                    "bgb_zip": cls.bgb_zip,
+                    "usc01_zip": cls.usc01_zip,
+                    "usc02_zip": cls.usc02_zip,
+                },
             )
-        return text.encode(spec.encoding), spec.content_type
+        return cls.router
 
     def do_GET(self) -> None:
-        spec = self._resolve_route()
-        if spec is None:
+        router = self._get_router()
+        rendered = router.resolve_and_render(
+            self.active_source_id,
+            self.path,
+            headers=dict(self.headers.items()),
+            secondary_netloc=self.secondary_netloc,
+        )
+        if rendered is None:
             self.send_response(404)
             self.end_headers()
             return
-        body, content_type = self._render_route(spec)
-        self.send_response(spec.status)
+        status, content_type, body = rendered
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -544,6 +147,7 @@ def bridge_fixture_servers(
             "SUPREME COURT OF THE UNITED STATES Syllabus WEST VIRGINIA ET AL. v. B. P. J., BY HER NEXT FRIEND AND MOTHER, HEATHER JACKSON CERTIORARI TO THE UNITED STATES COURT OF APPEALS FOR THE FOURTH CIRCUIT No. 24–43. Argued January 13, 2026—Decided June 30, 2026 Held: The judgment of the Court of Appeals is reversed."
         ],
     ).read_bytes()
+    _BridgeFixtureHandler.router = None
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), _BridgeFixtureHandler)
     port = server.server_address[1]
@@ -561,6 +165,7 @@ def bridge_fixture_servers(
     finally:
         _BridgeFixtureHandler.secondary_netloc = ""
         _BridgeFixtureHandler.active_source_id = ""
+        _BridgeFixtureHandler.router = None
         server.shutdown()
         server_v6.shutdown()
         thread.join(timeout=2.0)
@@ -836,10 +441,24 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         (source_id,),
                     ).fetchall()
                     assert len(rows) >= 1, f"Expected document_row for {source_id}"
-                    if source_id in multi_resource_sources:
-                        assert len({r["resource_id"] for r in rows}) >= 2, (
-                            f"Expected at least 2 distinct resources discovered from list/index for {source_id}"
-                        )
+                    from wlh.engine.objects import Objects
+
+                    objs = Objects()
+                    quality_report = assert_delivery_quality(
+                        rows,
+                        objects=objs,
+                        source_config=raw_cfg,
+                        require_multi_resource=(source_id in multi_resource_sources),
+                    )
+                    assert quality_report["passed"] is True
+                    assert quality_report["violations"] == []
+
+                    verified = verify_source_delivery(
+                        source_id,
+                        require_multi_resource=(source_id in multi_resource_sources),
+                    )
+                    assert verified["passed"] is True
+
                     projected_rows = [project_canonical(r) for r in rows]
                     projected = next(
                         (
@@ -874,9 +493,6 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                             f"Expected captured attachment/original for every resource of {source_id}"
                         )
                     if source_id in {"dd-512", "dd-516", "dd-565", "dd-575"}:
-                        from wlh.engine.objects import Objects
-
-                        objs = Objects()
                         primary_rows = [r for r in rows if r["role"] == "primary"] or rows
                         for r in primary_rows:
                             md_text = objs.get(r["markdown_hash"]).decode(
@@ -1067,3 +683,465 @@ documents:
                     assert row_count is not None and row_count[0] == 0
         finally:
             _BridgeFixtureHandler.active_source_id = ""
+
+
+class TestDeliverySemanticQualityContract:
+    def test_valid_multi_resource_delivery_rows_pass_semantic_quality_audit(
+        self, wlh_env: dict[str, str]
+    ) -> None:
+        """Multi-resource delivery rows with distinct substantive titles, valid metadata, and clean CAS Markdown pass semantic quality audit."""
+        from wlh.engine.objects import Objects
+
+        objs = Objects()
+        md1_hash = objs.put(
+            (
+                "# 中华人民共和国数据安全法\n\n"
+                "第一条 为了规范数据处理活动，保障数据安全，促进数据开发利用，"
+                "保护个人、组织的合法权益，维护国家主权、安全和发展利益，制定本法。"
+            ).encode("utf-8")
+        )
+        md2_hash = objs.put(
+            (
+                "# 中华人民共和国个人信息保护法\n\n"
+                "第一条 为了保护个人信息权益，规范个人信息处理活动，促进个人信息合理利用，"
+                "根据宪法，制定本法。"
+            ).encode("utf-8")
+        )
+        rows = [
+            {
+                "source_id": "dd-901",
+                "resource_id": "res-001",
+                "row_index": 1,
+                "role": "primary",
+                "title": "中华人民共和国数据安全法",
+                "markdown_file": f"数据安全法_{'a' * 8}_{md1_hash[:8]}.md",
+                "doc_type": "法律法规",
+                "acquired_at": "2026-10-25 06:00:00",
+                "original_file": None,
+                "volume_order": None,
+                "doc_number": "主席令第八十四号",
+                "issuer": "全国人民代表大会常务委员会",
+                "published_at": "2021-06-10",
+                "effective_at": "2021-09-01",
+                "expired_at": None,
+                "status": "有效",
+                "source_name": "国家法律法规数据库",
+                "detail_url": "https://flk.npc.gov.cn/detail1.html",
+                "source_record_hash": "a" * 64,
+                "markdown_hash": md1_hash,
+                "original_hash": None,
+            },
+            {
+                "source_id": "dd-901",
+                "resource_id": "res-002",
+                "row_index": 1,
+                "role": "primary",
+                "title": "中华人民共和国个人信息保护法",
+                "markdown_file": f"个人信息保护法_{'b' * 8}_{md2_hash[:8]}.md",
+                "doc_type": "法律法规",
+                "acquired_at": "2026-10-25 06:01:00",
+                "original_file": None,
+                "volume_order": None,
+                "doc_number": "主席令第九十一号",
+                "issuer": "全国人民代表大会常务委员会",
+                "published_at": "2021-08-20",
+                "effective_at": "2021-11-01",
+                "expired_at": None,
+                "status": "有效",
+                "source_name": "国家法律法规数据库",
+                "detail_url": "https://flk.npc.gov.cn/detail2.html",
+                "source_record_hash": "b" * 64,
+                "markdown_hash": md2_hash,
+                "original_hash": None,
+            },
+        ]
+        report = audit_delivery_rows(rows, objects=objs, require_multi_resource=True)
+        assert report["passed"] is True
+        assert report["violations"] == []
+
+    def test_defect_rows_report_boilerplate_duplicate_title_polluted_doc_number_and_signature_stub_violations(
+        self, wlh_env: dict[str, str]
+    ) -> None:
+        """Semantic quality audit deterministically flags boilerplate titles, duplicate titles, polluted doc_numbers, signature-only stubs, duplicated body paragraphs, and single-resource collections."""
+        from wlh.engine.objects import Objects
+
+        objs = Objects()
+        sig_stub_hash = objs.put(
+            b"Signer: Ministry Office\nSigned at: 2026-10-23\nCertificate ID: 8849-1102"
+        )
+        repeated_para = (
+            "Pursuant to Section 42 of the Administrative Procedure Act, the agency hereby "
+            "establishes mandatory compliance reporting standards for all regulated entities."
+        )
+        dup_body_hash = objs.put(
+            f"# Administrative Compliance Rule\n\n{repeated_para}\n\n{repeated_para}".encode(
+                "utf-8"
+            )
+        )
+        clean_md_hash = objs.put(
+            (
+                "# Substantive Legal Provision\n\n"
+                "Article 1. All administrative agencies shall publish normative decisions in the official gazette."
+            ).encode("utf-8")
+        )
+
+        # 1. Single resource in collection + boilerplate title + signature-only markdown + polluted doc_number
+        single_defect_rows = [
+            {
+                "source_id": "dd-455",
+                "resource_id": "res-only-1",
+                "row_index": 1,
+                "role": "primary",
+                "title": "国家新闻出版署",
+                "markdown_file": f"国家新闻出版署_{'c' * 8}_{sig_stub_hash[:8]}.md",
+                "doc_type": "通知公告",
+                "acquired_at": "2026-10-25 06:00:00",
+                "original_file": None,
+                "volume_order": None,
+                "doc_number": "国新出发〔2026〕1号\n附表说明及长篇正文污染内容",
+                "issuer": "国家新闻出版署",
+                "published_at": "2026-01-26",
+                "effective_at": None,
+                "expired_at": None,
+                "status": None,
+                "source_name": "国家新闻出版署",
+                "detail_url": "https://www.nppa.gov.cn/detail1.html",
+                "source_record_hash": "c" * 64,
+                "markdown_hash": sig_stub_hash,
+                "original_hash": None,
+            }
+        ]
+        report_single = audit_delivery_rows(
+            single_defect_rows, objects=objs, require_multi_resource=True
+        )
+        assert report_single["passed"] is False
+        codes_single = set(
+            report_single.get("violation_codes")
+            or [v["code"] for v in report_single["violations"]]
+        )
+        assert "single_resource_in_collection" in codes_single
+        assert "boilerplate_or_garbage_title" in codes_single
+        assert "polluted_or_malformed_doc_number" in codes_single
+        assert "signature_only_markdown" in codes_single
+
+        # 2. Duplicate resource titles + boilerplate attachment title ("Tải file đính kèm") + duplicated body markdown + long-title-duplicating doc_number
+        long_shared_title = (
+            "Administrative Enforcement Guidelines on Cross-Border Financial Data Transfers"
+        )
+        multi_defect_rows = [
+            {
+                "source_id": "dd-902",
+                "resource_id": "res-dup-1",
+                "row_index": 1,
+                "role": "primary",
+                "title": long_shared_title,
+                "markdown_file": f"guidelines1_{'d' * 8}_{dup_body_hash[:8]}.md",
+                "doc_type": "政策文件",
+                "acquired_at": "2026-10-25 06:00:00",
+                "original_file": None,
+                "volume_order": None,
+                "doc_number": long_shared_title,
+                "issuer": "Financial Regulatory Authority",
+                "published_at": "2026-05-01",
+                "effective_at": None,
+                "expired_at": None,
+                "status": None,
+                "source_name": "Financial Regulatory Portal",
+                "detail_url": "https://reg.example.org/doc1",
+                "source_record_hash": "d" * 64,
+                "markdown_hash": dup_body_hash,
+                "original_hash": None,
+            },
+            {
+                "source_id": "dd-902",
+                "resource_id": "res-dup-2",
+                "row_index": 1,
+                "role": "primary",
+                "title": long_shared_title,
+                "markdown_file": f"guidelines2_{'e' * 8}_{clean_md_hash[:8]}.md",
+                "doc_type": "政策文件",
+                "acquired_at": "2026-10-25 06:01:00",
+                "original_file": None,
+                "volume_order": None,
+                "doc_number": None,
+                "issuer": "Financial Regulatory Authority",
+                "published_at": "2026-05-02",
+                "effective_at": None,
+                "expired_at": None,
+                "status": None,
+                "source_name": "Financial Regulatory Portal",
+                "detail_url": "https://reg.example.org/doc2",
+                "source_record_hash": "e" * 64,
+                "markdown_hash": clean_md_hash,
+                "original_hash": None,
+            },
+            {
+                "source_id": "dd-902",
+                "resource_id": "res-dup-2",
+                "row_index": 2,
+                "role": "independent_attachment",
+                "title": "Tải file đính kèm",
+                "markdown_file": f"attach_{'e' * 8}_{clean_md_hash[:8]}.md",
+                "doc_type": "政策文件",
+                "acquired_at": "2026-10-25 06:01:00",
+                "original_file": None,
+                "volume_order": None,
+                "doc_number": None,
+                "issuer": None,
+                "published_at": None,
+                "effective_at": None,
+                "expired_at": None,
+                "status": None,
+                "source_name": "Financial Regulatory Portal",
+                "detail_url": "https://reg.example.org/doc2",
+                "source_record_hash": "e" * 64,
+                "markdown_hash": clean_md_hash,
+                "original_hash": None,
+            },
+        ]
+        report_multi = audit_delivery_rows(
+            multi_defect_rows, objects=objs, require_multi_resource=True
+        )
+        assert report_multi["passed"] is False
+        codes_multi = set(
+            report_multi.get("violation_codes")
+            or [v["code"] for v in report_multi["violations"]]
+        )
+        assert "duplicate_resource_titles" in codes_multi
+        assert "boilerplate_or_garbage_title" in codes_multi
+        assert "polluted_or_malformed_doc_number" in codes_multi
+        assert "duplicated_body_markdown" in codes_multi
+
+        for bad_title in ("Tải file đính kèm", "Contents", "附件下载"):
+            bad_title_row = {
+                **multi_defect_rows[1],
+                "title": bad_title,
+                "doc_number": "DOC-2026-" + ("X" * 130),
+            }
+            rep = audit_delivery_rows([bad_title_row], objects=objs, require_multi_resource=False)
+            rep_codes = set(
+                rep.get("violation_codes") or [v["code"] for v in rep["violations"]]
+            )
+            assert "boilerplate_or_garbage_title" in rep_codes
+            assert "polluted_or_malformed_doc_number" in rep_codes
+
+        with pytest.raises(WlhError) as exc:
+            assert_delivery_quality(
+                multi_defect_rows, objects=objs, require_multi_resource=True
+            )
+        assert exc.value.code == "delivery_quality_failed"
+
+
+class TestCasFixtureBundleExportAndReplay:
+    def test_all_fixture_directories_contain_valid_manifest_without_hardcoded_route_table(
+        self,
+    ) -> None:
+        """Every `dd-*` fixture directory in `tests/fixtures/` is self-describing via a valid `wlh.fixture.v1` `manifest.json`."""
+        fixture_dirs = sorted(
+            d for d in FIXTURES_DIR.iterdir() if d.is_dir() and d.name.startswith("dd-")
+        )
+        assert len(fixture_dirs) >= 40
+        for d in fixture_dirs:
+            manifest = load_fixture_manifest(FIXTURES_DIR, d.name)
+            assert manifest["schema"] == "wlh.fixture.v1", f"Invalid schema in {d}"
+            assert manifest["source_id"] == d.name
+            routes: list[dict[str, Any]] = manifest["routes"]
+            assert len(routes) >= 1
+
+    def test_collected_run_exports_cas_fixture_bundle_and_replays_cleanly_via_fixture_router(
+        self, initialized_db: dict[str, str], tmp_path: Path
+    ) -> None:
+        """A collected source in PostgreSQL + S3 CAS exports via `wlh fixture export` into a self-contained `manifest.json` bundle and replays offline without the original server."""
+        origin_port_holder: list[int] = []
+
+        class _OriginHandler(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def do_GET(self) -> None:
+                port = origin_port_holder[0]
+                if self.path == "/robots.txt":
+                    body = b"User-agent: *\nAllow: /\n"
+                    ctype = "text/plain"
+                elif self.path == "/laws/index.html":
+                    body = (
+                        f"<html><body><ul>"
+                        f'<li><a href="http://127.0.0.1:{port}/laws/act-1.html">Digital Commerce Act 2026</a></li>'
+                        f'<li><a href="http://127.0.0.1:{port}/laws/act-2.html">Electronic Signatures Act 2026</a></li>'
+                        f"</ul></body></html>"
+                    ).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                elif self.path == "/laws/act-1.html":
+                    body = (
+                        "<html><body>"
+                        '<h1 class="doc-title">Digital Commerce Act 2026</h1>'
+                        '<div class="doc-meta"><span class="doc-no">Act No. 11 of 2026</span>'
+                        '<span class="pub-date">2026-03-15</span></div>'
+                        '<div class="law-body"><p>Section 1. This Act regulates commercial electronic transactions, intermediary liability, and consumer protection across digital marketplaces.</p></div>'
+                        "</body></html>"
+                    ).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                elif self.path == "/laws/act-2.html":
+                    body = (
+                        "<html><body>"
+                        '<h1 class="doc-title">Electronic Signatures Act 2026</h1>'
+                        '<div class="doc-meta"><span class="doc-no">Act No. 12 of 2026</span>'
+                        '<span class="pub-date">2026-04-20</span></div>'
+                        '<div class="law-body"><p>Section 1. Qualified electronic signatures backed by accredited cryptographic certificates shall carry full legal equivalence to handwritten signatures.</p></div>'
+                        "</body></html>"
+                    ).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        origin_srv = ThreadingHTTPServer(("127.0.0.1", 0), _OriginHandler)
+        origin_port = origin_srv.server_address[1]
+        origin_port_holder.append(origin_port)
+        origin_thread = threading.Thread(target=origin_srv.serve_forever, daemon=True)
+        origin_thread.start()
+
+        try:
+            source_yaml = tmp_path / "dd-905.yaml"
+            source_yaml.write_text(
+                f"""
+id: dd-905
+adapter: web
+archive_approved: true
+scope: "CAS fixture bundle export and replay E2E test"
+entry_urls:
+  - "http://127.0.0.1:{origin_port}/laws/index.html"
+allowed_hosts:
+  - "127.0.0.1"
+allowed_path_prefixes:
+  - "/laws/"
+delay: 0.0
+metadata:
+  source_name: "Test Legislative Portal"
+  document_type: "法律法规"
+  language: "en"
+  jurisdiction: "INTL"
+documents:
+  detail_url_patterns:
+    - "^http://127\\\\.0\\\\.0\\\\.1:{origin_port}/laws/act-\\\\d+\\\\.html$"
+  detail_body: always
+  content_xpath: '//div[@class="law-body"]'
+  fields:
+    title:
+      xpath: '//h1[@class="doc-title"]'
+    document_number:
+      xpath: '//span[@class="doc-no"]'
+    issuer:
+      value: "Parliament"
+    published_at:
+      xpath: '//span[@class="pub-date"]'
+      regex: '\\d{{4}}-\\d{{2}}-\\d{{2}}'
+""".strip(),
+                encoding="utf-8",
+            )
+
+            from wlh.engine.runs import execute_run, prepare_run
+
+            c_run = prepare_run(source_yaml, "collect")
+            c_res = execute_run(c_run)
+            assert c_res["status"] == "complete", f"Initial collect failed: {c_res}"
+
+            export_root = tmp_path / "exported_fixtures"
+            export_dir = export_root / "dd-905"
+            direct_manifest = export_source_fixture("dd-905", export_dir, max_resources=2)
+            assert direct_manifest["schema"] == "wlh.fixture.v1"
+            rc, out, err = run_wlh_cli(
+                "fixture",
+                "export",
+                "dd-905",
+                "--output-dir",
+                str(export_dir),
+                "--max-resources",
+                "2",
+                env=initialized_db,
+            )
+            assert rc == 0, f"wlh fixture export failed: {out} {err}"
+            assert (export_dir / "manifest.json").is_file()
+            manifest = load_fixture_manifest(export_root, "dd-905")
+            assert manifest["schema"] == "wlh.fixture.v1"
+            assert len(manifest["routes"]) >= 3
+
+            html_files = list(export_dir.glob("*.html"))
+            assert len(html_files) >= 3
+            assert any("{host}" in f.read_text(encoding="utf-8") for f in html_files)
+            assert all(
+                f"127.0.0.1:{origin_port}" not in f.read_text(encoding="utf-8")
+                for f in html_files
+            )
+        finally:
+            origin_srv.shutdown()
+            origin_thread.join(timeout=2.0)
+            origin_srv.server_close()
+
+        replay_router = FixtureRouter(export_root)
+
+        class _ReplayHandler(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def do_GET(self) -> None:
+                rendered = replay_router.resolve_and_render(
+                    "dd-905",
+                    self.path,
+                    headers=dict(self.headers.items()),
+                )
+                if rendered is None:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                status, content_type, body = rendered
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        replay_srv = ThreadingHTTPServer(("127.0.0.1", 0), _ReplayHandler)
+        replay_port = replay_srv.server_address[1]
+        replay_thread = threading.Thread(target=replay_srv.serve_forever, daemon=True)
+        replay_thread.start()
+
+        try:
+            with psycopg.connect(initialized_db["WLH_DATABASE_URL"], autocommit=True) as conn:
+                conn.execute("DROP SCHEMA IF EXISTS wlh CASCADE")
+            from wlh.db import initialize
+
+            initialize()
+
+            replay_yaml = tmp_path / "dd-905-replay.yaml"
+            replay_yaml.write_text(
+                source_yaml.read_text(encoding="utf-8").replace(
+                    str(origin_port), str(replay_port)
+                ),
+                encoding="utf-8",
+            )
+
+            from wlh.engine.runs import execute_run, prepare_run
+
+            rc_run = prepare_run(replay_yaml, "collect")
+            rc_res = execute_run(rc_run)
+            assert rc_res["status"] == "complete", f"Replay collect failed: {rc_res}"
+
+            verified = verify_source_delivery("dd-905", require_multi_resource=True)
+            assert verified["passed"] is True
+            assert verified["resource_count"] == 2
+
+            rp_run = prepare_run(replay_yaml, "reparse")
+            rp_res = execute_run(rp_run)
+            assert rp_res["status"] == "complete", f"Replay reparse failed: {rp_res}"
+            assert rp_res["report"]["external_requests"] == 0
+        finally:
+            replay_srv.shutdown()
+            replay_thread.join(timeout=2.0)
+            replay_srv.server_close()

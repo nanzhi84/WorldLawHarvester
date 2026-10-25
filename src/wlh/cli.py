@@ -56,6 +56,20 @@ def parser() -> Parser:
     commands.add_parser("worker", help="Consume persistent jobs").add_argument(
         "--once", action="store_true"
     )
+    fixture = commands.add_parser("fixture", help="Manage CAS replay fixture bundles")
+    fixture_ops = fixture.add_subparsers(dest="operation", required=True)
+    fixture_export = fixture_ops.add_parser(
+        "export", help="Export archived CAS responses into a wlh.fixture.v1 bundle"
+    )
+    fixture_export.add_argument("source_id")
+    fixture_export.add_argument("--run-id", default=None)
+    fixture_export.add_argument("--output-dir", type=Path, default=None)
+    fixture_export.add_argument("--max-resources", type=int, default=2)
+    quality = commands.add_parser(
+        "quality", help="Audit semantic delivery quality for a source"
+    )
+    quality.add_argument("source_id")
+    quality.add_argument("--require-multi-resource", action="store_true")
     return root
 
 
@@ -89,6 +103,21 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         from wlh.engine.queue import worker
 
         return worker(args.once)
+    if args.command == "fixture":
+        from wlh.fixtures import export_source_fixture
+
+        out_dir = args.output_dir or (Path("tests/fixtures") / args.source_id)
+        return export_source_fixture(
+            args.source_id,
+            out_dir,
+            run_id=args.run_id,
+            max_resources=args.max_resources,
+        )
+    if args.command == "quality":
+        from wlh.domain.delivery_quality import verify_source_delivery
+
+        req_multi = True if args.require_multi_resource else None
+        return verify_source_delivery(args.source_id, require_multi_resource=req_multi)
     from wlh.engine.progress import ProgressPanel
     from wlh.engine.runs import execute_run, prepare_run, receipt
 
