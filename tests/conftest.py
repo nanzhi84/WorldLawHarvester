@@ -15,20 +15,71 @@ import pytest
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
 
+def _ensure_test_db_and_bucket(env: dict[str, str]) -> None:
+    """Verify isolated test DB/bucket names and create them if missing."""
+    from typing import Any
+    from urllib.parse import urlsplit, urlunsplit
+
+    import boto3  # type: ignore[import-untyped]
+    import psycopg
+    from psycopg import sql
+
+    parsed = urlsplit(env["WLH_DATABASE_URL"])
+    db_name = parsed.path.lstrip("/")
+    if not (db_name.endswith("_test") or db_name.startswith("test_")):
+        raise RuntimeError(
+            f"Refusing to run tests against non-test PostgreSQL database: {db_name!r}"
+        )
+    bucket_name = env["WLH_S3_BUCKET"]
+    if not (
+        bucket_name.endswith(("-test", "_test"))
+        or bucket_name.startswith(("test-", "test_"))
+    ):
+        raise RuntimeError(
+            f"Refusing to run tests against non-test S3 bucket: {bucket_name!r}"
+        )
+
+    admin_dsn = urlunsplit((parsed.scheme, parsed.netloc, "/postgres", "", ""))
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM pg_database WHERE datname = %s", (db_name,)
+        ).fetchone()
+        if not exists:
+            conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
+
+    boto3_mod: Any = boto3
+    s3_client: Any = boto3_mod.client(
+        "s3",
+        endpoint_url=env["WLH_S3_ENDPOINT"],
+        aws_access_key_id=env["WLH_S3_ACCESS_KEY"],
+        aws_secret_access_key=env["WLH_S3_SECRET_KEY"],
+        region_name=env["WLH_S3_REGION"],
+    )
+    existing_buckets = {
+        str(b.get("Name", ""))
+        for b in s3_client.list_buckets().get("Buckets", [])
+    }
+    if bucket_name not in existing_buckets:
+        s3_client.create_bucket(Bucket=bucket_name)
+
+
 def _ensure_dev_env() -> dict[str, str]:
-    """Ensure environment variables point to local PostgreSQL and MinIO S3 CAS."""
+    """Force environment variables to isolated test PostgreSQL (`wlh_test`) and MinIO bucket (`wlh-archive-test`)."""
+    test_db_url = os.environ.get(
+        "WLH_TEST_DATABASE_URL", "postgresql://wlh:wlh@127.0.0.1:15432/wlh_test"
+    )
+    test_bucket = os.environ.get("WLH_TEST_S3_BUCKET", "wlh-archive-test")
     env = {
-        "WLH_DATABASE_URL": os.environ.get(
-            "WLH_DATABASE_URL", "postgresql://wlh:wlh@127.0.0.1:15432/wlh"
-        ),
+        "WLH_DATABASE_URL": test_db_url,
         "WLH_S3_ENDPOINT": os.environ.get("WLH_S3_ENDPOINT", "http://127.0.0.1:19000"),
-        "WLH_S3_BUCKET": os.environ.get("WLH_S3_BUCKET", "wlh-archive"),
+        "WLH_S3_BUCKET": test_bucket,
         "WLH_S3_ACCESS_KEY": os.environ.get("WLH_S3_ACCESS_KEY", "wlh"),
         "WLH_S3_SECRET_KEY": os.environ.get("WLH_S3_SECRET_KEY", "wlhsecret"),
         "WLH_S3_REGION": os.environ.get("WLH_S3_REGION", "us-east-1"),
         "WLH_ALLOW_LOOPBACK": "1",
         "WLH_BR_OCR_URL": os.environ.get("WLH_BR_OCR_URL", "http://127.0.0.1:59999/api/v1"),
     }
+    _ensure_test_db_and_bucket(env)
     for k, v in env.items():
         os.environ[k] = v
     return env
@@ -45,8 +96,16 @@ def wlh_env(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
 
 @pytest.fixture()
 def initialized_db(wlh_env: dict[str, str]) -> dict[str, str]:
-    """Initialize a clean wlh schema in PostgreSQL before the test."""
+    """Initialize a clean wlh schema in the isolated test PostgreSQL database before the test."""
+    from urllib.parse import urlsplit
+
     import psycopg
+
+    db_name = urlsplit(wlh_env["WLH_DATABASE_URL"]).path.lstrip("/")
+    if not (db_name.endswith("_test") or db_name.startswith("test_")):
+        raise RuntimeError(
+            f"Refusing to DROP SCHEMA on non-test database: {db_name!r}"
+        )
 
     with psycopg.connect(wlh_env["WLH_DATABASE_URL"], autocommit=True) as conn:
         conn.execute("DROP SCHEMA IF EXISTS wlh CASCADE")

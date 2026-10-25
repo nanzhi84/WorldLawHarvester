@@ -481,6 +481,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         "dd-507",
                         "dd-512",
                         "dd-513",
+                        "dd-514",
                         "dd-560",
                         "dd-561",
                         "dd-562",
@@ -523,8 +524,26 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                     if source_id == "dd-512":
                         assert projected["issuer"] == "Quốc hội"
                         assert projected["published_at"] == "2026-08-24"
+                        assert projected["title"] != projected["doc_number"]
+                        assert not re.fullmatch(
+                            r"(?:Luật|Pháp lệnh|Nghị quyết)(?:\s+số)?\s+"
+                            + re.escape(projected["doc_number"] or ""),
+                            (projected["title"] or "").strip(),
+                            re.I,
+                        ), (
+                            f"dd-512 title {projected['title']!r} must include descriptive subject (Trích yếu), "
+                            "not just bare document number"
+                        )
+                    if source_id == "dd-516":
+                        assert projected["issuer"] == "Bộ Tài chính"
+                        assert not (projected["title"] or "").startswith("Bộ Tài")
+                        assert not (projected["title"] or "").endswith("...")
                     if source_id == "dd-575":
                         assert "Bộ Quốc phòng" in (projected["issuer"] or "")
+                        for r in rows:
+                            assert r["doc_number"] is None
+                            assert r["role"] == "primary"
+                            assert r["original_hash"] is not None
                     if source_id == "dd-548":
                         assert projected["issuer"] == "The Supreme Court"
                         assert projected["published_at"] == "2024-01-11"
@@ -930,6 +949,131 @@ class TestDeliverySemanticQualityContract:
                 multi_defect_rows, objects=objs, require_multi_resource=True
             )
         assert exc.value.code == "delivery_quality_failed"
+
+    def test_vietnamese_paywall_placeholder_and_stub_attachment_rows_fail_semantic_quality_audit(
+        self, wlh_env: dict[str, str]
+    ) -> None:
+        """Vietnamese login-wall/un-uploaded placeholders, gazette running-header attachment stubs, and UUID/salutation-polluted titles fail semantic quality audit."""
+        from wlh.engine.objects import Objects
+
+        objs = Objects()
+        clean_md_hash = objs.put(
+            (
+                "# Luật Đầu tư công 2026\n\n"
+                "Điều 1. Phạm vi điều chỉnh. Luật này quy định việc quản lý và sử dụng vốn đầu tư công; "
+                "quản lý nhà nước về đầu tư công; quyền, nghĩa vụ và trách nhiệm của cơ quan, đơn vị, "
+                "tổ chức, cá nhân có liên quan đến hoạt động đầu tư công."
+            ).encode("utf-8")
+        )
+        base_valid_row: dict[str, Any] = {
+            "source_id": "dd-495",
+            "resource_id": "res-vn-1",
+            "row_index": 1,
+            "role": "primary",
+            "title": "Luật Đầu tư công 2026",
+            "markdown_file": f"luat_dau_tu_cong_{'a' * 8}_{clean_md_hash[:8]}.md",
+            "doc_type": "法律法规",
+            "acquired_at": "2026-10-25 06:00:00",
+            "original_file": None,
+            "volume_order": None,
+            "doc_number": "58/2026/QH15",
+            "issuer": "Quốc hội",
+            "published_at": "2026-06-15",
+            "effective_at": "2026-09-01",
+            "expired_at": None,
+            "status": "Còn hiệu lực",
+            "source_name": "LuatVietnam 法规库",
+            "detail_url": "https://luatvietnam.vn/dau-tu/luat-dau-tu-cong-2026-123456-d1.html",
+            "source_record_hash": "a" * 64,
+            "markdown_hash": clean_md_hash,
+            "original_hash": None,
+        }
+
+        # 1. Primary rows containing Vietnamese VIP/login-wall or un-uploaded placeholders padded with metadata
+        placeholder_samples = (
+            (
+                "# Thông tư 145/2026/TT-BTC\n\n"
+                "Văn bản này đang cập nhật nội dung. Mời quý khách xem nội dung văn bản dưới dạng file PDF... "
+                "Bạn chưa Đăng nhập thành viên. Vui lòng Đăng nhập để tải văn bản.\n\n"
+                "| Thuộc tính | Giá trị |\n| --- | --- |\n| Số hiệu | 145/2026/TT-BTC |\n| Cơ quan ban hành | Bộ Tài chính |"
+            ),
+            (
+                "# Quyết định 88/2026/QĐ-TTg\n\n"
+                "Bạn chưa Đăng nhập thành viên. Đây là tiện ích dành cho tài khoản Tiêu chuẩn hoặc Nâng cao 6 tháng trở lên. "
+                "Vui lòng Đăng nhập để xem chi tiết Nội dung.\n\n"
+                "| Thuộc tính | Giá trị |\n| --- | --- |\n| Số hiệu | 88/2026/QĐ-TTg |"
+            ),
+            (
+                "# Nghị quyết 46/2026/QH16\n\n"
+                "Vui lòng xem nội dung chi tiết trong file đính kèm."
+            ),
+        )
+        for sample_md in placeholder_samples:
+            sample_hash = objs.put(sample_md.encode("utf-8"))
+            placeholder_row = {
+                **base_valid_row,
+                "markdown_file": f"placeholder_{'b' * 8}_{sample_hash[:8]}.md",
+                "markdown_hash": sample_hash,
+            }
+            rep_placeholder = audit_delivery_rows(
+                [placeholder_row], objects=objs, require_multi_resource=False
+            )
+            assert rep_placeholder["passed"] is False
+            codes_placeholder = set(
+                rep_placeholder.get("violation_codes")
+                or [v["code"] for v in rep_placeholder["violations"]]
+            )
+            assert codes_placeholder & {
+                "blocked_or_placeholder_markdown",
+                "stub_markdown",
+            }, (
+                f"Expected blocked_or_placeholder_markdown or stub_markdown for {sample_md!r}, "
+                f"got {codes_placeholder}"
+            )
+
+        # 2. independent_attachment row whose Markdown is only a gazette running header stub
+        gazette_stub_md = "CÔNG BÁO/Số 560/Ngày 23-10-2026\n\nCÔNG BÁO/Số 560/Ngày 23-10-2026"
+        gazette_stub_hash = objs.put(gazette_stub_md.encode("utf-8"))
+        stub_att_row = {
+            **base_valid_row,
+            "source_id": "dd-493",
+            "row_index": 2,
+            "role": "independent_attachment",
+            "title": "Quyết định 48/2026/QĐ-TTg (Bản PDF Công báo)",
+            "markdown_file": f"congbao_stub_{'c' * 8}_{gazette_stub_hash[:8]}.md",
+            "original_file": f"congbao_stub_{'c' * 8}_{gazette_stub_hash[:8]}.pdf",
+            "markdown_hash": gazette_stub_hash,
+            "original_hash": gazette_stub_hash,
+        }
+        rep_att = audit_delivery_rows(
+            [stub_att_row], objects=objs, require_multi_resource=False
+        )
+        assert rep_att["passed"] is False
+        codes_att = set(
+            rep_att.get("violation_codes") or [v["code"] for v in rep_att["violations"]]
+        )
+        assert "stub_markdown" in codes_att
+
+        # 3. Rows whose title ends with a raw 32-hex UUID filename suffix or starts with an unstripped salutation fragment
+        for polluted_title in (
+            "Luật Phát triển đô thị - 690779d6257c4649a72bd5ce76e64cb1.pdf",
+            "Bộ Tài Chính. Công ty tôi hoạt động trong lĩnh vực...",
+        ):
+            bad_title_row = {
+                **base_valid_row,
+                "title": polluted_title,
+            }
+            rep_title = audit_delivery_rows(
+                [bad_title_row], objects=objs, require_multi_resource=False
+            )
+            assert rep_title["passed"] is False
+            codes_title = set(
+                rep_title.get("violation_codes")
+                or [v["code"] for v in rep_title["violations"]]
+            )
+            assert "boilerplate_or_garbage_title" in codes_title, (
+                f"Expected boilerplate_or_garbage_title for {polluted_title!r}, got {codes_title}"
+            )
 
 
 class TestCasFixtureBundleExportAndReplay:

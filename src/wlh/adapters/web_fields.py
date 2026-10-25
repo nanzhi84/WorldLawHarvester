@@ -169,6 +169,54 @@ def field_value(
     return value.strip() or None
 
 
+def enrich_bare_title(
+    title: str | None,
+    doc_number: str | None,
+    tree: Any | None = None,
+    body_text: str | None = None,
+) -> str | None:
+    if not title:
+        return title
+    clean_title = re.sub(r"[^\S\u3000]+", " ", title).strip()
+    doc_num = re.sub(r"[^\S\u3000]+", " ", doc_number or "").strip()
+    is_bare = False
+    if doc_num:
+        if clean_title.casefold() == doc_num.casefold():
+            is_bare = True
+        elif re.match(
+            rf"^(?:luật|pháp\s+lệnh|nghị\s+quyết|nghị\s+định|thông\s+tư|quyết\s+định|chỉ\s+thị)(?:\s+số)?\s+{re.escape(doc_num)}$",
+            clean_title,
+            re.IGNORECASE,
+        ):
+            is_bare = True
+    if not is_bare:
+        return clean_title
+    if tree is not None:
+        for node in tree.xpath('//div[contains(@class, "toanvan")]'):
+            txt = re.sub(r"\s+", " ", node.text_content()).strip()
+            if 15 <= len(txt) <= 260 and txt.casefold() != clean_title.casefold():
+                return txt
+            m = re.search(
+                r"(?:LUẬT|PHÁP LỆNH|NGHỊ QUYẾT|NGHỊ ĐỊNH|THÔNG TƯ|QUYẾT ĐỊNH)\s+((?:Về|Sửa đổi|Ban hành|Quy định|Phê chuẩn|Bãi bỏ)[^.;\n]{10,200})",
+                txt,
+                re.IGNORECASE,
+            )
+            if m:
+                subj = re.sub(r"\s+", " ", m.group(1)).strip()
+                return f"{clean_title} - {subj}"
+    if body_text:
+        m = re.search(
+            r"(?:LU[ẬA]T|PH[ÁA]P\s+L[ỆE]NH|NGH[ỊI]\s+QUY[ẾÉEe]T|NGH[ỊI]\s+[ĐD][ỊI]NH|TH[ÔO]NG\s+T[ƯU]|QUY[ẾÉEe]T\s+[ĐD][ỊI]NH)(?!\s+s[ốo]\b)[^\n]*\n+\s*((?:Về|Sửa đổi|Ban hành|Quy định|Phê chuẩn|Phê duyệt|Bãi bỏ|Thông qua|Chương trình|Kế hoạch)[\s\S]{10,280}?)(?=(?:\n|\s+)(?:QU[ỐÓO]C\s+H[ỘỘO]I|U[ỶY]\s+BAN|CH[ÍI]NH\s+PH[ỦU]|TH[ỦU]\s+T[ƯU][ỚƠO]NG|C[ăa]n\s+c[ứư]|ĐI[ỀE]U\s+1)\b|\n\s*\n|$)",
+            body_text,
+            re.IGNORECASE,
+        )
+        if m:
+            subj = re.sub(r"\s+", " ", m.group(1)).strip(" .;-_")
+            if subj and subj.casefold() not in clean_title.casefold():
+                return f"{clean_title} - {subj}"
+    return clean_title
+
+
 def extract_detail_fields(
     fields: Mapping[str, Any],
     data: bytes,
@@ -203,11 +251,23 @@ def extract_detail_fields(
             ),
             None,
         )
-        return values, values.get("title") or h1 or page_title, encoding
+        resolved_title = enrich_bare_title(
+            values.get("title") or h1 or page_title,
+            values.get("document_number"),
+            tree=tree,
+            body_text=text,
+        )
+        return values, resolved_title, encoding
     source_text = f"{url}\n{text}" if text else url
     for name, rule in fields.items():
         if rule.get("value") is not None:
             values[name] = rule["value"]
         elif not rule.get("xpath") and rule.get("regex"):
             values[name] = field_value(None, source_text, rule, is_date=(name in DATE_FIELDS))
-    return values, values.get("title") or file_name(url), acquisition["charset"]
+    resolved_title = enrich_bare_title(
+        values.get("title") or file_name(url),
+        values.get("document_number"),
+        tree=None,
+        body_text=text,
+    )
+    return values, resolved_title, acquisition["charset"]

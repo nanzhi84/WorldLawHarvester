@@ -20,6 +20,7 @@ from wlh.adapters.web_fields import (
     DATE_FIELDS,
     clean_url,
     decode,
+    enrich_bare_title,
     extract_detail_fields,
     field_value,
     file_name,
@@ -161,6 +162,10 @@ class Adapter(Base):
                     detail_paths.add(urlsplit(link).path)
                 if self.attachment.search(unquote(link)) or self.attachment.search(file_name(link)):
                     if self.details and detail:
+                        if anchor.xpath(
+                            'ancestor::*[@id="vblienquan" or contains(@class, "vblienquan")]'
+                        ):
+                            continue
                         text = re.sub(r"\s+", " ", anchor.text_content()).strip()
                         attachments.append({"url": link, "text": text})
                     elif not self.details or self.is_detail(link):
@@ -195,7 +200,7 @@ class Adapter(Base):
                     and link not in self.config["entry_urls"]
                 ):
                     unexpanded_paths.add(urlsplit(link).path)
-            if unexpanded_paths - detail_paths:
+            if (not self.details or not detail_paths) and (unexpanded_paths - detail_paths):
                 truncated = truncated or "max_depth_exceeded"
             if not detail:
                 page = cast(Mapping[str, Any], request.get("meta") or {}).get("page", 1)
@@ -380,25 +385,44 @@ class Adapter(Base):
         files: list[dict[str, Any]] = []
         for item in attachments:
             att = item["acquisition"]
+            source = public_url(att["actual_url"] or att["request_url"])
+            if not (
+                self.attachment.search(unquote(source))
+                or self.attachment.search(file_name(source))
+            ):
+                continue
             body = ctx.read(att)
             att_kind = detect_real_format(body)
             if att_kind in TEXT_KINDS and blocked(body, self.config):
                 raise WlhError("target_content_blocked")
             if att_kind not in BINARY_KINDS | TEXT_KINDS:
                 raise WlhError("unsupported_attachment_type")
-            source = public_url(att["actual_url"] or att["request_url"])
             text = (item.get("text") or "").strip()
             use_link_text = (
                 self.config["documents"]["attachment_title"] == "link_text"
                 and text.lower() not in GENERIC_ATTACHMENT_LABELS
             )
             base_name = file_name(source)
+            clean_base_name = re.sub(
+                r"(?:^|[-_\s]+)[0-9a-f]{32}(?=\.[a-z0-9]{2,5}$|$)",
+                "",
+                base_name,
+                flags=re.IGNORECASE,
+            )
+            clean_base_name = re.sub(
+                r"\.(?:pdf|docx?|rtf|xlsx?|zip)$",
+                "",
+                clean_base_name,
+                flags=re.IGNORECASE,
+            ).strip(" -_.")
             if use_link_text and text:
                 att_title = text
+            elif title and clean_base_name and clean_base_name.lower() not in {"file", "download"}:
+                att_title = f"{title} - {clean_base_name}"
             elif title:
-                att_title = f"{title} - {base_name}"
+                att_title = title
             else:
-                att_title = base_name
+                att_title = clean_base_name or base_name
             match: re.Match[str] | None = (
                 (self.volume.search(text) or self.volume.search(base_name))
                 if self.volume
@@ -434,16 +458,6 @@ class Adapter(Base):
                 )
         else:
             candidate_inputs[0]["role"] = "context"
-            candidate_inputs[0]["slice_hash"] = digest(
-                {
-                    "title": title,
-                    "fields": values,
-                    "files": sorted(
-                        ({k: f[k] for k in ("url", "title", "order")} for f in files),
-                        key=canonical,
-                    ),
-                }
-            )
         for f in volumes:
             candidate_inputs.append(self.input_for(f, "volume", f["order"]))
             add(
@@ -477,6 +491,29 @@ class Adapter(Base):
             raise WlhError("quality_check_failed:" + sorted(set(quality_fail))[0])
         if not deliverables:
             raise WlhError("document_deliverables_required")
+        if not use_body and deliverables:
+            att_vals, _, _ = self.detail_values(
+                data, kind, acquisition, url, deliverables[0]["markdown"]
+            )
+            for k, v in att_vals.items():
+                if not values.get(k) and v:
+                    values[k] = v
+            title = enrich_bare_title(
+                title,
+                values.get("document_number"),
+                tree=None,
+                body_text=deliverables[0]["markdown"],
+            )
+            candidate_inputs[0]["slice_hash"] = digest(
+                {
+                    "title": title,
+                    "fields": values,
+                    "files": sorted(
+                        ({k: f[k] for k in ("url", "title", "order")} for f in files),
+                        key=canonical,
+                    ),
+                }
+            )
         if kind in TEXT_KINDS and use_body:
             candidate_inputs[0]["slice_hash"] = digest(
                 {"body": deliverables[0]["markdown"], "fields": values, "title": title}

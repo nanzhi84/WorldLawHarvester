@@ -3,9 +3,10 @@ from __future__ import annotations
 import os
 import pwd
 from collections.abc import Generator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime, timezone
 from typing import Any, LiteralString, cast
+from urllib.parse import urlsplit
 
 import psycopg
 from psycopg.rows import dict_row
@@ -20,18 +21,27 @@ DbConn = psycopg.Connection[dict[str, Any]]
 
 
 def dsn() -> str:
-    return os.environ.get("WLH_DATABASE_URL", "postgresql://wlh:wlh@127.0.0.1:15432/wlh")
+    url = os.environ.get("WLH_DATABASE_URL", "postgresql://wlh:wlh@127.0.0.1:15432/wlh")
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        db_name = urlsplit(url).path.lstrip("/")
+        if not (db_name.endswith("_test") or db_name.startswith("test_")):
+            raise WlhError("test_database_isolation_violation")
+    return url
 
 
 @contextmanager
-def connect() -> Generator[DbConn, None, None]:
+def _connect_ctx(url: str) -> Generator[DbConn, None, None]:
     with psycopg.Connection[dict[str, Any]].connect(
-        dsn(),
+        url,
         row_factory=dict_row,
         connect_timeout=5,
         options="-c statement_timeout=15000 -c lock_timeout=5000",
     ) as connection:
         yield connection
+
+
+def connect() -> AbstractContextManager[DbConn]:
+    return _connect_ctx(dsn())
 
 
 def one(

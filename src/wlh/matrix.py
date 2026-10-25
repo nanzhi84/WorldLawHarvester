@@ -112,6 +112,8 @@ def _format_status_md(csv_status: str) -> str:
     val = csv_status.strip().lower()
     if val.startswith("[x]") or val in {"x", "已完成", "已适配", "已实网跑通", "true"}:
         return "[x]"
+    if val.startswith("[~]") or val in {"~", "[-]", "部分跑通", "已部分跑通", "partial"}:
+        return "[~]"
     return "[ ]"
 
 
@@ -135,7 +137,7 @@ def _format_note_md(csv_note: str, existing_md_cell: str | None = None) -> str:
         return existing_md_cell
     s = re.sub(r"([^\s(]+)\s+\((https?://[^)]+)\)", r"[\1](\2)", val)
     s = re.sub(
-        r"^(实网已跑通[^：:]*|适配器契约已验证[^：:]*|实测受阻[^：:]*)([：:])",
+        r"^(实网已跑通[^：:]*|部分跑通[^：:]*|适配器契约已验证[^：:]*|实测受阻[^：:]*)([：:])",
         r"**\1**\2",
         s,
     )
@@ -163,7 +165,9 @@ def render_markdown_from_csv(csv_path: Path, md_path: Path) -> str:
         preamble = (
             "# 多法域资源适配与推进台账 (Source Adaptation Matrix)\n\n"
             "> **唯一事实源声明（Single Source of Truth）**：本文件与同目录下的扁平化宽表 "
-            "[`source-adaptation-matrix.csv`](source-adaptation-matrix.csv) 自动联动同步。\n\n---"
+            "[`source-adaptation-matrix.csv`](source-adaptation-matrix.csv) 自动联动同步；"
+            "各已跑通（`[x]`）及部分跑通（`[~]`）信源的双栏核验样本见 "
+            "[`source-verification-samples.md`](source-verification-samples.md)。\n\n---"
         )
 
     # Count items per (continent, jurisdiction, subcat)
@@ -284,8 +288,13 @@ def watch_csv(
     md_path = md_path.resolve()
     parent_dir = csv_path.parent
     last_digest = _file_digest(csv_path)
+    html_path = md_path.parent / "source-verification-samples.html"
     if last_digest:
         changed = sync_csv_to_md(csv_path, md_path)
+        if html_path.is_file():
+            from wlh.runbook_samples import sync_csv_to_html
+
+            sync_csv_to_html(csv_path, html_path)
         ts = datetime.now().strftime("%H:%M:%S")
         print(
             f"[{ts}] [matrix-hook] Initial sync check complete (updated={changed}). Waiting for kernel VFS events on {csv_path.name}",
@@ -343,6 +352,10 @@ def watch_csv(
             if digest and digest != last_digest:
                 last_digest = digest
                 changed = sync_csv_to_md(csv_path, md_path)
+                if html_path.is_file():
+                    from wlh.runbook_samples import sync_csv_to_html
+
+                    sync_csv_to_html(csv_path, html_path)
                 ts = datetime.now().strftime("%H:%M:%S")
                 print(
                     f"[{ts}] [matrix-hook] CSV modification event -> synced {md_path.name} (updated={changed})",
@@ -380,6 +393,12 @@ def main(argv: list[str] | None = None) -> int:
 
     changed = sync_csv_to_md(args.csv, args.md)
     print(f"synced {args.csv} -> {args.md} (updated={changed})")
+    html_target = args.md.resolve().parent / "source-verification-samples.html"
+    if html_target.is_file():
+        from wlh.runbook_samples import sync_csv_to_html
+
+        html_changed = sync_csv_to_html(args.csv, html_target)
+        print(f"synced {args.csv} -> {html_target} (updated={html_changed})")
     return 0
 
 

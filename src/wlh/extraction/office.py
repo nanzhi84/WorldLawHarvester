@@ -266,8 +266,18 @@ def extract_docx(path: str | Path) -> str:
     from docx.table import Table  # type: ignore[import-untyped]
     from docx.text.paragraph import Paragraph  # type: ignore[import-untyped]
 
+    has_media_images = False
     try:
         with normalized_office_archive(path) as handle:
+            with zipfile.ZipFile(handle) as zf:
+                has_media_images = any(
+                    name.startswith("word/media/")
+                    and name.lower().endswith(
+                        (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif")
+                    )
+                    for name in zf.namelist()
+                )
+            handle.seek(0)
             document: Any = Document(handle)
     except Exception:
         raise WlhError("docx_invalid") from None
@@ -296,8 +306,9 @@ def extract_docx(path: str | Path) -> str:
             if rows:
                 parts.append(table_markdown(rows))
     value = "\n\n".join(parts).strip()
-    if len(compact(value)) < 8:
-        raise WlhError("docx_text_unusable")
+    min_chars = 200 if has_media_images else 8
+    if len(compact(value)) < min_chars:
+        raise WlhError("quality_too_short" if has_media_images else "docx_text_unusable")
     return value + "\n"
 
 
@@ -344,7 +355,11 @@ def unpack_zip(path: str | Path, folder: str | Path, max_bytes: int) -> list[dic
 
 
 def extract_office(
-    path: str | Path, kind: str | None = None, timeout: float | dict[str, Any] = 120
+    path: str | Path,
+    kind: str | None = None,
+    timeout: float | dict[str, Any] = 120,
+    ocr: dict[str, Any] | None = None,
+    script_hint: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     path = Path(path)
     cfg: dict[str, Any] = (
@@ -366,9 +381,9 @@ def extract_office(
             path,
             kind,
             {
-                "ocr": OCRConfig().model_dump(),
+                "ocr": ocr if ocr is not None else OCRConfig().model_dump(),
                 "parser": cfg,
-                "profile": "generic",
+                "profile": script_hint or "generic",
                 "max_bytes": 128 * 1024 * 1024,
             },
         )
@@ -388,15 +403,79 @@ def extract_office(
         markdown, info["extractor"] = extract_excel(path, kind)
         return markdown, info
     if kind == "docx":
+        markdown_docx: str | None = None
         if prefer:
-            markdown, info["extractor"] = extract_docx(path), "python_docx"
-        else:
-            markdown = legal_markdown(extract_libreoffice_text(path, timeout, kind))
+            try:
+                markdown_docx, info["extractor"] = extract_docx(path), "python_docx"
+            except WlhError as exc:
+                if exc.code != "quality_too_short":
+                    raise
+                info["attempts"].append(exc.code)
+                from wlh.config import OCRConfig
+                from wlh.extraction.pdf_scan import extract_pdf
+
+                ocr_cfg = ocr if ocr is not None else OCRConfig().model_dump()
+                try:
+                    try:
+                        data = libreoffice_convert(
+                            path, "pdf:writer_pdf_Export", "pdf", timeout, kind
+                        )
+                        extractor_used = "libreoffice_pdf"
+                    except WlhError as lo_exc:
+                        info["attempts"].append(lo_exc.code)
+                        import pymupdf as _fitz  # type: ignore[import-untyped]
+
+                        fitz_mod: Any = _fitz
+                        with normalized_office_archive(path) as handle, zipfile.ZipFile(handle) as zf:
+                            media_names = sorted(
+                                name
+                                for name in zf.namelist()
+                                if name.startswith("word/media/")
+                                and name.lower().endswith(
+                                    (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif")
+                                )
+                            )
+                            if not media_names:
+                                raise WlhError("quality_too_short") from None
+                            pdf_doc = fitz_mod.open()
+                            try:
+                                for mname in media_names:
+                                    img_bytes = zf.read(mname)
+                                    page = pdf_doc.new_page(width=595, height=842)
+                                    page.insert_image(
+                                        fitz_mod.Rect(18, 18, 577, 824), stream=img_bytes
+                                    )
+                                data = bytes(pdf_doc.tobytes())
+                            finally:
+                                pdf_doc.close()
+                        extractor_used = "docx_media_pdf_ocr"
+                    with tempfile.TemporaryDirectory(prefix="wlh-office-pdf-") as folder:
+                        pdf_path = Path(folder) / "input.pdf"
+                        pdf_path.write_bytes(data)
+                        markdown_docx, pdf_info, quality, _ = extract_pdf(
+                            pdf_path, ocr_cfg, script_hint or "generic"
+                        )
+                except WlhError as pdf_exc:
+                    info["attempts"].append(pdf_exc.code)
+                    raise WlhError("quality_too_short") from None
+                if (
+                    quality["recommended_route"]
+                    not in {
+                        "accept",
+                        "accept_ocr",
+                        "accept_with_warning",
+                    }
+                    or len(compact(markdown_docx)) < 80
+                ):
+                    raise WlhError("quality_too_short")
+                info.update(extractor=extractor_used, pdf=pdf_info)
+        if markdown_docx is None:
+            markdown_docx = legal_markdown(extract_libreoffice_text(path, timeout, kind))
             info["extractor"] = "libreoffice_text"
-        markdown, changed = normalize_detected_tcvn3(markdown)
+        markdown_docx, changed = normalize_detected_tcvn3(markdown_docx)
         if changed:
             info["legacy_encoding"] = "tcvn3"
-        return markdown, info
+        return markdown_docx, info
     raw = Path(path).read_bytes()
     if kind == "rtf":
         markdown = None

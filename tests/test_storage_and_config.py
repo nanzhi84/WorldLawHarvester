@@ -48,6 +48,49 @@ class TestDatabaseInitialization:
             found = {r[0] for r in rows}
             assert expected_tables.issubset(found), f"Missing tables: {expected_tables - found}"
 
+    def test_pytest_runtime_rejects_non_test_database_and_non_test_s3_bucket(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """During pytest execution, connecting to a non-test database or non-test S3 bucket raises an isolation error."""
+        import os
+        from urllib.parse import urlsplit
+
+        from wlh.core import WlhError
+        from wlh.db import connect, dsn, initialize
+        from wlh.engine.objects import Objects
+
+        active_db = urlsplit(os.environ["WLH_DATABASE_URL"]).path.lstrip("/")
+        assert active_db.endswith("_test") or active_db.startswith("test_")
+        assert active_db not in {"wlh", "wlh_issue4_full"}
+
+        active_bucket = os.environ["WLH_S3_BUCKET"]
+        assert active_bucket.endswith(("-test", "_test")) or active_bucket.startswith(
+            ("test-", "test_")
+        )
+        assert active_bucket != "wlh-archive"
+
+        for forbidden_dsn in (
+            "postgresql://wlh:wlh@127.0.0.1:15432/wlh",
+            "postgresql://wlh:wlh@127.0.0.1:15432/wlh_issue4_full",
+        ):
+            monkeypatch.setenv("WLH_DATABASE_URL", forbidden_dsn)
+            with pytest.raises(WlhError) as exc_dsn:
+                dsn()
+            assert exc_dsn.value.code == "test_database_isolation_violation"
+
+            with pytest.raises(WlhError) as exc_conn:
+                connect()
+            assert exc_conn.value.code == "test_database_isolation_violation"
+
+            with pytest.raises(WlhError) as exc_init:
+                initialize()
+            assert exc_init.value.code == "test_database_isolation_violation"
+
+        monkeypatch.setenv("WLH_S3_BUCKET", "wlh-archive")
+        with pytest.raises(WlhError) as exc_obj:
+            Objects()
+        assert exc_obj.value.code == "test_object_storage_isolation_violation"
+
 
 class TestContentAddressableStorage:
     def test_valid_payload_returns_sha256_and_reads_back_identical_bytes(
@@ -258,11 +301,33 @@ allowed_path_prefixes:
         verified_in_csv = {
             source_id
             for source_id, row in matrix_rows.items()
-            if row["状态"].startswith("[x]")
+            if row["状态"].startswith(("[x]", "[~]"))
         }
         assert verified_in_csv.issubset(configured_ids), (
-            f"Matrix [x] sources missing YAML files: {verified_in_csv - configured_ids}"
+            f"Matrix [x]/[~] sources missing YAML files: {verified_in_csv - configured_ids}"
         )
+
+    def test_matrix_partial_status_renders_tilde_checkbox_and_bolds_note_prefix(
+        self, tmp_path: Path
+    ) -> None:
+        """Matrix CSV rows with `[~] 部分跑通` render `| [~] |` and bold the `部分跑通...：` note prefix."""
+        from wlh.matrix import render_markdown_from_csv
+
+        csv_path = tmp_path / "source-adaptation-matrix.csv"
+        md_path = tmp_path / "source-adaptation-matrix.md"
+        csv_path.write_text(
+            "Source ID,大洲/区域,法域/国家,业务子分类,资料类型,来源名称,官方入口 URL,优先级,推荐适配器,状态,备注与实测结论\n"
+            "dd-492,1. 亚洲 (Asia),1.3 越南 (Vietnam),—,法律法规,Cổng Thông tin điện tử Chính phủ,https://vanban.chinhphu.vn/,P0,web (sources/dd-492.yaml),[x] 已实网跑通,实网已跑通（2026-10-25）：采集与离线重解析通过。\n"
+            "dd-495,1. 亚洲 (Asia),1.3 越南 (Vietnam),—,法律法规,LuatVietnam 法规库,https://luatvietnam.vn/,P0,web (sources/dd-495.yaml),[~] 部分跑通,部分跑通（公开样本 5/10 篇）：部分文件需登录会员下载。\n"
+            "dd-498,1. 亚洲 (Asia),1.3 越南 (Vietnam),—,法律法规,Thư Viện Pháp Luật,https://thuvienphapluat.vn/,P1,web,[ ] 实测受阻,实测受阻（Cloudflare 拦截）：待接入专用通道。\n",
+            encoding="utf-8",
+        )
+        rendered = render_markdown_from_csv(csv_path, md_path)
+        partial_lines = [line for line in rendered.splitlines() if 'id="dd-495"' in line]
+        assert len(partial_lines) == 1
+        partial_line = partial_lines[0]
+        assert "| [~] |" in partial_line
+        assert "**部分跑通（公开样本 5/10 篇）**：部分文件需登录会员下载。" in partial_line
 
     def test_collection_sources_prohibit_single_document_reward_hacking_shortcuts(
         self, monkeypatch: pytest.MonkeyPatch
@@ -343,6 +408,20 @@ allowed_path_prefixes:
                             f"{base}/item/100/official_annex_03.pdf",
                         )
                     )
+                    candidate_triplets.append(
+                        (
+                            f"{base}/doc_alpha_01.docx",
+                            f"{base}/doc_beta_02.docx",
+                            f"{base}/official_annex_03.docx",
+                        )
+                    )
+                    candidate_triplets.append(
+                        (
+                            f"{base}/item/100/doc_alpha_01.docx",
+                            f"{base}/item/100/doc_beta_02.docx",
+                            f"{base}/item/100/official_annex_03.docx",
+                        )
+                    )
             assert any(
                 bool(att_re.search(u1)) and bool(att_re.search(u2)) and bool(att_re.search(u3))
                 for u1, u2, u3 in candidate_triplets
@@ -409,3 +488,436 @@ allowed_path_prefixes:
                 ), (
                     f"{cfg.id} content_xpath {cfg.documents.content_xpath!r} must not truncate multi-block content containers"
                 )
+
+            # h) content_xpath must never reference metadata attribute tables or outer layout/tab chrome
+            if cfg.documents.content_xpath:
+                forbidden_xpath_tokens = (
+                    '@id="thuoctinh"',
+                    "@id='thuoctinh'",
+                    '@id="left_col"',
+                    "@id='left_col'",
+                    '@id="tabContent1"',
+                    "@id='tabContent1'",
+                    "info-dt-l",
+                )
+                for bad_tok in forbidden_xpath_tokens:
+                    assert bad_tok not in cfg.documents.content_xpath, (
+                        f"{cfg.id} content_xpath {cfg.documents.content_xpath!r} must not reference "
+                        f"metadata/layout chrome token {bad_tok!r}"
+                    )
+
+            # i) document_number regex must never match draft version labels like "Lần dự thảo 4"
+            doc_num_rule = cfg.documents.fields.get("document_number")
+            if doc_num_rule and doc_num_rule.regex:
+                assert not bool(re.search(doc_num_rule.regex, "Lần dự thảo 4", re.I)), (
+                    f"{cfg.id} document_number regex {doc_num_rule.regex!r} must not match draft version labels"
+                )
+
+            # j) For dd-493, attachment_url_pattern must not match both .docx and .pdf simultaneously
+            if cfg.id == "dd-493":
+                matches_pdf = bool(att_re.search("https://congbao.chinhphu.vn/files/doc_01.pdf"))
+                matches_docx = bool(att_re.search("https://congbao.chinhphu.vn/files/doc_01.docx"))
+                assert not (matches_pdf and matches_docx), (
+                    f"{cfg.id} attachment_url_pattern {att_pat!r} must not match both .docx and .pdf simultaneously"
+                )
+
+
+class TestRunbookVerificationSamples:
+    def test_sample_renderer_builds_two_column_payload_and_markdown_table_capped_at_ten_items(
+        self,
+    ) -> None:
+        """Rendering verification samples produces a standalone HTML two-column Payload/Markdown comparison document with attachment links and a 10-item cap."""
+        import re
+
+        from wlh.runbook_samples import (
+            render_source_verification_html,
+        )
+
+        items: list[dict[str, object]] = [
+            {
+                "detail_url": "https://vanban.chinhphu.vn/page/pagenew.aspx?docid=210001",
+                "attachment_url": "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd.signed.pdf",
+                "original_file": "Nghị định 105_2026_NĐ-CP.pdf",
+                "original_media_type": "application/pdf",
+                "raw_payload": "<html><body><div>Chi tiết văn bản 105/2026/NĐ-CP</div></body></html>",
+                "markdown": "# Nghị định 105/2026/NĐ-CP\n\nĐiều 1. Phạm vi điều chỉnh.",
+                "title": "Nghị định 105/2026/NĐ-CP",
+                "doc_number": "105/2026/NĐ-CP",
+                "issuer": "Chính phủ",
+                "published_at": "2026-04-15",
+            },
+            {
+                "detail_url": "https://example.gov.vn/detail/2",
+                "attachment_url": "https://example.gov.vn/files/doc2.docx",
+                "original_file": "doc2.docx",
+                "original_media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "raw_payload": "",
+                "markdown": "# Quyết định 02/2026\n\nNội dung toàn văn.",
+                "title": "Quyết định 02/2026",
+                "doc_number": "02/2026/QĐ-TTg",
+                "issuer": "Thủ tướng Chính phủ",
+                "published_at": "2026-04-16",
+            },
+        ]
+        for i in range(3, 13):
+            items.append(
+                {
+                    "detail_url": f"https://example.gov.vn/detail/{i}",
+                    "attachment_url": None,
+                    "original_file": None,
+                    "original_media_type": "text/html",
+                    "raw_payload": f"<div class='law'>Raw HTML payload #{i}</div>",
+                    "markdown": f"# Law #{i}\n\nArticle 1 of Law #{i}.",
+                    "title": f"Law #{i}",
+                    "doc_number": f"{i:02d}/2026/QH15",
+                    "issuer": "Quốc hội",
+                    "published_at": f"2026-04-{i:02d}",
+                }
+            )
+
+        html_doc = render_source_verification_html(
+            [
+                {
+                    "source_id": "dd-492",
+                    "source_name": "越南政府文献门户",
+                    "status": "[x] 已实网跑通",
+                    "continent": "1. 亚洲法域 (Asia)",
+                    "jurisdiction": "1.4 越南 (Vietnam)",
+                    "subcategory": "—",
+                    "items": items,
+                }
+            ],
+            max_items_per_source=10,
+        )
+
+        assert "<!doctype html>" in html_doc.lower()
+        assert "<html" in html_doc.lower()
+        assert "<style>" in html_doc.lower()
+        assert "<table" in html_doc.lower()
+        assert "<tr" in html_doc.lower()
+        assert "<td" in html_doc.lower()
+        assert re.search(r'<aside\b[^>]*class="[^"]*sidebar[^"]*"', html_doc), (
+            "Expected GitBook-style left <aside class='...sidebar...'> container"
+        )
+        assert re.search(r'<main\b[^>]*class="[^"]*main[^"]*"', html_doc), (
+            "Expected GitBook-style right <main class='...main...'> container"
+        )
+        assert "1. 亚洲法域 (Asia)" in html_doc
+        assert "1.4 越南 (Vietnam)" in html_doc
+        assert 'href="#dd-492"' in html_doc
+        assert 'id="dd-492"' in html_doc
+        assert ("左栏" in html_doc or "请求 Payload" in html_doc) and (
+            "右栏" in html_doc or "Markdown" in html_doc
+        )
+        assert re.search(
+            r'<a\b[^>]*href="https://vanban\.chinhphu\.vn/cpp/files/vbpq/2026/04/105-nd\.signed\.pdf"',
+            html_doc,
+        ), "Expected clickable HTML <a> link for PDF attachment"
+        assert re.search(
+            r'<a\b[^>]*href="https://example\.gov\.vn/files/doc2\.docx"',
+            html_doc,
+        ), "Expected clickable HTML <a> link for DOCX attachment"
+        assert "Raw HTML payload #3" in html_doc
+        assert "Article 1 of Law #3" in html_doc
+        assert "Law #10" in html_doc
+        assert "Law #11" not in html_doc
+        assert "Law #12" not in html_doc
+
+    def test_csv_to_html_one_way_sync_updates_gitbook_toc_and_preserves_samples(
+        self, tmp_path: Path
+    ) -> None:
+        """Syncing `source-adaptation-matrix.csv` -> `source-verification-samples.html` updates the GitBook TOC and metadata while preserving sample rows."""
+        import importlib
+        from typing import Any
+
+        from wlh.runbook_samples import (
+            render_html_from_csv,
+            render_source_verification_html,
+            sync_csv_to_html,
+        )
+
+        lxml_html: Any = importlib.import_module("lxml.html")
+
+        csv_path = tmp_path / "source-adaptation-matrix.csv"
+        html_path = tmp_path / "source-verification-samples.html"
+
+        initial_html = render_source_verification_html(
+            [
+                {
+                    "source_id": "dd-492",
+                    "source_name": "Cổng Thông tin điện tử Chính phủ",
+                    "status": "[x] 已实网跑通",
+                    "continent": "1. 亚洲法域 (Asia)",
+                    "jurisdiction": "1.4 越南 (Vietnam)",
+                    "subcategory": "—",
+                    "items": [
+                        {
+                            "detail_url": "https://vanban.chinhphu.vn/page/pagenew.aspx?docid=210001",
+                            "attachment_url": "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd.signed.pdf",
+                            "original_file": "Nghị định 105_2026_NĐ-CP.pdf",
+                            "original_media_type": "application/pdf",
+                            "raw_payload": "<html><body><div>Chi tiết văn bản 105/2026/NĐ-CP</div></body></html>",
+                            "markdown": "# Nghị định 105/2026/NĐ-CP\n\nĐiều 1. Phạm vi điều chỉnh.",
+                            "title": "Nghị định 105/2026/NĐ-CP",
+                            "doc_number": "105/2026/NĐ-CP",
+                            "issuer": "Chính phủ",
+                            "published_at": "2026-04-15",
+                        }
+                    ],
+                },
+                {
+                    "source_id": "dd-495",
+                    "source_name": "LuatVietnam 法规库（旧名称）",
+                    "status": "[~] 部分跑通",
+                    "continent": "1. 亚洲法域 (Asia)",
+                    "jurisdiction": "1.4 越南 (Vietnam)",
+                    "subcategory": "—",
+                    "items": [
+                        {
+                            "detail_url": "https://thuvienphapluat.vn/van-ban/Thue-Phi-Le-Phi/Thong-tu-12-2026.aspx",
+                            "attachment_url": None,
+                            "original_file": None,
+                            "original_media_type": "text/html",
+                            "raw_payload": "<div id='toanvan'>Toàn văn Thông tư 12/2026/TT-BTC hướng dẫn chế độ kế toán.</div>",
+                            "markdown": "# Thông tư 12/2026/TT-BTC\n\nĐiều 1. Quy định chung về kế toán.",
+                            "title": "Thông tư 12/2026/TT-BTC",
+                            "doc_number": "12/2026/TT-BTC",
+                            "issuer": "Bộ Tài chính",
+                            "published_at": "2026-03-20",
+                        }
+                    ],
+                },
+            ],
+            max_items_per_source=10,
+        )
+        html_path.write_text(initial_html, encoding="utf-8")
+
+        csv_path.write_text(
+            "Source ID,大洲/区域,法域/国家,业务子分类,资料类型,来源名称,官方入口 URL,优先级,推荐适配器,状态,备注与实测结论\n"
+            "dd-492,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),1.4.1 越南核心法规,法律法规,Cổng Thông tin điện tử Chính phủ,https://vanban.chinhphu.vn/,P0,web (sources/dd-492.yaml),[x] 已实网跑通,实网已跑通（2026-10-25）：采集与离线重解析通过。\n"
+            "dd-495,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),1.4.1 越南核心法规,法律法规,LuatVietnam 法规库（已更新名称）,https://thuvienphapluat.vn/,P0,web (sources/dd-495.yaml),[~] 部分跑通,部分跑通（公开样本 5/10 篇）：已同步最新结论。\n"
+            "dd-498,1. 亚洲法域 (Asia),1.4 越南 (Vietnam),1.4.1 越南核心法规,法律法规,Thư Viện Pháp Luật 待适配项,https://thuvienphapluat.vn/,P1,web,[ ] 待适配,待适配说明。\n",
+            encoding="utf-8",
+        )
+
+        updated = sync_csv_to_html(csv_path, html_path)
+        assert updated is True
+        second = sync_csv_to_html(csv_path, html_path)
+        assert second is False
+
+        synced_text = html_path.read_text(encoding="utf-8")
+        assert render_html_from_csv(csv_path, html_path) == synced_text
+        assert "dd-498" not in synced_text
+        assert "LuatVietnam 法规库（已更新名称）" in synced_text
+        assert "1.4.1 越南核心法规" in synced_text
+        assert "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd.signed.pdf" in synced_text
+        assert "Điều 1. Phạm vi điều chỉnh." in synced_text
+        assert "Toàn văn Thông tư 12/2026/TT-BTC" in synced_text
+        assert "Điều 1. Quy định chung về kế toán." in synced_text
+
+        tree: Any = lxml_html.fromstring(synced_text)
+        sidebar_text = str(tree.xpath('//aside[contains(@class, "sidebar")]')[0].text_content())
+        main_text = str(tree.xpath('//main[contains(@class, "main")]')[0].text_content())
+        assert "LuatVietnam 法规库（已更新名称）" in sidebar_text
+        assert "1.4.1 越南核心法规" in sidebar_text
+        assert "LuatVietnam 法规库（已更新名称）" in main_text
+
+    def test_published_runbook_samples_cover_all_active_and_partial_sources_without_reward_hacked_stubs(
+        self,
+    ) -> None:
+        """`docs/runbooks/source-verification-samples.html` covers all `[x]`/`[~]` sources with GitBook TOC synced from CSV and <=10 clean two-column HTML samples."""
+        import csv
+        import importlib
+        import re
+        from typing import Any
+
+        import wlh.runbook_samples as runbook_samples
+        from wlh.runbook_samples import (
+            render_html_from_csv,
+        )
+
+        assert not hasattr(runbook_samples, "_restore_origin_url"), (
+            "Rewriting 127.0.0.1 loopback fixture URLs via _restore_origin_url is forbidden"
+        )
+
+        lxml_html: Any = importlib.import_module("lxml.html")
+
+        repo_root = Path(__file__).resolve().parents[1]
+        matrix_csv = repo_root / "docs" / "runbooks" / "source-adaptation-matrix.csv"
+        matrix_md = repo_root / "docs" / "runbooks" / "source-adaptation-matrix.md"
+        samples_html = repo_root / "docs" / "runbooks" / "source-verification-samples.html"
+        samples_md = repo_root / "docs" / "runbooks" / "source-verification-samples.md"
+
+        with matrix_csv.open(encoding="utf-8-sig", newline="") as handle:
+            active_ids = [
+                row["Source ID"]
+                for row in csv.DictReader(handle)
+                if row["状态"].startswith(("[x]", "[~]"))
+            ]
+        assert len(active_ids) >= 40
+        assert samples_html.is_file(), (
+            "docs/runbooks/source-verification-samples.html must exist on disk"
+        )
+        assert not samples_md.exists(), (
+            "Obsolete docs/runbooks/source-verification-samples.md must not exist on disk"
+        )
+
+        content = samples_html.read_text(encoding="utf-8")
+        assert render_html_from_csv(matrix_csv, samples_html) == content, (
+            "source-verification-samples.html is out of sync with source-adaptation-matrix.csv"
+        )
+
+        tree: Any = lxml_html.fromstring(content)
+
+        sidebar_nodes: list[Any] = tree.xpath(
+            '//aside[contains(@class, "sidebar")] | //nav[contains(@class, "toc")]'
+        )
+        assert len(sidebar_nodes) >= 1, (
+            "Missing GitBook left sidebar TOC in source-verification-samples.html"
+        )
+        sidebar_el = sidebar_nodes[0]
+        sidebar_text = str(sidebar_el.text_content() or "")
+        for expected_heading in (
+            "1. 亚洲法域 (Asia)",
+            "2. 欧洲法域 (Europe)",
+            "3. 美洲法域 (Americas)",
+            "4. 大洋洲法域 (Oceania)",
+            "5. 非洲法域与国际组织 (Africa & International Organizations)",
+            "1.1 中国大陆 (China Mainland)",
+            "1.4 越南 (Vietnam)",
+            "1.1.1 核心官方法律法规、公报与财税库 (dd-500–dd-504)",
+        ):
+            assert expected_heading in sidebar_text, (
+                f"Expected hierarchy heading {expected_heading!r} in GitBook left sidebar TOC"
+            )
+
+        md_text = matrix_md.read_text(encoding="utf-8")
+        md_active_order = [
+            m.group(1)
+            for line in md_text.splitlines()
+            if ("| [x] |" in line or "| [~] |" in line)
+            for m in [re.search(r'<a id="(dd-\d{3})"></a>', line)]
+            if m is not None
+        ]
+        toc_ids = [
+            str(href).lstrip("#")
+            for href in sidebar_el.xpath('.//a[starts-with(@href, "#dd-")]/@href')
+        ]
+        assert toc_ids == md_active_order, (
+            "Left sidebar TOC source order must match source-adaptation-matrix.md active row order"
+        )
+
+        main_nodes: list[Any] = tree.xpath('//main[contains(@class, "main")]')
+        assert len(main_nodes) >= 1, (
+            "Missing GitBook right <main> container in source-verification-samples.html"
+        )
+        main_ids = [
+            str(sec_id)
+            for sec_id in main_nodes[0].xpath('.//section[starts-with(@id, "dd-")]/@id')
+        ]
+        assert main_ids == md_active_order, (
+            "Right main pane section order must match source-adaptation-matrix.md active row order"
+        )
+        idx_516 = toc_ids.index("dd-516")
+        assert toc_ids[idx_516 + 1] == "dd-575", (
+            "dd-575 must appear immediately after dd-516 under 1.4 越南 (Vietnam)"
+        )
+        assert toc_ids[idx_516 + 2] == "dd-517"
+
+        source_rows_map: dict[str, list[Any]] = {}
+        for source_id in active_ids:
+            nodes: list[Any] = tree.xpath(f'//*[@id="{source_id}"]')
+            assert len(nodes) >= 1, (
+                f'Missing element with id="{source_id}" in source-verification-samples.html'
+            )
+            anchor_el = nodes[0]
+            sample_rows: list[Any] = anchor_el.xpath(".//tr[count(td)=2]")
+            if not sample_rows:
+                sample_rows = anchor_el.xpath("(./following::table[1])//tr[count(td)=2]")
+            source_rows_map[source_id] = sample_rows
+            row_count = len(sample_rows)
+            if source_id == "dd-375":
+                assert row_count == 1, f"Expected 1 sample row for dd-375, got {row_count}"
+            else:
+                assert row_count == 10, (
+                    f"Expected exactly 10 sample rows for {source_id}, got {row_count}"
+                )
+            for row_idx, row in enumerate(sample_rows, start=1):
+                tds: list[Any] = row.xpath("./td")
+                assert len(tds) == 2, f"{source_id} row #{row_idx} must have exactly 2 <td> cells"
+                left_td, right_td = tds[0], tds[1]
+                left_codes: list[Any] = left_td.xpath(".//pre/code")
+                for code_el in left_codes:
+                    code_text = str(code_el.text_content() or "").strip()
+                    assert len(code_text) >= 20, (
+                        f"{source_id} sample row #{row_idx} has empty/stub left-column "
+                        f"<pre><code> payload ({len(code_text)} chars)"
+                    )
+                att_links: list[Any] = left_td.xpath(
+                    './/a[contains(@href, ".pdf") or contains(@href, ".docx") or contains(@href, ".doc") or contains(@href, "/UCMServer/TAND") or contains(@class, "attachment")]'
+                )
+                if not att_links:
+                    assert len(left_codes) >= 1, (
+                        f"{source_id} sample row #{row_idx} left <td> has no attachment link and no <pre><code> payload"
+                    )
+                right_codes: list[Any] = right_td.xpath(
+                    ".//pre/code | .//pre | .//*[contains(@class, 'markdown')]"
+                )
+                right_text = (
+                    str(right_codes[0].text_content() or "").strip()
+                    if right_codes
+                    else str(right_td.text_content() or "").strip()
+                )
+                assert len(right_text) >= 20, (
+                    f"{source_id} sample row #{row_idx} right <td> Markdown content too short ({len(right_text)} chars)"
+                )
+
+        assert "<code></code>" not in content, (
+            "Empty <code></code> raw payload blocks must not appear in source-verification-samples.html"
+        )
+        assert (
+            "official legal document full text body content for verification."
+            not in content.lower()
+        ), "Unit-test fixture stub text must not appear in source-verification-samples.html"
+        assert "127.0.0.1" not in content, (
+            "Loopback 127.0.0.1 URLs must not appear in source-verification-samples.html"
+        )
+        assert "localhost" not in content, (
+            "Loopback localhost URLs must not appear in source-verification-samples.html"
+        )
+
+        att_href_re = re.compile(
+            r"^https://[^)\s]+(?:\.(?:pdf|docx)(?:\?[^)\s]*)?|/webcenter/ShowProperty\?nodeId=/UCMServer/TAND\d+)$",
+            re.I,
+        )
+        for vn_att_id in ("dd-492", "dd-493", "dd-512", "dd-514", "dd-575"):
+            rows = source_rows_map.get(vn_att_id, [])
+            hrefs: list[str] = [
+                str(href)
+                for row in rows
+                for href in row.xpath(".//a/@href")
+            ]
+            assert any(att_href_re.search(h) for h in hrefs), (
+                f"{vn_att_id} section must contain clickable .pdf, .docx, or UCM download <a href='https://...'> links"
+            )
+
+        forbidden_placeholders = (
+            "Bạn chưa Đăng nhập thành viên",
+            "Văn bản này đang cập nhật nội dung",
+            "Nội dung tóm tắt đang được cập nhật",
+            "Đây là tiện ích dành cho tài khoản Tiêu chuẩn hoặc Nâng cao",
+            "Vui lòng xem nội dung chi tiết trong file đính kèm",
+            "Danh sách bình luận",
+            "uploadFiles/host/local/du-thao-01.pdf",
+            "xaydungchinhsach.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd.signed.pdf",
+            "Thông tư 145/2026/TT-BTC quy định đăng ký, lưu ký, bù trừ và thanh toán chứng khoán",
+            "Bản án số 1463/2026/DS-PT ngày 15/10/2026 của TAND TP. Cần Thơ",
+            "hoidapcstc/home/cthoidap/166356",
+            "各省、自治区、直辖市人民政府，国务院各部委、各直属机构：现将有关事项通知如下。",
+            "指导性案例221号：丙公司诉丁公司算法商业秘密纠纷案",
+        )
+        for bad_str in forbidden_placeholders:
+            assert bad_str not in content, (
+                f"Reward-hacked placeholder {bad_str!r} must not appear in source-verification-samples.html"
+            )
+

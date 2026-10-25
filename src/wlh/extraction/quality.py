@@ -23,6 +23,12 @@ WARNING_REASONS = {
     "reading_order_unstable",
 }
 SIGNATURE_MARKERS = ("TM.", "T.M.", "KT.", "KÝ TÊN", "THỦ TƯỚNG", "BỘ TRƯỞNG", "CHỦ TỊCH")
+BLOCK_PATTERNS = (
+    "bạn chưa đăng nhập thành viên",
+    "văn bản này đang cập nhật nội dung",
+    "đây là tiện ích dành cho tài khoản tiêu chuẩn hoặc nâng cao",
+    "vui lòng xem nội dung chi tiết trong file đính kèm",
+)
 
 
 def json_value(value: Any, fallback: Any) -> Any:
@@ -65,9 +71,9 @@ def route(document_reasons: Sequence[str], pages: Sequence[Mapping[str, Any]]) -
     warnings = [p for p in pages if p["route"] == "accept_with_warning"]
     return (
         "legacy_font_encoding_recovery"
-        if document_reasons
+        if "legacy_vietnamese_font_encoding_suspect" in document_reasons
         else "vision_reparse_pages"
-        if hard
+        if document_reasons or hard
         else "accept_with_warning"
         if warnings
         else "accept_ocr"
@@ -104,6 +110,9 @@ def quality_check(
         not has_native_pages and garbled >= 16 and garbled_ratio >= 0.03
     ):
         document_reasons.append("legacy_vietnamese_font_encoding_suspect")
+    lowered_md = str(markdown).casefold()
+    if any(pat in lowered_md for pat in BLOCK_PATTERNS):
+        document_reasons.append("blocked_or_placeholder_text")
     pages: list[dict[str, Any]] = []
     for page in analysis.get("pages", []):
         number = page["page"]
@@ -204,6 +213,9 @@ def text_check(markdown: str, profile: str = "generic") -> dict[str, Any]:
         reasons.append("replacement_character")
     elif replacements:
         reasons.append("isolated_replacement_character")
+    lowered = markdown.casefold()
+    if any(pat in lowered for pat in BLOCK_PATTERNS):
+        reasons.append("blocked_or_placeholder_text")
     garbled = 0
     if profile == "vi":
         garbled = sum(char in LEGACY_GARBLED for char in markdown)

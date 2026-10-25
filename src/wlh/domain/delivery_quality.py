@@ -55,6 +55,19 @@ _BARE_DOC_NUMBER_LABEL_RE = re.compile(
     r"^(?:文号|发文字号|案号|số|số\s+ký\s+hiệu|no\.?)[:：\s]*$", re.IGNORECASE
 )
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_VI_PLACEHOLDER_PATTERNS = (
+    "bạn chưa đăng nhập thành viên",
+    "văn bản này đang cập nhật nội dung",
+    "đây là tiện ích dành cho tài khoản tiêu chuẩn hoặc nâng cao",
+    "vui lòng xem nội dung chi tiết trong file đính kèm",
+)
+_GAZETTE_RUNNING_HEADER_RE = re.compile(r"(?im)^\s*công\s+báo\s*/\s*số\s+\d+.*$")
+_UUID_FILENAME_SUFFIX_RE = re.compile(
+    r"(?:^|[-_\s]+)[0-9a-f]{32}(?:\.[a-z0-9]{2,5})?$", re.IGNORECASE
+)
+_SALUTATION_PREFIX_RE = re.compile(
+    r"^bộ\s+tài\s+chính\s*[.:,-]\s*", re.IGNORECASE
+)
 
 
 def _normalize_title_token(value: str) -> str:
@@ -74,7 +87,9 @@ def _is_signature_only_stub(md_text: str, non_ws_len: int) -> bool:
 
 def _has_duplicated_substantive_paragraph(md_text: str) -> bool:
     blocks = re.split(r"\n\s*\n+", md_text.strip())
-    seen: set[str] = set()
+    substantive_blocks: list[str] = []
+    prev_compact: str | None = None
+    has_adjacent_dup = False
     for block in blocks:
         stripped = block.strip()
         if not stripped or stripped.startswith(("#", "|", "```", "- ", "* ")):
@@ -82,9 +97,17 @@ def _has_duplicated_substantive_paragraph(md_text: str) -> bool:
         compact = re.sub(r"\s+", " ", stripped)
         if len(compact) < 60:
             continue
-        if compact in seen:
+        if prev_compact is not None and compact == prev_compact:
+            has_adjacent_dup = True
+        substantive_blocks.append(compact)
+        prev_compact = compact
+    if has_adjacent_dup and len(substantive_blocks) <= 40:
+        return True
+    if len(substantive_blocks) >= 2:
+        unique_count = len(set(substantive_blocks))
+        dup_instances = len(substantive_blocks) - unique_count
+        if dup_instances * 2 >= len(substantive_blocks) or unique_count <= len(substantive_blocks) * 0.6:
             return True
-        seen.add(compact)
     return False
 
 
@@ -194,6 +217,18 @@ def audit_delivery_rows(
                 f"title duplicates source_name: {title_raw!r}",
                 row,
             )
+        elif _UUID_FILENAME_SUFFIX_RE.search(title_raw):
+            _add(
+                "boilerplate_or_garbage_title",
+                f"title contains unstripped UUID hash filename: {title_raw!r}",
+                row,
+            )
+        elif _SALUTATION_PREFIX_RE.search(title_raw):
+            _add(
+                "boilerplate_or_garbage_title",
+                f"title contains unstripped salutation/agency prefix: {title_raw!r}",
+                row,
+            )
 
         doc_num = row.get("doc_number")
         if doc_num is not None:
@@ -256,17 +291,26 @@ def audit_delivery_rows(
         if md_text is not None:
             if md_text.count("\ufffd") >= 3:
                 _add("garbled_markdown", "markdown contains >= 3 replacement characters", row)
+            lowered_md = unicodedata.normalize("NFC", md_text).casefold()
+            if any(pat in lowered_md for pat in _VI_PLACEHOLDER_PATTERNS):
+                _add(
+                    "blocked_or_placeholder_markdown",
+                    "markdown contains login-wall or placeholder stub text",
+                    row,
+                )
+            stripped_gazette = _GAZETTE_RUNNING_HEADER_RE.sub("", md_text)
             non_ws_len = len(re.sub(r"\s+", "", md_text))
+            substantive_non_ws_len = len(re.sub(r"\s+", "", stripped_gazette))
             if _is_signature_only_stub(md_text, non_ws_len):
                 _add(
                     "signature_only_markdown",
                     "markdown contains only a digital signature block without substantive text",
                     row,
                 )
-            elif row.get("role") != "independent_attachment" and non_ws_len < min_markdown_chars:
+            elif substantive_non_ws_len < min_markdown_chars:
                 _add(
                     "stub_markdown",
-                    f"markdown non-whitespace length {non_ws_len} < {min_markdown_chars}",
+                    f"markdown substantive non-whitespace length {substantive_non_ws_len} < {min_markdown_chars}",
                     row,
                 )
             if _has_duplicated_substantive_paragraph(md_text):

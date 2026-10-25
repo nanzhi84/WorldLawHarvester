@@ -73,6 +73,12 @@ class Objects:
         except ValueError:
             raise WlhError("invalid_object_storage_endpoint") from None
         self.bucket: str = settings["BUCKET"]
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            if not (
+                self.bucket.endswith(("-test", "_test"))
+                or self.bucket.startswith(("test-", "test_"))
+            ):
+                raise WlhError("test_object_storage_isolation_violation")
         self.client: Any = client(
             settings["ENDPOINT"],
             settings["ACCESS_KEY"],

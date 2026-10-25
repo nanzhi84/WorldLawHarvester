@@ -87,6 +87,79 @@ class TestLegacyVietnameseAndDisguisedOfficeExtraction:
         assert "Luật Doanh nghiệp" in md_rtf
         assert info_rtf["detected_format"] == "rtf"
 
+    def test_scanned_image_docx_with_only_signature_text_falls_back_to_ocr_or_rejects_stub(
+        self, tmp_path: Path
+    ) -> None:
+        """A `.docx` containing only a 56-char signature text block and an embedded scan image in `word/media/image1.png` triggers OCR fallback or rejects the stub."""
+        import inspect
+        import zipfile
+        from typing import Any
+
+        import fitz  # type: ignore[import-untyped]
+        from docx import Document  # type: ignore[import-untyped]
+        from docx.shared import Inches  # type: ignore[import-untyped]
+
+        from wlh.core import WlhError
+        from wlh.extraction.office import extract_office
+
+        fitz_mod: Any = fitz
+        img_doc = fitz_mod.open()
+        img_page = img_doc.new_page(width=595, height=420)
+        img_page.insert_textbox(
+            fitz_mod.Rect(30, 40, 565, 380),
+            "DECREE NO 325 FULL STATUTORY TEXT ON PUBLIC ADMINISTRATION\n"
+            "Article 1. All public agencies shall digitize administrative records.",
+            fontsize=18,
+            fontname="helv",
+        )
+        img_path = tmp_path / "scan_body.png"
+        img_page.get_pixmap(dpi=150).save(str(img_path))
+        img_doc.close()
+
+        sig_text = "TM. CHINH PHU KT. THU TUONG PHO THU TUONG Phan Van Giang"
+        assert len(sig_text) == 56
+
+        docx_path = tmp_path / "scanned_sig.docx"
+        word_doc: Any = Document()
+        word_doc.add_paragraph(sig_text)
+        word_doc.add_picture(str(img_path), width=Inches(6.0))
+        word_doc.save(str(docx_path))
+
+        with zipfile.ZipFile(docx_path) as zf:
+            names = set(zf.namelist())
+            assert "word/document.xml" in names
+            assert "word/media/image1.png" in names
+
+        ocr_cfg = {
+            "engine": "br-ocr-v1",
+            "languages": "eng",
+            "model": "br-ocr-v1",
+            "timeout_seconds": 60,
+            "poll_seconds": 0.2,
+            "max_pages": 50,
+            "dpi": 150,
+            "max_page_pixels": 20000000,
+            "max_result_bytes": 16777216,
+        }
+        sig = inspect.signature(extract_office)
+        extract_fn: Any = extract_office
+        try:
+            if "ocr" in sig.parameters:
+                md_docx, info_docx = extract_fn(
+                    docx_path, kind="docx", ocr=ocr_cfg, script_hint="latin"
+                )
+            else:
+                md_docx, info_docx = extract_office(docx_path, kind="docx")
+        except WlhError as exc:
+            assert exc.code in {
+                "quality_too_short",
+                "quality_check_failed",
+                "docx_text_unusable",
+            }
+        else:
+            assert info_docx.get("extractor") not in {"python_docx", "docx_xml"}
+            assert "DECREE NO 325" in md_docx.upper()
+
 
 class TestPdfExtractionAndOcrFallback:
     def test_digital_born_pdf_extracts_text_directly_without_invoking_ocr(
@@ -285,3 +358,59 @@ class TestPdfExtractionAndOcrFallback:
         assert "ocr" not in parsers
         assert info["method"] == "native"
         assert "statutory regulation" in md
+
+    def test_scanned_pdf_with_running_header_and_cropped_scan_image_triggers_ocr(
+        self, tmp_path: Path
+    ) -> None:
+        """A 2-page gazette PDF with a ~50-60 char running header and a ~60% coverage scanned body image on each page triggers OCR."""
+        from typing import Any
+
+        import fitz  # type: ignore[import-untyped]
+
+        from wlh.extraction.pdf_scan import analyze, extract_pdf
+
+        fitz_mod: Any = fitz
+        temp_doc = fitz_mod.open()
+        tp = temp_doc.new_page(width=515, height=520)
+        tp.insert_textbox(
+            fitz_mod.Rect(20, 40, 495, 480),
+            "GOVERNMENT RESOLUTION NO 325 ON DIGITAL INFRASTRUCTURE\n"
+            "Article 1. National digital infrastructure standards and public data governance.",
+            fontsize=18,
+            fontname="helv",
+        )
+        img_bytes = tp.get_pixmap(dpi=150).tobytes("png")
+        temp_doc.close()
+
+        pdf_doc = fitz_mod.open()
+        for page_no in (121, 122):
+            p = pdf_doc.new_page(width=595, height=842)
+            p.insert_textbox(
+                fitz_mod.Rect(40, 25, 555, 80),
+                f"CONG BAO / So 560 / Ngay 23-10-2026   Trang {page_no}",
+                fontsize=11,
+                fontname="helv",
+            )
+            p.insert_image(fitz_mod.Rect(40, 100, 555, 620), stream=img_bytes)
+        pdf_path = tmp_path / "gazette_running_header_scan.pdf"
+        pdf_doc.save(str(pdf_path))
+        pdf_doc.close()
+
+        analysis, _ = analyze(pdf_path)
+        assert analysis["suspected_scan_pages"] == [1, 2]
+
+        ocr_cfg = {
+            "engine": "br-ocr-v1",
+            "languages": "eng",
+            "model": "br-ocr-v1",
+            "timeout_seconds": 60,
+            "poll_seconds": 0.2,
+            "max_pages": 50,
+            "dpi": 150,
+            "max_page_pixels": 20000000,
+            "max_result_bytes": 16777216,
+        }
+        md, info, _, parsers = extract_pdf(pdf_path, ocr_cfg, "latin")
+        assert info["method"] == "ocr"
+        assert "ocr" in parsers
+        assert "RESOLUTION NO 325" in md.upper() or "DIGITAL INFRASTRUCTURE" in md.upper()

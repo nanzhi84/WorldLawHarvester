@@ -57,7 +57,13 @@ def extract(
         )
         return markdown, info, report, parsers, []
     if kind in OFFICE_KINDS:
-        markdown, info = extract_office(path, kind, job["parser"])
+        markdown, info = extract_office(
+            path,
+            kind,
+            job["parser"],
+            ocr=job.get("ocr"),
+            script_hint=job.get("profile"),
+        )
         parsers = ["office", "quality"]
         if info.get("legacy_encoding"):
             parsers.append("tcvn3")

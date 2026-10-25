@@ -71,6 +71,7 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
 
     total_native = sum(p["native_text_chars"] for p in raw_pages)
     has_normal_text_page = any(p["native_text_chars"] >= NORMAL_PAGE_TEXT_CHARS for p in raw_pages)
+    max_sparse_doc_chars = max(SIGNATURE_DOC_MAX_TEXT_CHARS, 220 * len(raw_pages))
 
     pages: list[dict[str, Any]] = []
     for p in raw_pages:
@@ -81,9 +82,10 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
         )
         is_signature_scan = (
             not has_normal_text_page
-            and total_native < SIGNATURE_DOC_MAX_TEXT_CHARS
-            and p["image_coverage"] >= SIGNATURE_PAGE_MIN_COVERAGE
-            and p["ink_ratio"] > SIGNATURE_PAGE_MIN_INK
+            and total_native < max_sparse_doc_chars
+            and p["native_text_chars"] < NORMAL_PAGE_TEXT_CHARS
+            and float(p["image_coverage"]) >= 0.25
+            and float(p["ink_ratio"]) >= SIGNATURE_PAGE_MIN_INK
         )
         suspected = is_pure_scan or is_signature_scan
         pages.append(dict(p, suspected_scan=suspected))
