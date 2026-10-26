@@ -329,6 +329,27 @@ allowed_path_prefixes:
         assert "| [~] |" in partial_line
         assert "**部分跑通（公开样本 5/10 篇）**：部分文件需登录会员下载。" in partial_line
 
+    def test_matrix_multi_entry_urls_render_distinct_markdown_links(
+        self, tmp_path: Path
+    ) -> None:
+        """Matrix CSV rows with multiple entry URLs render distinct Markdown links separated by <br>."""
+        from wlh.matrix import render_markdown_from_csv
+
+        csv_path = tmp_path / "source-adaptation-matrix.csv"
+        md_path = tmp_path / "source-adaptation-matrix.md"
+        csv_path.write_text(
+            "Source ID,大洲/区域,法域/国家,业务子分类,资料类型,来源名称,官方入口 URL,优先级,推荐适配器,状态,备注与实测结论\n"
+            'dd-509,1. 亚洲法域 (Asia),1.3 中国台湾 (Taiwan),—,法律法规,全国法规资料库（LawBank Taiwan）,"https://law.moj.gov.tw/ENG/Law/LawSearchLaw.aspx, https://law.moj.gov.tw/ENG/Law/LawSearchAgree.aspx",P0,web / structured_xml,[ ] 实测受阻,实测受阻说明\n',
+            encoding="utf-8",
+        )
+        rendered = render_markdown_from_csv(csv_path, md_path)
+        multi_lines = [line for line in rendered.splitlines() if 'id="dd-509"' in line]
+        assert len(multi_lines) == 1
+        line = multi_lines[0]
+        assert "[全国法规资料库（LawBank Taiwan）（法规检索）](https://law.moj.gov.tw/ENG/Law/LawSearchLaw.aspx)" in line
+        assert "[全国法规资料库（LawBank Taiwan）（条约协定）](https://law.moj.gov.tw/ENG/Law/LawSearchAgree.aspx)" in line
+        assert "<br>" in line
+
     def test_collection_sources_prohibit_single_document_reward_hacking_shortcuts(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

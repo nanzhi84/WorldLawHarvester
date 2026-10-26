@@ -313,7 +313,13 @@ def audit_delivery_rows(
                     f"markdown substantive non-whitespace length {substantive_non_ws_len} < {min_markdown_chars}",
                     row,
                 )
-            if _has_duplicated_substantive_paragraph(md_text):
+            orig_file = str(row.get("original_file") or "").lower()
+            is_binary_attachment = row.get(
+                "role"
+            ) == "independent_attachment" and orig_file.endswith(
+                (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".rtf")
+            )
+            if not is_binary_attachment and _has_duplicated_substantive_paragraph(md_text):
                 _add(
                     "duplicated_body_markdown",
                     "markdown repeats an identical substantive paragraph multiple times",

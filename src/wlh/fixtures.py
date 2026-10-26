@@ -16,9 +16,13 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urljoin, urlsplit
 
+import lxml.etree as etree
+
 from wlh.core import WlhError, atomic_write
 from wlh.db import connect
 from wlh.engine.objects import Objects
+
+etree: Any
 
 FIXTURE_SCHEMA = "wlh.fixture.v1"
 
@@ -104,6 +108,14 @@ def _should_prune_candidate_url(
         return False
     cand_path = parts.path or "/"
     cand_route = f"{cand_path}?{parts.query}" if parts.query else cand_path
+    if cand_path.lower().endswith("/hot/addhotlaw.ashx") and parts.query:
+        m_pcode = re.search(
+            r"(?:^|&)pcode=([A-Za-z0-9]+)", parts.query, flags=re.IGNORECASE
+        )
+        if m_pcode:
+            cand_path = "/LawClass/LawAll.aspx"
+            cand_route = f"{cand_path}?pcode={m_pcode.group(1)}"
+            resolved = f"{parts.scheme}://{parts.netloc}{cand_route}"
     plaw_mapped = re.sub(
         r"^/app/details/(PLAW-[A-Za-z0-9_-]+).*",
         r"/content/pkg/\1/uslm/\1.xml",
@@ -502,6 +514,44 @@ def export_source_fixture(
                 }
             )
         else:
+            if raw_bytes.startswith(b"PK\x03\x04"):
+                try:
+                    import io
+                    import zipfile
+
+                    with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+                        xml_members = [
+                            m
+                            for m in zf.infolist()
+                            if not m.is_dir() and m.filename.lower().endswith(".xml")
+                        ]
+                        if len(xml_members) == 1:
+                            xml_data = zf.read(xml_members[0])
+                            xml_root = etree.fromstring(
+                                xml_data,
+                                etree.XMLParser(
+                                    resolve_entities=False, no_network=True, load_dtd=False
+                                ),
+                            )
+                            law_nodes = xml_root.xpath(
+                                './/*[local-name()="法規" or local-name()="Law"]'
+                            )
+                            if len(law_nodes) > max_resources:
+                                for extra_node in law_nodes[max_resources:]:
+                                    parent = extra_node.getparent()
+                                    if parent is not None:
+                                        parent.remove(extra_node)
+                                trimmed_xml = etree.tostring(
+                                    xml_root, encoding="utf-8", xml_declaration=True
+                                )
+                                out_buf = io.BytesIO()
+                                with zipfile.ZipFile(
+                                    out_buf, "w", compression=zipfile.ZIP_DEFLATED
+                                ) as out_zf:
+                                    out_zf.writestr(xml_members[0].filename, trimmed_xml)
+                                raw_bytes = out_buf.getvalue()
+                except Exception:
+                    pass
             atomic_write(out_path / filename, raw_bytes)
             routes.append(
                 {

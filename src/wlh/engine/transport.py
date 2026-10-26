@@ -283,6 +283,7 @@ class Transport:
                 if os.environ.get("SSL_CERT_FILE")
                 else ssl.create_default_context()
             )
+            ssl_ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
             ssl_ctx.load_verify_locations(cadata=EXTRA_INTERMEDIATE_CAS_PEM)
             self.session = aiohttp.ClientSession(
                 headers={"User-Agent": self.config["user_agent"]},

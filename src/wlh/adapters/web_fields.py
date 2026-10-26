@@ -93,6 +93,15 @@ def parse_date(value: str, fmt: str | None = None) -> str | None:
             return datetime.strptime(text, fmt).date().isoformat()
         except ValueError:
             raise WlhError("document_date_unparseable") from None
+    roc_zh_match: re.Match[str] | None = re.search(
+        r"(?:中華民國|民國)\s*(\d{1,3})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", text
+    )
+    if roc_zh_match:
+        try:
+            y, m, d = (int(part) for part in roc_zh_match.groups())
+            return datetime(y + 1911, m, d).date().isoformat()
+        except ValueError:
+            raise WlhError("document_date_unparseable") from None
     zh_match: re.Match[str] | None = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", text)
     if zh_match:
         try:
@@ -100,6 +109,16 @@ def parse_date(value: str, fmt: str | None = None) -> str | None:
             return datetime(y, m, d).date().isoformat()
         except ValueError:
             raise WlhError("document_date_unparseable") from None
+    roc_num_match: re.Match[str] | None = re.match(
+        r"^(\d{2,3})[-./](\d{1,2})[-./](\d{1,2})(?:\b|$)", text
+    )
+    if roc_num_match:
+        y, m, d = (int(part) for part in roc_num_match.groups())
+        if 1 <= y <= 300:
+            try:
+                return datetime(y + 1911, m, d).date().isoformat()
+            except ValueError:
+                raise WlhError("document_date_unparseable") from None
     for candidate in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y"):
         try:
             return datetime.strptime(text[:10], candidate).date().isoformat()

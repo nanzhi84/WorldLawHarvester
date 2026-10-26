@@ -19,6 +19,7 @@ import lxml.etree as etree
 from lxml import html as lxml_html  # type: ignore[import-untyped]
 
 from wlh.adapters.bridges.common import RecordAdapter
+from wlh.config import MAX_ORIGINAL_BYTES
 from wlh.core import WlhError, public_url
 from wlh.engine.scope import guard
 from wlh.extraction.markdown import normalized
@@ -28,15 +29,26 @@ lxml_html: Any
 HEADING_TAGS: set[str] = {
     "heading", "longTitle", "docTitle", "LawTitle", "LawName", "法規名稱",
     "ArticleCaption", "ChapterTitle", "titel", "enbez", "HEAD", "Heading",
-    "TitleText", "MarginalNote",
+    "TitleText", "MarginalNote", "ArticleNo", "條號", "EngArticleNo",
 }
 PARAGRAPH_TAGS: set[str] = {
     "p", "paragraph", "Sentence", "LawContent", "法規內容", "條文內容",
     "ParagraphSentence", "P", "PSPACE", "FP", "Text",
+    "ArticleContent", "ArticleConctent", "EngArticleContent",
+    "LawForeword", "前言", "EngLawForeword",
+    "LawHistories", "沿革內容", "EngLawHistories",
 }
 SKIP_TAGS: set[str] = {
     "meta", "metadata", "identification", "Identification", "preface",
     "Notes", "附註", "presentation", "style", "metadaten", "fussnoten", "toc", "TOC",
+    "LawLevel", "法規位階", "LawURL", "法規網址", "EngLawURL",
+    "LawCategory", "法規類別", "LawModifiedDate", "最新異動日期", "EngLawModifiedDate",
+    "LawEffectiveDate", "生效日期", "LawEffectiveNote", "生效內容",
+    "LawAbandonNote", "廢止註記", "EngLawAbandonNote",
+    "LawHasEngVersion", "是否英譯註記", "EngLawName", "英文法規名稱",
+    "LawAttachements", "EngLawAttachements", "附件",
+    "ArticleType", "條文型態", "EngArticleType",
+    "FileName", "檔案名稱", "FileURL", "下載網址",
 }
 ERA_OFFSETS: dict[str, int] = {
     "Meiji": 1867, "Taisho": 1911, "Showa": 1925, "Heisei": 1988, "Reiwa": 2018,
@@ -134,10 +146,22 @@ class Adapter(RecordAdapter):
     NAMESPACE: str = "legislative-xml"
 
     def records(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
+        cache_key = (
+            acquisition.get("archive_ref"),
+            acquisition.get("actual_url"),
+            int(self.config["budget"]["documents"]),
+        )
+        cached: tuple[list[dict[str, Any]], str | None] | None = getattr(
+            self, "_records_cache", {}
+        ).get(cache_key)
+        if cached is not None and cache_key[0] is not None:
+            self.truncated = cached[1] or self.truncated
+            return cached[0]
         raw_bytes = data
         zipped = data.startswith(b"PK\x03\x04")
+        total_nodes = 1
         if zipped:
-            max_bytes = self.config["budget"]["response_bytes"]
+            max_bytes = max(int(self.config["budget"]["response_bytes"]), MAX_ORIGINAL_BYTES)
             try:
                 with zipfile.ZipFile(io.BytesIO(data)) as archive:
                     member: zipfile.ZipInfo | None = next(
@@ -302,18 +326,30 @@ class Adapter(RecordAdapter):
             root, "法規名稱", "LawName"
         ):
             nodes = root.xpath('.//*[local-name()="法規" or local-name()="Law"]') or [root]
-            entries = [
-                (
-                    n,
-                    select(n, "法規名稱", "LawName"),
-                    select(n, "法規字號", "LawNo"),
-                    select(n, "法規網址", "LawURL") or select(n, "法規名稱", "LawName"),
-                    select(n, "最新異動日期", "LawModifiedDate", "LawPublishedDate"),
-                    None,
-                    None,
+            total_nodes = len(nodes)
+            limit = int(self.config["budget"]["documents"])
+            if total_nodes > limit:
+                self.truncated = "document_budget_exceeded"
+                nodes = nodes[:limit]
+            entries = []
+            for n in nodes:
+                law_url = select(n, "法規網址", "LawURL")
+                law_no = select(n, "法規字號", "LawNo")
+                if not law_no and law_url:
+                    m_pcode = re.search(r"[?&]pcode=([A-Za-z0-9]+)", law_url, re.I)
+                    if m_pcode:
+                        law_no = m_pcode.group(1)
+                entries.append(
+                    (
+                        n,
+                        select(n, "法規名稱", "LawName"),
+                        law_no,
+                        law_url or select(n, "法規名稱", "LawName"),
+                        select(n, "最新異動日期", "LawModifiedDate", "LawPublishedDate"),
+                        None,
+                        None,
+                    )
                 )
-                for n in nodes
-            ]
         else:
             raise WlhError("unsupported_legal_xml_vocabulary")
         result: list[dict[str, Any]] = []
@@ -338,11 +374,15 @@ class Adapter(RecordAdapter):
                             "kind": "zip",
                             "byte_size": len(raw_bytes),
                         }
-                        if zipped
+                        if zipped and total_nodes == 1
                         else None
                     ),
                 }
             )
+        if cache_key[0] is not None:
+            cache_dict: dict[Any, Any] = getattr(self, "_records_cache", {})
+            cache_dict[cache_key] = (result, self.truncated)
+            setattr(self, "_records_cache", cache_dict)
         return result
 
     def _filter_requests(

@@ -446,10 +446,28 @@ def render_source_verification_html(
                 f'<span class="meta-chip">适配器: <code>{std_html.escape(adapter)}</code></span>'
             )
         if entry_url:
-            esc_entry = std_html.escape(entry_url, quote=True)
-            meta_chips.append(
-                f'<a class="meta-chip meta-link" href="{esc_entry}" target="_blank" rel="noopener">官方入口 ↗</a>'
-            )
+            raw_urls = [
+                u.strip().rstrip(",")
+                for line in entry_url.replace("<br>", "\n").replace("、", "\n").replace(",", "\n").replace("，", "\n").splitlines()
+                for u in line.split()
+                if u.strip().rstrip(",").startswith(("http://", "https://"))
+            ]
+            if len(raw_urls) == 1:
+                esc_entry = std_html.escape(raw_urls[0], quote=True)
+                meta_chips.append(
+                    f'<a class="meta-chip meta-link" href="{esc_entry}" target="_blank" rel="noopener">官方入口 ↗</a>'
+                )
+            elif len(raw_urls) > 1:
+                for idx, u in enumerate(raw_urls, 1):
+                    esc_entry = std_html.escape(u, quote=True)
+                    label = f"官方入口 {idx} ↗"
+                    if "LawSearchLaw" in u:
+                        label = "法规检索 ↗"
+                    elif "LawSearchAgree" in u:
+                        label = "条约协定 ↗"
+                    meta_chips.append(
+                        f'<a class="meta-chip meta-link" href="{esc_entry}" target="_blank" rel="noopener">{label}</a>'
+                    )
         meta_bar_html = (
             f'<div class="source-meta-bar">{"".join(meta_chips)}</div>'
             if meta_chips
@@ -1032,6 +1050,7 @@ def generate_verification_samples_from_db(
             if row["状态"].strip().startswith(("[x]", "[~]"))
         ]
 
+    existing_items_map = _parse_existing_html_samples(output_path)
     objs = Objects()
     sources_payload: list[dict[str, Any]] = []
 
@@ -1268,6 +1287,10 @@ def generate_verification_samples_from_db(
                         "published_at": primary.get("published_at"),
                     }
                 )
+
+            existing_items = existing_items_map.get(source_id, [])
+            if len(items) < len(existing_items):
+                items = existing_items
 
             sources_payload.append(
                 {

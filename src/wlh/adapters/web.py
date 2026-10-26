@@ -57,6 +57,12 @@ GENERIC_ATTACHMENT_LABELS: set[str] = {
     "xem toàn văn",
     "đính kèm",
     "dinh kem",
+    "pdf",
+    "doc",
+    "docx",
+    "odt",
+    "odf",
+    "檔案下載",
 }
 
 
@@ -99,6 +105,21 @@ class Adapter(Base):
             return None
         base_parts = urlsplit(base)
         parts = urlsplit(link)
+        if parts.path.lower().endswith("/hot/addhotlaw.ashx") and parts.query:
+            m_pcode = re.search(
+                r"(?:^|&)pcode=([A-Za-z0-9]+)", parts.query, flags=re.IGNORECASE
+            )
+            if m_pcode:
+                link = urlunsplit(
+                    (
+                        parts.scheme,
+                        parts.netloc,
+                        "/LawClass/LawAll.aspx",
+                        f"pcode={m_pcode.group(1)}",
+                        "",
+                    )
+                )
+                parts = urlsplit(link)
         if (
             base_parts.query
             and not parts.query
@@ -163,10 +184,26 @@ class Adapter(Base):
                 if self.attachment.search(unquote(link)) or self.attachment.search(file_name(link)):
                     if self.details and detail:
                         if anchor.xpath(
-                            'ancestor::*[@id="vblienquan" or contains(@class, "vblienquan")]'
+                            'ancestor::*[@id="vblienquan" or contains(@class, "vblienquan") or contains(@class, "Side_Links")]'
                         ):
                             continue
                         text = re.sub(r"\s+", " ", anchor.text_content()).strip()
+                        if text.lower() in GENERIC_ATTACHMENT_LABELS:
+                            alt_nodes = anchor.xpath(
+                                "preceding-sibling::*[contains(@class, 'file_name')][1]"
+                                " | ../preceding-sibling::*[contains(@class, 'file_name')][1]"
+                            )
+                            alt_text = (
+                                re.sub(r"\s+", " ", alt_nodes[0].text_content()).strip()
+                                if alt_nodes
+                                else re.sub(
+                                    r"\s*[(（][^()（）]*(?:檔案下載|另開新視窗)[^()（）]*[)）]\s*$",
+                                    "",
+                                    str(anchor.get("title") or "").strip(),
+                                ).strip()
+                            )
+                            if alt_text and alt_text.lower() not in GENERIC_ATTACHMENT_LABELS:
+                                text = alt_text
                         attachments.append({"url": link, "text": text})
                     elif not self.details or self.is_detail(link):
                         if ctx.follow_links(task):

@@ -60,18 +60,67 @@ def _strip_md_note_to_csv(md_note: str) -> str:
     return s.strip()
 
 
+def _extract_entry_urls(raw_url: str) -> list[str]:
+    """Split multi-line or delimiter-separated entry URLs."""
+    raw = (
+        raw_url.replace("<br>", "\n")
+        .replace("、", "\n")
+        .replace(",", "\n")
+        .replace("，", "\n")
+    )
+    urls: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        for part in line.split():
+            part = part.strip().rstrip(",")
+            if part.startswith(("http://", "https://")):
+                urls.append(part)
+    return urls
+
+
+def _derive_entry_label(base_name: str, url: str, index: int) -> str:
+    """Generate meaningful entry sub-labels for multiple entry points."""
+    clean_base = re.sub(r"（(?:法规检索|条约协定|入口\s*\d+)）$", "", base_name).strip()
+    if "LawSearchLaw" in url:
+        return f"{clean_base}（法规检索）"
+    if "LawSearchAgree" in url:
+        return f"{clean_base}（条约协定）"
+    return f"{clean_base}（入口 {index}）"
+
+
 def _strip_md_name_url(md_cell: str) -> tuple[str, str]:
-    """Extract (source_name, url) from MD cell `[Name](URL)`."""
-    m = re.match(r"^\[(.*)\]\(([^)]+)\)$", md_cell.strip())
-    if m:
+    """Extract (source_name, url) from MD cell `[Name](URL)` or multiple links."""
+    matches = re.findall(r"\[(.*?)\]\((https?://[^)]+)\)", md_cell.strip())
+    if len(matches) == 1:
         name = (
-            m.group(1)
+            matches[0][0]
             .replace("&amp;", "&")
             .replace("&gt;", ">")
             .replace("&lt;", "<")
             .strip()
         )
-        return name, m.group(2).strip()
+        return name, matches[0][1].strip()
+    if len(matches) > 1:
+        urls = [m[1].strip() for m in matches]
+        base_names: list[str] = []
+        for m in matches:
+            raw_n = (
+                m[0]
+                .replace("&amp;", "&")
+                .replace("&gt;", ">")
+                .replace("&lt;", "<")
+                .strip()
+            )
+            base_n = re.sub(r"（(?:法规检索|条约协定|入口\s*\d+)）$", "", raw_n).strip()
+            base_names.append(base_n)
+        common_name = (
+            base_names[0]
+            if all(b == base_names[0] for b in base_names)
+            else "<br>".join(m[0] for m in matches)
+        )
+        return common_name, "\n".join(urls)
     name = (
         md_cell.replace("&amp;", "&")
         .replace("&gt;", ">")
@@ -121,14 +170,20 @@ def _format_name_url_md(
     name: str, url: str, existing_md_cell: str | None = None
 ) -> str:
     clean_name = name.strip()
-    clean_url = url.strip()
+    urls = _extract_entry_urls(url)
+    if not urls:
+        return clean_name
     if existing_md_cell:
         ex_name, ex_url = _strip_md_name_url(existing_md_cell)
-        if ex_name == clean_name and ex_url == clean_url:
+        if ex_name == clean_name and _extract_entry_urls(ex_url) == urls:
             return existing_md_cell
-    if clean_url:
-        return f"[{clean_name}]({clean_url})"
-    return clean_name
+    if len(urls) == 1:
+        return f"[{clean_name}]({urls[0]})"
+    links = [
+        f"[{_derive_entry_label(clean_name, u, idx)}]({u})"
+        for idx, u in enumerate(urls, 1)
+    ]
+    return "<br>".join(links)
 
 
 def _format_note_md(csv_note: str, existing_md_cell: str | None = None) -> str:
