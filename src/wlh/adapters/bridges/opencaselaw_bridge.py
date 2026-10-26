@@ -39,9 +39,12 @@ class Adapter(RecordAdapter):
             return [
                 {
                     "external_key": str(r.get("decision_id") or r.get("id") or r["docket_number"]),
-                    "title": r.get("title")
-                    or r.get("citation_string_de")
-                    or r.get("docket_number"),
+                    "title": str(
+                        r.get("title") or r.get("citation_string_de") or r.get("docket_number") or ""
+                    )
+                    .strip()
+                    .rstrip(",")
+                    or None,
                     "doc_type": "案例",
                     "doc_number": r.get("docket_number") or r.get("case_number"),
                     "issuer": r.get("court_name") or r.get("court"),

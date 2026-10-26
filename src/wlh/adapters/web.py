@@ -31,7 +31,7 @@ from wlh.adapters.web_pagination import aspnet_next_page
 from wlh.core import WlhError, canonical, digest, public_url
 from wlh.engine.scope import guard
 from wlh.engine.transport import blocked
-from wlh.extraction.markdown import html_to_markdown, text_to_markdown
+from wlh.extraction.markdown import clean_html_tree, html_to_markdown, text_to_markdown
 from wlh.extraction.office import detect_real_format
 
 etree: Any
@@ -281,8 +281,7 @@ class Adapter(Base):
                 raise WlhError("target_content_blocked")
             raise WlhError("content_region_missing")
         for node in nodes:
-            for bad in node.xpath(".//script|.//style|.//noscript|.//template"):
-                bad.drop_tree()
+            clean_html_tree(node)
         fragment = "".join(etree.tostring(n, encoding="unicode", method="html") for n in nodes)
         if blocked(fragment.encode("utf-8"), self.config):
             raise WlhError("target_content_blocked")
@@ -401,6 +400,7 @@ class Adapter(Base):
             use_link_text = (
                 self.config["documents"]["attachment_title"] == "link_text"
                 and text.lower() not in GENERIC_ATTACHMENT_LABELS
+                and not text.lower().startswith("download this version")
             )
             base_name = file_name(source)
             clean_base_name = re.sub(

@@ -36,7 +36,7 @@ PARAGRAPH_TAGS: set[str] = {
 }
 SKIP_TAGS: set[str] = {
     "meta", "metadata", "identification", "Identification", "preface",
-    "Notes", "附註", "presentation", "style", "metadaten", "fussnoten", "toc",
+    "Notes", "附註", "presentation", "style", "metadaten", "fussnoten", "toc", "TOC",
 }
 ERA_OFFSETS: dict[str, int] = {
     "Meiji": 1867, "Taisho": 1911, "Showa": 1925, "Heisei": 1988, "Reiwa": 2018,
@@ -193,15 +193,16 @@ class Adapter(RecordAdapter):
             return []
         if tag == "akomaNtoso" or "/akn/3.0" in namespace:
             is_judgment = tag == "judgment" or bool(root.xpath(".//*[local-name()='judgment']"))
-            number: str | None = select(root, "neutralCitation", "cite", "docNumber") or select(
+            cite_num: str | None = select(root, "neutralCitation", "cite", "docNumber") or select(
                 root, "FRBRnumber", attribute="value"
             )
+            number: str | None = cite_num or select(root, "docketNumber")
             title: str | None = select(root, "docTitle", "shortTitle", "longTitle") or select(
                 root, "FRBRname", attribute="value"
             )
             key: str | None = select(root, "FRBRuri", attribute="value")
             if not key or key.rstrip("/").endswith("/id"):
-                key = number or acquisition.get("actual_url")
+                key = cite_num or acquisition.get("actual_url")
             published: str | None = select(root, "FRBRdate", attribute="date")
             issuer: str | None = select(root, "FRBRauthor", attribute="href")
             if issuer and issuer.startswith("#"):
@@ -241,7 +242,8 @@ class Adapter(RecordAdapter):
                 r"/(\d{4}-\d{2}-\d{2})/", acquisition.get("actual_url") or ""
             )
             published = select(root, "AMDDATE", "DATE") or (m_date.group(1) if m_date else None)
-            entries = [(root, title, number, key, published, None, "法律法规")]
+            issuer = select(root, "AGENCY") or "Office of the Federal Register (NARA)"
+            entries = [(root, title, number, key, published, issuer, "法律法规")]
         elif tag in {"Statute", "Regulation"}:
             title = select(root, "ShortTitle", "LongTitle", "TitleText")
             number = select(root, "ConsolidatedNumber", "InstrumentNumber")
@@ -254,7 +256,17 @@ class Adapter(RecordAdapter):
                 ),
                 None,
             )
-            entries = [(root, title, number, key, published, None, "法律法规")]
+            entries = [
+                (
+                    root,
+                    title,
+                    number,
+                    key,
+                    published,
+                    "Department of Justice Canada",
+                    "法律法规",
+                )
+            ]
         elif tag in {"Law", "DataRoot"} and (select(root, "LawTitle") or root.xpath(".//LawBody")):
             laws = [root] if tag == "Law" else root.xpath(".//Law")
             entries = []

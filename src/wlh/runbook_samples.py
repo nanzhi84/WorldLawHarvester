@@ -39,11 +39,134 @@ FORBIDDEN_PLACEHOLDERS = (
 )
 
 
+_BLOCK_MARKUP_TAG_RE = re.compile(
+    r"(</?(?:p|div|tr|th|td|table|thead|tbody|tfoot|ul|ol|li|h[1-6]|section|article|header|footer|blockquote|pre|hr|br|dl|dt|dd|form|meta|link|title|head|body|html|"
+    r"Law|LawBody|MainProvision|SupplProvision|Part|Chapter|Section|Subsection|Division|Article|Paragraph|Item|Subitem\d*|Sentence|TableStruct|TableRow|"
+    r"RULE|PREAMB|AGY|ACT|SUM|EFFDATE|FURINF|SUPLINF|HD|P|Body|Title|Subtitle|Schedule|Heading|MarginalNote|Text|"
+    r"akomaNtoso|judgment|judgmentBody|decision|level|content|block|FRBRWork|FRBRExpression|FRBRManifestation)\b[^>]*>)",
+    re.I,
+)
+
+
+def _visible_chars_only(value: str) -> str:
+    return re.sub(r"\s+", "", value)
+
+
+def _strip_md_syntax(md_text: str) -> str:
+    s = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", md_text)
+    s = re.sub(r"(?m)^\s*\|(?:\s*---+\s*\|)+\s*$", "", s)
+    s = re.sub(r"(?m)^\s*#{1,6}\s+", "", s)
+    s = re.sub(r"(?m)^\s*-\s+", "", s)
+    s = s.replace("**", "").replace("|", "")
+    return _visible_chars_only(s)
+
+
+def _format_multiline_payload(raw_text: str) -> str:
+    s = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not s:
+        return ""
+    if s.startswith(("{", "[")):
+        try:
+            parsed_json: Any = json.loads(s)
+            return json.dumps(parsed_json, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+    s = _BLOCK_MARKUP_TAG_RE.sub(r"\n\1\n", s)
+    lines: list[str] = []
+    for line in s.splitlines():
+        cleaned = re.sub(r"[ \t\u00a0]+", " ", line).strip()
+        if cleaned:
+            lines.append(cleaned)
+    out = "\n".join(lines)
+    if "\n" not in out and out.startswith("<") and ">" in out:
+        first_close = out.find(">")
+        if 0 < first_close < len(out) - 1:
+            out = out[: first_close + 1] + "\n" + out[first_close + 1 :].lstrip()
+    return out
+
+
 def _truncate_text(text: str, max_chars: int = 1200) -> str:
     cleaned = text.replace("\r\n", "\n").replace("\r", "\n").strip()
     if len(cleaned) > max_chars:
         cleaned = cleaned[:max_chars].rstrip() + "\n…(truncated)"
     return cleaned
+
+
+def _truncate_payload_aligned(
+    raw_payload: str,
+    markdown: str,
+    max_md_chars: int = 1500,
+    max_raw_chars: int = 8000,
+) -> str:
+    cleaned = _format_multiline_payload(raw_payload)
+    if not cleaned:
+        return ""
+    if cleaned.endswith("…(truncated)"):
+        return cleaned
+
+    md_clean = markdown.replace("\r\n", "\n").replace("\r", "\n").strip()
+    md_is_truncated = len(md_clean) > max_md_chars
+    md_prefix = md_clean[:max_md_chars].rstrip() if md_is_truncated else md_clean
+    target_vis = len(_strip_md_syntax(md_prefix))
+    if target_vis < 20:
+        target_vis = max_md_chars
+
+    total_payload_vis = len(_visible_chars_only(re.sub(r"<[^>]+>", "", cleaned)))
+    if (
+        not md_is_truncated
+        and total_payload_vis <= max(target_vis + 100, max_md_chars)
+        and len(cleaned) <= max_raw_chars
+    ):
+        return cleaned
+
+    vis_count = 0
+    raw_count = 0
+    out_lines: list[str] = []
+    truncated = False
+    for line in cleaned.splitlines():
+        vis_line = _visible_chars_only(re.sub(r"<[^>]+>", "", line))
+        if (
+            vis_count + len(vis_line) > target_vis
+            or raw_count + len(line) > max_raw_chars
+        ):
+            remain_vis = target_vis - vis_count
+            if remain_vis > 0 and raw_count < max_raw_chars:
+                pos = 0
+                v = 0
+                in_tag = False
+                while pos < len(line) and v < remain_vis:
+                    ch = line[pos]
+                    if ch == "<":
+                        in_tag = True
+                    elif ch == ">":
+                        in_tag = False
+                    elif not in_tag and not ch.isspace():
+                        v += 1
+                    pos += 1
+                while pos < len(line) and in_tag:
+                    if line[pos] == ">":
+                        in_tag = False
+                    pos += 1
+                partial = line[:pos].rstrip()
+                if partial:
+                    out_lines.append(partial)
+            truncated = True
+            break
+        out_lines.append(line)
+        vis_count += len(vis_line)
+        raw_count += len(line) + 1
+    else:
+        if md_is_truncated:
+            truncated = True
+
+    res = "\n".join(out_lines).rstrip()
+    if "\n" not in res and res.startswith("<") and ">" in res:
+        first_close = res.find(">")
+        if 0 < first_close < len(res) - 1:
+            res = res[: first_close + 1] + "\n" + res[first_close + 1 :].lstrip()
+    if truncated:
+        res += "\n…(truncated)"
+    return res
 
 
 def _normalize_item(item: Mapping[str, Any]) -> dict[str, Any]:
@@ -62,13 +185,49 @@ def _normalize_item(item: Mapping[str, Any]) -> dict[str, Any]:
     orig_mime_raw = item.get("original_media_type")
     original_media_type = str(orig_mime_raw).strip() if orig_mime_raw else None
 
+    raw_atts = item.get("attachments")
+    attachments: list[dict[str, str | None]] = []
+    seen_att_urls: set[str] = set()
+    if isinstance(raw_atts, Sequence) and not isinstance(raw_atts, (str, bytes)):
+        for entry in cast(Sequence[Any], raw_atts):
+            if isinstance(entry, Mapping):
+                entry_map = cast(Mapping[str, Any], entry)
+                u_raw = entry_map.get("url") or entry_map.get("attachment_url")
+                u_str = str(u_raw).strip() if u_raw else ""
+                if not u_str or u_str in seen_att_urls:
+                    continue
+                seen_att_urls.add(u_str)
+                n_raw = entry_map.get("name") or entry_map.get("original_file")
+                m_raw = entry_map.get("media_type") or entry_map.get("original_media_type")
+                attachments.append(
+                    {
+                        "url": u_str,
+                        "name": str(n_raw).strip() if n_raw else None,
+                        "media_type": str(m_raw).strip() if m_raw else None,
+                    }
+                )
+    if attachment_url and attachment_url not in seen_att_urls:
+        attachments.insert(
+            0,
+            {
+                "url": attachment_url,
+                "name": original_file,
+                "media_type": original_media_type,
+            },
+        )
+    elif not attachment_url and attachments:
+        attachment_url = attachments[0]["url"]
+        original_file = original_file or attachments[0]["name"]
+        original_media_type = original_media_type or attachments[0]["media_type"]
+
     return {
         "detail_url": str(item.get("detail_url") or "").strip(),
         "attachment_url": attachment_url,
         "original_file": original_file,
         "original_media_type": original_media_type,
-        "raw_payload": str(item.get("raw_payload") or "").strip()[:1500],
-        "markdown": str(item.get("markdown") or "").strip()[:2000],
+        "attachments": attachments,
+        "raw_payload": str(item.get("raw_payload") or "").strip()[:12000],
+        "markdown": str(item.get("markdown") or "").strip()[:4000],
         "title": item.get("title"),
         "doc_number": item.get("doc_number"),
         "issuer": item.get("issuer"),
@@ -192,13 +351,34 @@ def render_source_verification_html(
             left_parts.append("</div>")
 
             has_att_link = False
-            if attachment_url:
+            att_entries_raw = item.get("attachments")
+            att_entries: list[dict[str, str | None]] = (
+                cast(list[dict[str, str | None]], att_entries_raw)
+                if isinstance(att_entries_raw, list) and att_entries_raw
+                else (
+                    [
+                        {
+                            "url": attachment_url,
+                            "name": original_file or None,
+                            "media_type": original_media_type or None,
+                        }
+                    ]
+                    if attachment_url
+                    else []
+                )
+            )
+            for att_entry in att_entries:
+                att_u = (att_entry.get("url") or "").strip()
+                if not att_u:
+                    continue
                 has_att_link = True
-                esc_att = std_html.escape(attachment_url, quote=True)
-                label = std_html.escape(original_file or "下载附件原件")
+                att_n = (att_entry.get("name") or "").strip()
+                att_m = (att_entry.get("media_type") or "").strip()
+                esc_att = std_html.escape(att_u, quote=True)
+                label = std_html.escape(att_n or original_file or "下载附件原件")
                 media_info = (
-                    f' <span class="media-badge">{std_html.escape(original_media_type)}</span>'
-                    if original_media_type
+                    f' <span class="media-badge">{std_html.escape(att_m)}</span>'
+                    if att_m
                     else ""
                 )
                 left_parts.append(
@@ -207,15 +387,24 @@ def render_source_verification_html(
                     f"</div>"
                 )
 
-            payload_str = _truncate_text(raw_payload, 1200)
+            payload_str = _truncate_payload_aligned(raw_payload, markdown, 1500)
             if not has_att_link and len(payload_str) < 20:
                 payload_str = _truncate_text(
                     f"<!-- Source: {detail_url} | Title: {title} -->\n{markdown}",
-                    1200,
+                    1500,
                 )
 
             if len(payload_str) >= 20:
-                media_label = std_html.escape(original_media_type or "text/html")
+                p_lstrip = payload_str.lstrip().lower()
+                if p_lstrip.startswith("<?xml"):
+                    detected_payload_mime = "application/xml"
+                elif p_lstrip.startswith(("<", "<!doctype")):
+                    detected_payload_mime = "text/html"
+                elif p_lstrip.startswith(("{", "[")):
+                    detected_payload_mime = "application/json"
+                else:
+                    detected_payload_mime = original_media_type or "text/html"
+                media_label = std_html.escape(detected_payload_mime)
                 left_parts.append(
                     f'<div class="payload-label">📄 实际请求 Payload 原文 (<code>{media_label}</code>)</div>'
                     f'<pre class="payload-box"><code>{std_html.escape(payload_str)}</code></pre>'
@@ -726,7 +915,10 @@ def sync_csv_to_html(
 
 
 def _extract_payload_snippet(
-    raw_bytes: bytes, mime_type: str | None, content_xpath: str | None
+    raw_bytes: bytes,
+    mime_type: str | None,
+    content_xpath: str | None,
+    charset: str | None = None,
 ) -> str:
     if raw_bytes.startswith(b"%PDF"):
         return ""
@@ -738,7 +930,7 @@ def _extract_payload_snippet(
                         (".xml", ".html", ".htm", ".json", ".txt")
                     ) and not name.startswith("word/"):
                         inner = zf.read(name).decode("utf-8", errors="replace")
-                        snippet = re.sub(r"\s+", " ", inner).strip()[:1200]
+                        snippet = _format_multiline_payload(inner)[:12000]
                         if len(snippet) >= 20:
                             return snippet
         except Exception:
@@ -747,43 +939,75 @@ def _extract_payload_snippet(
     if raw_bytes.startswith(b"\xd0\xcf\x11\xe0"):
         return ""
 
-    text = raw_bytes.decode("utf-8", errors="replace")
+    from wlh.adapters.web_fields import decode
+
+    text, enc = decode(raw_bytes, charset)
+    if enc == "utf-8-replace":
+        for fallback_enc in ("cp932", "gb18030"):
+            try:
+                text = raw_bytes.decode(fallback_enc)
+                break
+            except UnicodeDecodeError:
+                continue
     lower_mime = (mime_type or "").lower()
     if "html" in lower_mime or text.lstrip().lower().startswith(("<!doctype html", "<html")):
         try:
             import lxml.etree as etree
             from lxml import html as lxml_html  # type: ignore[import-untyped]
 
+            from wlh.extraction.markdown import clean_html_tree
+
             etree_mod: Any = etree
             lxml_html_mod: Any = lxml_html
             tree = lxml_html_mod.document_fromstring(text)
-            for bad in FORBIDDEN_PLACEHOLDERS:
-                for bad_el in tree.xpath(f"//*[contains(text(), '{bad}')]"):
-                    parent = bad_el.getparent()
+            for el in list(tree.xpath("//*")):
+                t_val = (el.text or "") + " " + (el.tail or "")
+                if any(bad in t_val for bad in FORBIDDEN_PLACEHOLDERS):
+                    parent = el.getparent()
                     if parent is not None:
-                        parent.remove(bad_el)
+                        parent.remove(el)
             if content_xpath:
                 nodes: Any = tree.xpath(content_xpath)
                 if isinstance(nodes, list):
-                    nodes_list = cast(list[Any], nodes)
+                    nodes_list = [
+                        n for n in cast(list[Any], nodes) if isinstance(n, etree_mod._Element)
+                    ]
+                    node_set = set(nodes_list)
+                    nodes_list = [
+                        n
+                        for n in nodes_list
+                        if not any(anc in node_set for anc in n.iterancestors())
+                    ]
                     if nodes_list:
-                        first: Any = nodes_list[0]
-                        if isinstance(first, etree_mod._Element):
-                            frag = str(
-                                etree_mod.tostring(first, encoding="unicode", method="html")
-                            )
-                            cleaned_frag = re.sub(r"\s+", " ", frag).strip()[:1200]
-                            if len(cleaned_frag) >= 20 and not any(
-                                b in cleaned_frag for b in FORBIDDEN_PLACEHOLDERS
-                            ):
-                                return cleaned_frag
+                        for n in nodes_list:
+                            clean_html_tree(n)
+                        frag = "\n".join(
+                            str(etree_mod.tostring(n, encoding="unicode", method="html"))
+                            for n in nodes_list
+                        )
+                        cleaned_frag = _format_multiline_payload(frag)[:12000]
+                        if len(cleaned_frag) >= 20 and not any(
+                            b in cleaned_frag for b in FORBIDDEN_PLACEHOLDERS
+                        ):
+                            return cleaned_frag
+            clean_html_tree(tree)
+            for head_el in list(tree.xpath("//head")):
+                parent = head_el.getparent()
+                if parent is not None and len(tree.xpath("//body//*")) > 0:
+                    parent.remove(head_el)
             cleaned_tree = str(etree_mod.tostring(tree, encoding="unicode", method="html"))
-            cleaned_all = re.sub(r"\s+", " ", cleaned_tree).strip()[:1200]
+            cleaned_all = _format_multiline_payload(cleaned_tree)[:12000]
             if not any(b in cleaned_all for b in FORBIDDEN_PLACEHOLDERS):
                 return cleaned_all
         except Exception:
             pass
-    out_txt = re.sub(r"\s+", " ", text).strip()[:1200]
+    text_no_toc = re.sub(
+        r"<(?:TOC|ImageData)\b[^>]*>.*?</(?:TOC|ImageData)>",
+        "",
+        text,
+        flags=re.S,
+    )
+    out_txt = _format_multiline_payload(text_no_toc)[:12000]
     for bad in FORBIDDEN_PLACEHOLDERS:
         out_txt = out_txt.replace(bad, "")
     return out_txt.strip()
@@ -872,32 +1096,48 @@ def generate_verification_samples_from_db(
                 if any(bad in md_text for bad in FORBIDDEN_PLACEHOLDERS):
                     continue
 
-                att_row = next(
-                    (r for r in res_rows if r.get("original_hash") is not None),
-                    None,
-                )
-                attachment_url: str | None = None
-                original_file: str | None = None
-                original_media_type: str | None = None
-                if att_row is not None:
-                    loc = att_row.get("locator")
+                att_rows = [
+                    r for r in res_rows if r.get("original_hash") is not None
+                ]
+                attachments_list: list[dict[str, str | None]] = []
+                seen_att_urls: set[str] = set()
+                for ar in att_rows:
+                    ar_url: str | None = None
+                    loc = ar.get("locator")
                     if isinstance(loc, Mapping):
                         loc_map = cast(Mapping[str, Any], loc)
                         loc_url = loc_map.get("url")
                         if isinstance(loc_url, str) and loc_url.strip():
-                            attachment_url = loc_url.strip()
-                    if not attachment_url:
-                        detail_candidate = str(att_row.get("detail_url") or "").strip()
+                            ar_url = loc_url.strip()
+                    if not ar_url:
+                        detail_candidate = str(ar.get("detail_url") or "").strip()
                         if re.search(
                             r"(?:\.(?:pdf|docx?|xlsx?|zip)(?:\?|$)|/UCMServer/TAND\d+)",
                             detail_candidate,
                             flags=re.I,
                         ):
-                            attachment_url = detail_candidate
-                    original_file = str(att_row.get("original_file") or "").strip() or None
-                    original_media_type = (
-                        str(att_row.get("original_media_type") or "").strip() or None
-                    )
+                            ar_url = detail_candidate
+                    ar_file = str(ar.get("original_file") or "").strip() or None
+                    ar_mime = str(ar.get("original_media_type") or "").strip() or None
+                    if ar_url and ar_url not in seen_att_urls:
+                        seen_att_urls.add(ar_url)
+                        attachments_list.append(
+                            {
+                                "url": ar_url,
+                                "name": ar_file,
+                                "media_type": ar_mime,
+                            }
+                        )
+
+                attachment_url: str | None = (
+                    attachments_list[0]["url"] if attachments_list else None
+                )
+                original_file: str | None = (
+                    attachments_list[0]["name"] if attachments_list else None
+                )
+                original_media_type: str | None = (
+                    attachments_list[0]["media_type"] if attachments_list else None
+                )
 
                 raw_payload = ""
                 inputs_ref = primary.get("inputs_ref")
@@ -920,6 +1160,9 @@ def generate_verification_samples_from_db(
                             inp_map = cast(dict[str, Any], inp_obj)
                             acq_id = inp_map.get("acquisition_id")
                             arch_ref = inp_map.get("archive_ref")
+                            inp_charset = (
+                                str(inp_map.get("charset") or "").strip() or None
+                            )
                             acq_row = (
                                 conn.execute(
                                     """
@@ -954,20 +1197,35 @@ def generate_verification_samples_from_db(
                             if not original_media_type and mime:
                                 original_media_type = mime
                             if (
-                                not attachment_url
-                                and acq_url
+                                acq_url
+                                and acq_url not in seen_att_urls
                                 and re.search(
                                     r"(?:\.(?:pdf|docx?|xlsx?|zip)(?:\?|$)|/UCMServer/TAND\d+)",
                                     acq_url,
                                     flags=re.I,
                                 )
                             ):
-                                attachment_url = acq_url
+                                seen_att_urls.add(acq_url)
+                                attachments_list.append(
+                                    {
+                                        "url": acq_url,
+                                        "name": Path(acq_url.split("?")[0]).name or None,
+                                        "media_type": mime,
+                                    }
+                                )
+                                if not attachment_url:
+                                    attachment_url = acq_url
 
-                            if target_ref and len(raw_payload) < 20:
+                            if target_ref and (
+                                len(raw_payload) < 20
+                                or (
+                                    raw_payload.lstrip().startswith("{")
+                                    and not (mime or "").lower().endswith("json")
+                                )
+                            ):
                                 raw_bytes = objs.get(target_ref)
                                 candidate = _extract_payload_snippet(
-                                    raw_bytes, mime, content_xpath
+                                    raw_bytes, mime, content_xpath, inp_charset
                                 )
                                 if len(candidate) >= 20:
                                     raw_payload = candidate
@@ -999,8 +1257,11 @@ def generate_verification_samples_from_db(
                         "attachment_url": att_url_val,
                         "original_file": original_file,
                         "original_media_type": original_media_type,
-                        "raw_payload": raw_payload[:1500],
-                        "markdown": md_text[:2000],
+                        "attachments": attachments_list,
+                        "raw_payload": _truncate_payload_aligned(
+                            raw_payload, md_text, 1500
+                        ),
+                        "markdown": md_text[:4000],
                         "title": primary.get("title"),
                         "doc_number": primary.get("doc_number"),
                         "issuer": primary.get("issuer"),

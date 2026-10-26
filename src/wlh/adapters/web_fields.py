@@ -113,6 +113,46 @@ def parse_date(value: str, fmt: str | None = None) -> str | None:
     raise WlhError("document_date_unparseable")
 
 
+def _split_top_level_union(xpath_expr: str) -> list[str]:
+    """Split top-level `|` union branches (outside brackets/parens/quotes) to preserve left-to-right priority."""
+    branches: list[str] = []
+    cur: list[str] = []
+    paren_depth = 0
+    bracket_depth = 0
+    quote_char: str | None = None
+    for ch in xpath_expr:
+        if quote_char is not None:
+            cur.append(ch)
+            if ch == quote_char:
+                quote_char = None
+        elif ch in ("'", '"'):
+            quote_char = ch
+            cur.append(ch)
+        elif ch == "(":
+            paren_depth += 1
+            cur.append(ch)
+        elif ch == ")":
+            paren_depth = max(0, paren_depth - 1)
+            cur.append(ch)
+        elif ch == "[":
+            bracket_depth += 1
+            cur.append(ch)
+        elif ch == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+            cur.append(ch)
+        elif ch == "|" and paren_depth == 0 and bracket_depth == 0:
+            part = "".join(cur).strip()
+            if part:
+                branches.append(part)
+            cur = []
+        else:
+            cur.append(ch)
+    tail = "".join(cur).strip()
+    if tail:
+        branches.append(tail)
+    return branches if len(branches) > 1 else [xpath_expr]
+
+
 def field_value(
     tree: Any, text: str | None, rule: Mapping[str, Any], *, is_date: bool = False
 ) -> Any:
@@ -120,6 +160,13 @@ def field_value(
         return rule["value"]
     if rule.get("xpath"):
         if tree is None:
+            return None
+        branches = _split_top_level_union(str(rule["xpath"]))
+        if len(branches) > 1:
+            for branch in branches:
+                res = field_value(tree, text, {**rule, "xpath": branch}, is_date=is_date)
+                if res is not None:
+                    return res
             return None
         found: Any = tree.xpath(rule["xpath"])
         if isinstance(found, list):

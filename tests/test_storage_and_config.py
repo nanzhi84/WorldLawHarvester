@@ -656,6 +656,18 @@ class TestRunbookVerificationSamples:
                             "attachment_url": "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd.signed.pdf",
                             "original_file": "Nghị định 105_2026_NĐ-CP.pdf",
                             "original_media_type": "application/pdf",
+                            "attachments": [
+                                {
+                                    "url": "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd.signed.pdf",
+                                    "name": "Nghị định 105_2026_NĐ-CP.pdf",
+                                    "media_type": "application/pdf",
+                                },
+                                {
+                                    "url": "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd-phu-luc.docx",
+                                    "name": "Phụ lục Nghị định 105.docx",
+                                    "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                },
+                            ],
                             "raw_payload": "<html><body><div>Chi tiết văn bản 105/2026/NĐ-CP</div></body></html>",
                             "markdown": "# Nghị định 105/2026/NĐ-CP\n\nĐiều 1. Phạm vi điều chỉnh.",
                             "title": "Nghị định 105/2026/NĐ-CP",
@@ -711,6 +723,8 @@ class TestRunbookVerificationSamples:
         assert "LuatVietnam 法规库（已更新名称）" in synced_text
         assert "1.4.1 越南核心法规" in synced_text
         assert "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd.signed.pdf" in synced_text
+        assert "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd-phu-luc.docx" in synced_text
+        assert "Phụ lục Nghị định 105.docx" in synced_text
         assert "Điều 1. Phạm vi điều chỉnh." in synced_text
         assert "Toàn văn Thông tư 12/2026/TT-BTC" in synced_text
         assert "Điều 1. Quy định chung về kế toán." in synced_text
@@ -920,4 +934,264 @@ class TestRunbookVerificationSamples:
             assert bad_str not in content, (
                 f"Reward-hacked placeholder {bad_str!r} must not appear in source-verification-samples.html"
             )
+
+        def _right_cell_markdown(row_el: Any) -> str:
+            tds_local: list[Any] = row_el.xpath("./td")
+            right_td_local = tds_local[1]
+            codes_local: list[Any] = right_td_local.xpath(
+                ".//pre/code | .//pre | .//*[contains(@class, 'markdown')]"
+            )
+            return (
+                str(codes_local[0].text_content() or "").strip()
+                if codes_local
+                else str(right_td_local.text_content() or "").strip()
+            )
+
+        for src_id in ("dd-040", "dd-041"):
+            for r_idx, r_el in enumerate(source_rows_map.get(src_id, []), start=1):
+                md_cell = _right_cell_markdown(r_el)
+                assert "【字体：大 中 小】" not in md_cell, (
+                    f"{src_id} row #{r_idx} right-column Markdown contains font widget noise"
+                )
+                assert "### 相关新闻" not in md_cell, (
+                    f"{src_id} row #{r_idx} right-column Markdown contains hidden related news heading"
+                )
+
+        for r_idx, r_el in enumerate(source_rows_map.get("dd-102", []), start=1):
+            md_cell = _right_cell_markdown(r_el)
+            assert "【打印】" not in md_cell and "【返回】" not in md_cell, (
+                f"dd-102 row #{r_idx} right-column Markdown contains print/back button noise"
+            )
+
+        dd375_rows = source_rows_map.get("dd-375", [])
+        assert len(dd375_rows) == 1
+        dd375_left_td = dd375_rows[0].xpath("./td")[0]
+        dd375_hrefs = " ".join(str(h) for h in dd375_left_td.xpath(".//a/@href"))
+        assert "P020200612583036030033.DOCX" in dd375_hrefs, (
+            "dd-375 sample row #1 left-column <td> must include attachment link P020200612583036030033.DOCX"
+        )
+        assert "P020210608556900301740.docx" in dd375_hrefs, (
+            "dd-375 sample row #1 left-column <td> must include attachment link P020210608556900301740.docx"
+        )
+
+        for r_idx, r_el in enumerate(source_rows_map.get("dd-527", []), start=1):
+            md_cell = _right_cell_markdown(r_el)
+            assert "Share:" not in md_cell, (
+                f"dd-527 row #{r_idx} right-column Markdown contains Share bar noise"
+            )
+            assert "- [](https://www.iras.gov.sg/" not in md_cell, (
+                f"dd-527 row #{r_idx} right-column Markdown contains empty social share link"
+            )
+
+        for r_idx, r_el in enumerate(source_rows_map.get("dd-563", []), start=1):
+            md_cell = _right_cell_markdown(r_el)
+            for toc_noise in (
+                "- [HIGHLIGHTS OF THIS ISSUE](",
+                "- [INCOME TAX](",
+                "[](https://www.irs.gov/irb/",
+            ):
+                assert toc_noise not in md_cell, (
+                    f"dd-563 row #{r_idx} right-column Markdown contains TOC/anchor noise {toc_noise!r}"
+                )
+
+        global_forbidden_md_tokens = (
+            "[](https://",
+            "[](http://",
+            "【字体：大 中 小】",
+            "字体 [大 中 小]",
+            "[【打印】]",
+            "[【返回】]",
+            "Đang theo dõi",
+        )
+        for src_id, s_rows in source_rows_map.items():
+            for r_idx, r_el in enumerate(s_rows, start=1):
+                md_cell = _right_cell_markdown(r_el)
+                for bad_tok in global_forbidden_md_tokens:
+                    assert bad_tok not in md_cell, (
+                        f"{src_id} row #{r_idx} right-column Markdown contains forbidden UI noise {bad_tok!r}"
+                    )
+
+    def test_payload_preserves_multiline_structure_and_aligns_truncation_with_markdown(
+        self,
+    ) -> None:
+        """Payload preview preserves multi-line structure and aligns truncation with right-column Markdown both in unit rendering and in the published HTML runbook."""
+        import importlib
+        import re
+        from typing import Any
+
+        from wlh.runbook_samples import render_source_verification_html
+
+        lxml_html: Any = importlib.import_module("lxml.html")
+
+        paragraphs_a = [
+            f"第{i}条 纳税人应当依照税收法律、行政法规的规定履行纳税义务，按期如实办理纳税申报并缴纳税款（段落编号 A-{i:02d}）。"
+            for i in range(1, 12)
+        ]
+        markdown_a = "\n\n".join(paragraphs_a)
+        assert 550 <= len(markdown_a) <= 700
+        raw_payload_a = (
+            '<div class="law-body" data-jurisdiction="cn">\n'
+            + "\n".join(
+                f'  <p class="legal-paragraph" style="margin-bottom: 1.5em; text-indent: 2em; line-height: 1.8;">{p}</p>'
+                for p in paragraphs_a
+            )
+            + "\n</div>"
+        )
+        assert 1600 <= len(raw_payload_a) <= 2000
+
+        paragraphs_b = [
+            f"第{i}条 税务机关应当加强对纳税人发票使用情况的监督检查，依法查处虚开发票等涉税违法行为（段落编号 B-{i:02d}）。"
+            for i in range(1, 45)
+        ]
+        markdown_b = "\n\n".join(paragraphs_b)
+        assert 2300 <= len(markdown_b) <= 2700
+        raw_payload_b = (
+            '<div class="law-body" data-jurisdiction="cn">\n'
+            + "\n".join(
+                f'  <p style="margin-bottom: 1.5em; text-indent: 2em;">{p}</p>'
+                for p in paragraphs_b
+            )
+            + "\n</div>"
+        )
+        assert 4500 <= len(raw_payload_b) <= 5500
+
+        rendered_unit = render_source_verification_html(
+            [
+                {
+                    "source_id": "dd-501",
+                    "source_name": "国家税务总局法规库",
+                    "status": "[x] 已实网跑通",
+                    "continent": "1. 亚洲法域 (Asia)",
+                    "jurisdiction": "1.1 中国大陆 (China Mainland)",
+                    "subcategory": "—",
+                    "items": [
+                        {
+                            "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/c100012/c5200001/content.html",
+                            "attachment_url": None,
+                            "original_file": None,
+                            "original_media_type": "text/html",
+                            "raw_payload": raw_payload_a,
+                            "markdown": markdown_a,
+                            "title": "短篇完整法规样本",
+                            "doc_number": "税总发〔2026〕1号",
+                            "issuer": "国家税务总局",
+                            "published_at": "2026-04-01",
+                        },
+                        {
+                            "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/c100012/c5200002/content.html",
+                            "attachment_url": None,
+                            "original_file": None,
+                            "original_media_type": "text/html",
+                            "raw_payload": raw_payload_b,
+                            "markdown": markdown_b,
+                            "title": "长篇截断法规样本",
+                            "doc_number": "税总发〔2026〕2号",
+                            "issuer": "国家税务总局",
+                            "published_at": "2026-04-02",
+                        },
+                    ],
+                }
+            ],
+            max_items_per_source=10,
+        )
+
+        unit_tree: Any = lxml_html.fromstring(rendered_unit)
+        unit_rows: list[Any] = unit_tree.xpath('//section[@id="dd-501"]//tr[count(td)=2]')
+        assert len(unit_rows) == 2
+
+        payload_text_a = str(
+            unit_rows[0].xpath('.//pre[contains(@class, "payload-box")]')[0].text_content() or ""
+        ).strip()
+        md_text_a = str(
+            unit_rows[0].xpath('.//pre[contains(@class, "markdown-box")]')[0].text_content() or ""
+        ).strip()
+        assert "\n" in payload_text_a, "Case A payload-box must preserve multiple lines"
+        assert "…(truncated)" not in payload_text_a, (
+            "Case A payload-box must not be prematurely truncated when Markdown is complete"
+        )
+        assert "…(truncated)" not in md_text_a, (
+            "Case A markdown-box must not be truncated when <= 1500 chars"
+        )
+        assert paragraphs_a[-1] in payload_text_a, (
+            "Case A final paragraph of Markdown must also be present at the end of payload-box"
+        )
+
+        payload_text_b = str(
+            unit_rows[1].xpath('.//pre[contains(@class, "payload-box")]')[0].text_content() or ""
+        ).strip()
+        md_text_b = str(
+            unit_rows[1].xpath('.//pre[contains(@class, "markdown-box")]')[0].text_content() or ""
+        ).strip()
+        assert payload_text_b.count("\n") >= 5, (
+            "Case B payload-box must preserve multi-line formatting (>= 5 newlines)"
+        )
+        assert payload_text_b.endswith("…(truncated)"), (
+            "Case B payload-box must end with '…(truncated)'"
+        )
+        assert md_text_b.endswith("…(truncated)"), (
+            "Case B markdown-box must end with '…(truncated)'"
+        )
+        payload_body_b = payload_text_b.removesuffix("…(truncated)").strip()
+        md_body_b = md_text_b.removesuffix("…(truncated)").strip()
+        payload_visible_b = re.sub(r"\s+", "", re.sub(r"<[^>]*>?", "", payload_body_b))
+        md_visible_b = re.sub(r"\s+", "", md_body_b)
+        assert len(md_visible_b) > 0
+        diff_ratio = abs(len(payload_visible_b) - len(md_visible_b)) / len(md_visible_b)
+        assert diff_ratio <= 0.15, (
+            f"Case B visible text length of payload-box ({len(payload_visible_b)}) must match "
+            f"markdown-box ({len(md_visible_b)}) within 15% (got {diff_ratio:.1%})"
+        )
+
+        repo_root = Path(__file__).resolve().parents[1]
+        samples_html = repo_root / "docs" / "runbooks" / "source-verification-samples.html"
+        published_tree: Any = lxml_html.fromstring(samples_html.read_text(encoding="utf-8"))
+
+        all_payload_codes: list[Any] = published_tree.xpath(
+            '//pre[contains(@class, "payload-box")]/code'
+        )
+        assert len(all_payload_codes) > 0
+        for idx, code_el in enumerate(all_payload_codes, start=1):
+            code_text = str(code_el.text_content() or "").strip()
+            assert "\n" in code_text, (
+                f"Published payload-box <code> #{idx} is compressed into a single line: {code_text[:80]!r}"
+            )
+
+        fulltext_html_sources = (
+            "dd-501",
+            "dd-040",
+            "dd-041",
+            "dd-102",
+            "dd-375",
+            "dd-506",
+            "dd-517",
+            "dd-520",
+            "dd-527",
+            "dd-563",
+        )
+        for src_id in fulltext_html_sources:
+            sec_nodes: list[Any] = published_tree.xpath(f'//*[@id="{src_id}"]')
+            assert len(sec_nodes) >= 1, f"Missing section #{src_id} in published HTML"
+            rows: list[Any] = sec_nodes[0].xpath(".//tr[count(td)=2]")
+            if not rows:
+                rows = sec_nodes[0].xpath("(./following::table[1])//tr[count(td)=2]")
+            assert len(rows) >= 1, f"No sample rows found for {src_id}"
+            for r_idx, row in enumerate(rows, start=1):
+                p_nodes: list[Any] = row.xpath('.//pre[contains(@class, "payload-box")]')
+                m_nodes: list[Any] = row.xpath('.//pre[contains(@class, "markdown-box")]')
+                assert len(p_nodes) >= 1 and len(m_nodes) >= 1, (
+                    f"{src_id} row #{r_idx} must contain both payload-box and markdown-box"
+                )
+                p_text = str(p_nodes[0].text_content() or "").strip()
+                m_text = str(m_nodes[0].text_content() or "").strip()
+                p_trunc = p_text.endswith("…(truncated)")
+                m_trunc = m_text.endswith("…(truncated)")
+                assert ("…(truncated)" in p_text) == ("…(truncated)" in m_text) and (
+                    p_trunc == m_trunc
+                ), (
+                    f"{src_id} row #{r_idx} truncation mismatch: "
+                    f"payload_truncated={p_trunc} (len={len(p_text)}), "
+                    f"markdown_truncated={m_trunc} (len={len(m_text)})"
+                )
+
+
 
