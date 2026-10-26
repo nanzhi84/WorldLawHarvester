@@ -263,6 +263,157 @@ metadata:
         finally:
             _BridgeFixtureHandler.active_source_id = ""
 
+    def test_rss_uslm_plaw_feed_discovers_uslm_detail_links_and_parses_public_law_metadata_and_sections(
+        self,
+        initialized_db: dict[str, str],
+        tmp_path: Path,
+    ) -> None:
+        """An RSS 2.0 feed with HTML-escaped `<description>` links discovers matching USLM `<pLaw>` XML detail URLs without emitting the RSS index itself, and parses `<pLaw>` metadata (`dc:title`, `citableAs`, `approvedDate`) and section body."""
+        port_holder: list[int] = []
+        requested_paths: list[str] = []
+
+        class _PlawRssHandler(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def do_GET(self) -> None:
+                requested_paths.append(self.path)
+                port = port_holder[0]
+                if self.path == "/robots.txt":
+                    body = b"User-agent: *\nAllow: /\n"
+                    ctype = "text/plain"
+                elif self.path == "/rss/plaw.xml":
+                    body = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>GovInfo Public Laws</title>
+    <item>
+      <title>Public Law 118-7</title>
+      <link>http://127.0.0.1:{port}/app/details/PLAW-118publ7</link>
+      <description>&lt;a href="http://127.0.0.1:{port}/content/pkg/PLAW-118publ7/pdf/PLAW-118publ7.pdf"&gt;PDF&lt;/a&gt; &lt;a href="http://127.0.0.1:{port}/content/pkg/PLAW-118publ7/uslm/PLAW-118publ7.xml"&gt;XML&lt;/a&gt;</description>
+    </item>
+  </channel>
+</rss>""".encode("utf-8")
+                    ctype = "application/rss+xml; charset=utf-8"
+                elif self.path == "/content/pkg/PLAW-118publ7/uslm/PLAW-118publ7.xml":
+                    body = """<?xml version="1.0" encoding="UTF-8"?>
+<pLaw xmlns="http://schemas.gpo.gov/xml/uslm" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <meta>
+    <dc:title>Public Law 118–7: An Act to modify the authority of the Secretary of Veterans Affairs</dc:title>
+    <docNumber>7</docNumber>
+    <citableAs>Public Law 118–7</citableAs>
+    <approvedDate>2023-06-30</approvedDate>
+  </meta>
+  <main>
+    <longTitle>
+      <docTitle>An Act</docTitle>
+      <officialTitle>To modify the authority of the Secretary of Veterans Affairs to furnish care and services.</officialTitle>
+    </longTitle>
+    <section identifier="/us/pl/118/7/s1">
+      <num value="1">SECTION 1.</num>
+      <heading>SHORT TITLE.</heading>
+      <content>This Act may be cited as the Veterans Care Act of 2023.</content>
+    </section>
+  </main>
+</pLaw>""".encode("utf-8")
+                    ctype = "application/xml; charset=utf-8"
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), _PlawRssHandler)
+        port = srv.server_address[1]
+        port_holder.append(port)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+
+        try:
+            source_yaml = tmp_path / "dd-557.yaml"
+            source_yaml.write_text(
+                f"""
+id: dd-557
+adapter: structured_xml
+archive_approved: true
+scope: "USLM Public Law RSS discovery and XML parsing contract test"
+entry_urls:
+  - "http://127.0.0.1:{port}/rss/plaw.xml"
+allowed_hosts:
+  - "127.0.0.1"
+allowed_path_prefixes:
+  - "/rss/"
+  - "/content/pkg/"
+delay: 0.0
+fetch:
+  mode: http
+  max_depth: 1
+documents:
+  detail_url_patterns:
+    - "^http://127\\\\.0\\\\.0\\\\.1:{port}/content/pkg/PLAW-[^/]+/uslm/PLAW-[^/]+\\\\.xml$"
+metadata:
+  source_name: "GovInfo Public Laws"
+  document_type: "法律法规"
+  language: "en"
+  jurisdiction: "US"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            from wlh.engine.objects import Objects
+            from wlh.engine.runs import execute_run, prepare_run
+            from wlh.projections.canonical import project_canonical
+
+            c_run = prepare_run(source_yaml, "collect")
+            c_res = execute_run(c_run)
+            assert c_res["status"] == "complete", f"dd-557 collect failed: {c_res}"
+            assert "/content/pkg/PLAW-118publ7/uslm/PLAW-118publ7.xml" in requested_paths
+            assert "/content/pkg/PLAW-118publ7/pdf/PLAW-118publ7.pdf" not in requested_paths
+
+            with psycopg.connect(initialized_db["WLH_DATABASE_URL"]) as conn:
+                from psycopg.rows import dict_row
+
+                with conn.cursor(row_factory=dict_row) as cur:
+                    rows = cur.execute(
+                        """
+                        SELECT f.source_id, r.id AS resource_id, d.*
+                        FROM wlh.document_row d
+                        JOIN wlh.version v ON v.id = d.version_id
+                        JOIN wlh.resource r ON r.id = v.resource_id
+                        JOIN wlh.frontier f ON f.id = r.frontier_id
+                        WHERE f.source_id = 'dd-557'
+                        ORDER BY d.row_index
+                        """
+                    ).fetchall()
+                    assert len(rows) == 1
+                    projected = project_canonical(rows[0])
+                    assert (
+                        projected["title"]
+                        == "Public Law 118–7: An Act to modify the authority of the Secretary of Veterans Affairs"
+                    )
+                    assert projected["doc_number"] == "Public Law 118–7"
+                    assert projected["published_at"] == "2023-06-30"
+                    assert (
+                        projected["detail_url"]
+                        == f"http://127.0.0.1:{port}/content/pkg/PLAW-118publ7/uslm/PLAW-118publ7.xml"
+                    )
+                    md_text = Objects().get(rows[0]["markdown_hash"]).decode("utf-8")
+                    assert "SECTION 1." in md_text
+                    assert "Veterans Care Act of 2023" in md_text
+
+            rp_run = prepare_run(source_yaml, "reparse")
+            rp_res = execute_run(rp_run)
+            assert rp_res["status"] == "complete", f"dd-557 reparse failed: {rp_res}"
+            assert rp_res["report"]["external_requests"] == 0
+        finally:
+            srv.shutdown()
+            thread.join(timeout=2.0)
+            srv.server_close()
+
 
 class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
     @pytest.mark.parametrize(
@@ -308,6 +459,46 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-516", "税务资料", "Đề nghị hướng dẫn"),
             ("dd-517", "法律法规", "平成五年法律第八十八号"),
             ("dd-575", "法律法规", "Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng"),
+            ("dd-525", "法律法规", "Accountants Act 2004"),
+            ("dd-557", "法律法规", "Public Law 118–5"),
+            ("dd-518", "政策文件", "第1815号"),
+            ("dd-571", "税务资料", "2026-NZSC-121"),
+            ("dd-142", "其他", "「2026 정부혁신 왕중왕전」온라인 정책소통 OPEN!"),
+            (
+                "dd-019",
+                "通知公告",
+                "最高人民法院发布《关于审理涉及刑事犯罪的民事纠纷案件若干问题的规定》",
+            ),
+            ("dd-039", "政策文件", "检察机关深入开展“益路长征·赓续守护”专项监督"),
+            ("dd-482", "通知公告", "关于在政府采购活动中对有关美国企业采取相关措施的通知"),
+            ("dd-423", "通知公告", "宋志勇会见空客首席执行官"),
+            ("dd-385", "通知公告", "关于开展季度调查监测的通知"),
+            (
+                "dd-265",
+                "税务资料",
+                "中国注册税务师协会关于第七届理事会部分理事及常务理事调整的公告",
+            ),
+            (
+                "dd-153",
+                "其他",
+                "关于征集2026年度互联网域名管理技术国家工程实验室开放课题指南建议的通知",
+            ),
+            ("dd-108", "通知公告", "2025信息通信行业信用建设研讨会成功召开"),
+            ("dd-198", "通知公告", "黑龙江省黑土资源交易“表土剥离独立交易窗口”上线"),
+            ("dd-209", "通知公告", "广州市番禺城市排水管理有限公司"),
+            ("dd-320", "通知公告", "山西省自然资源厅"),
+            (
+                "dd-323",
+                "通知公告",
+                "吉林省桦甸市半截沟区金多金属矿勘查探矿权挂牌出让成交结果公示",
+            ),
+            ("dd-324", "通知公告", "李强主持召开国务院常务会议"),
+            (
+                "dd-327",
+                "通知公告",
+                "《浙江省自然资源厅关于建立健全国土空间详细规划体系的通知》政策解读",
+            ),
+            ("dd-337", "通知公告", "2026年第6期自贸港机关讲坛开讲"),
         ],
     )
     def test_adapted_production_source_configs_collect_and_reparse_against_local_samples(
@@ -400,6 +591,22 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
 
             multi_resource_sources = {
                 "dd-017",
+                "dd-019",
+                "dd-039",
+                "dd-108",
+                "dd-142",
+                "dd-153",
+                "dd-198",
+                "dd-209",
+                "dd-265",
+                "dd-320",
+                "dd-323",
+                "dd-324",
+                "dd-327",
+                "dd-337",
+                "dd-385",
+                "dd-423",
+                "dd-482",
                 "dd-492",
                 "dd-493",
                 "dd-502",
@@ -409,17 +616,21 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                 "dd-514",
                 "dd-516",
                 "dd-517",
+                "dd-518",
+                "dd-525",
                 "dd-527",
                 "dd-548",
                 "dd-549",
                 "dd-550",
                 "dd-551",
+                "dd-557",
                 "dd-558",
                 "dd-559",
                 "dd-562",
                 "dd-564",
                 "dd-565",
                 "dd-570",
+                "dd-571",
                 "dd-572",
                 "dd-575",
             }
@@ -1112,6 +1323,7 @@ class TestCasFixtureBundleExportAndReplay:
                         f"<html><body><ul>"
                         f'<li><a href="http://127.0.0.1:{port}/laws/act-1.html">Digital Commerce Act 2026</a></li>'
                         f'<li><a href="http://127.0.0.1:{port}/laws/act-2.html">Electronic Signatures Act 2026</a></li>'
+                        f'<li><a href="http://127.0.0.1:{port}/laws/act-3.html">Data Governance Act 2026</a></li>'
                         f"</ul></body></html>"
                     ).encode("utf-8")
                     ctype = "text/html; charset=utf-8"
@@ -1132,6 +1344,16 @@ class TestCasFixtureBundleExportAndReplay:
                         '<div class="doc-meta"><span class="doc-no">Act No. 12 of 2026</span>'
                         '<span class="pub-date">2026-04-20</span></div>'
                         '<div class="law-body"><p>Section 1. Qualified electronic signatures backed by accredited cryptographic certificates shall carry full legal equivalence to handwritten signatures.</p></div>'
+                        "</body></html>"
+                    ).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                elif self.path == "/laws/act-3.html":
+                    body = (
+                        "<html><body>"
+                        '<h1 class="doc-title">Data Governance Act 2026</h1>'
+                        '<div class="doc-meta"><span class="doc-no">Act No. 13 of 2026</span>'
+                        '<span class="pub-date">2026-05-10</span></div>'
+                        '<div class="law-body"><p>Section 1. Public-sector data sharing, cross-border data stewardship, and algorithmic accountability obligations shall be supervised by the Data Governance Commission.</p></div>'
                         "</body></html>"
                     ).encode("utf-8")
                     ctype = "text/html; charset=utf-8"
@@ -1195,11 +1417,10 @@ documents:
             c_run = prepare_run(source_yaml, "collect")
             c_res = execute_run(c_run)
             assert c_res["status"] == "complete", f"Initial collect failed: {c_res}"
+            assert verify_source_delivery("dd-905", require_multi_resource=True)["resource_count"] == 3
 
             export_root = tmp_path / "exported_fixtures"
             export_dir = export_root / "dd-905"
-            direct_manifest = export_source_fixture("dd-905", export_dir, max_resources=2)
-            assert direct_manifest["schema"] == "wlh.fixture.v1"
             rc, out, err = run_wlh_cli(
                 "fixture",
                 "export",
@@ -1211,6 +1432,10 @@ documents:
                 env=initialized_db,
             )
             assert rc == 0, f"wlh fixture export failed: {out} {err}"
+            direct_manifest = export_source_fixture(
+                "dd-905", export_dir, max_resources=2, source_yaml=source_yaml
+            )
+            assert direct_manifest["schema"] == "wlh.fixture.v1"
             assert (export_dir / "manifest.json").is_file()
             manifest = load_fixture_manifest(export_root, "dd-905")
             assert manifest["schema"] == "wlh.fixture.v1"
@@ -1276,6 +1501,7 @@ documents:
             rc_run = prepare_run(replay_yaml, "collect")
             rc_res = execute_run(rc_run)
             assert rc_res["status"] == "complete", f"Replay collect failed: {rc_res}"
+            assert rc_res["errors"] == []
 
             verified = verify_source_delivery("dd-905", require_multi_resource=True)
             assert verified["passed"] is True

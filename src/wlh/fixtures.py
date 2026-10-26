@@ -7,13 +7,14 @@ verified PostgreSQL `wlh.acquisition` records and S3 CAS raw payloads.
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from wlh.core import WlhError, atomic_write
 from wlh.db import connect
@@ -71,6 +72,132 @@ def _slug_filename(index: int, route_path: str, mime_type: str) -> str:
         if q_slug:
             stem = f"{stem}-{q_slug}"
     return f"{index:02d}-{stem[:48]}{ext}"
+
+
+def _route_path_from_url(raw_url: str) -> str:
+    parts = urlsplit(raw_url)
+    path = parts.path or "/"
+    if parts.query:
+        return f"{path}?{parts.query}"
+    return path
+
+
+def _should_prune_candidate_url(
+    raw_url: str,
+    base_url: str,
+    exported_paths: set[str],
+    unselected_paths: set[str],
+    detail_patterns: list[re.Pattern[str]],
+    allowed_prefixes: list[str] | None = None,
+    entry_paths: set[str] | None = None,
+) -> bool:
+    cleaned = html.unescape(raw_url.strip())
+    if (
+        not cleaned
+        or cleaned.startswith("#")
+        or cleaned.lower().startswith(("javascript:", "mailto:", "tel:", "data:"))
+    ):
+        return False
+    resolved = urljoin(base_url, cleaned)
+    parts = urlsplit(resolved)
+    if parts.scheme not in {"http", "https"}:
+        return False
+    cand_path = parts.path or "/"
+    cand_route = f"{cand_path}?{parts.query}" if parts.query else cand_path
+    plaw_mapped = re.sub(
+        r"^/app/details/(PLAW-[A-Za-z0-9_-]+).*",
+        r"/content/pkg/\1/uslm/\1.xml",
+        cand_path,
+    )
+    if (
+        cand_route in exported_paths
+        or cand_path in exported_paths
+        or plaw_mapped in exported_paths
+    ):
+        return False
+    if entry_paths and (cand_route in entry_paths or cand_path in entry_paths):
+        return False
+    if (
+        cand_route in unselected_paths
+        or cand_path in unselected_paths
+        or plaw_mapped in unselected_paths
+    ):
+        return True
+    plaw_full = f"{parts.scheme}://{parts.netloc}{plaw_mapped}"
+    if detail_patterns and any(
+        p.search(resolved)
+        or p.search(cand_route)
+        or p.search(cand_path)
+        or p.search(plaw_mapped)
+        or p.search(plaw_full)
+        for p in detail_patterns
+    ):
+        return True
+    if allowed_prefixes and any(
+        cand_path.startswith(pref) or cand_path == pref.rstrip("/")
+        for pref in allowed_prefixes
+    ):
+        return True
+    return False
+
+
+def _prune_unselected_links(
+    text: str,
+    base_url: str,
+    exported_paths: set[str],
+    unselected_paths: set[str],
+    detail_patterns: list[re.Pattern[str]],
+    allowed_prefixes: list[str] | None = None,
+    entry_paths: set[str] | None = None,
+) -> str:
+    def _replace_attr(m: re.Match[str]) -> str:
+        attr, quote, val = m.group(1), m.group(2), m.group(3)
+        if _should_prune_candidate_url(
+            val,
+            base_url,
+            exported_paths,
+            unselected_paths,
+            detail_patterns,
+            allowed_prefixes=allowed_prefixes,
+            entry_paths=entry_paths,
+        ):
+            return f"{attr}={quote}#unselected{quote}"
+        return m.group(0)
+
+    out = re.sub(
+        r'\b(href|docurl|data-url|data-href)\s*=\s*(["\'])([^"\']+)\2',
+        _replace_attr,
+        text,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(
+        r"\b(href|docurl|data-url|data-href)\s*=\s*(&quot;|&#34;|&#x22;|&#39;|&#x27;)(.*?)\2",
+        _replace_attr,
+        out,
+        flags=re.IGNORECASE,
+    )
+
+    def _replace_xml_tag(m: re.Match[str]) -> str:
+        tag, val = m.group(1), m.group(2)
+        if _should_prune_candidate_url(
+            val,
+            base_url,
+            exported_paths,
+            unselected_paths,
+            detail_patterns,
+            allowed_prefixes=allowed_prefixes,
+            entry_paths=entry_paths,
+        ):
+            return f"<{tag}>#unselected</{tag}>"
+        return m.group(0)
+
+    out = re.sub(
+        r"<(link|loc)>([^<]+)</\1>",
+        _replace_xml_tag,
+        out,
+        flags=re.IGNORECASE,
+    )
+    return out
 
 
 def _templatize_text(
@@ -200,6 +327,7 @@ def export_source_fixture(
             selected_acq_ids.add(ev["acquisition_id"])
         else:
             unselected_acq_ids.add(ev["acquisition_id"])
+    direct_selected_acq_ids = set(selected_acq_ids)
 
     by_id = {a["id"]: a for a in acqs}
     # Walk parent chain for selected acquisitions
@@ -220,10 +348,20 @@ def export_source_fixture(
     primary_netlocs: list[str] = [primary_host]
     secondary_netlocs: list[str] = list(secondary_hosts)
 
+    entry_paths: set[str] = set()
     for entry_url in cast(list[Any], cfg.get("entry_urls") or []):
         ep = urlsplit(str(entry_url))
         if ep.netloc and ep.netloc not in primary_netlocs:
             primary_netlocs.append(ep.netloc)
+        entry_paths.add(_route_path_from_url(str(entry_url)))
+
+    allowed_prefixes: list[str] = [
+        str(p) for p in cast(list[Any], cfg.get("allowed_path_prefixes") or [])
+    ]
+    docs_cfg = cast(Mapping[str, Any], cfg.get("documents") or {})
+    detail_patterns = [
+        re.compile(str(p)) for p in cast(list[Any], docs_cfg.get("detail_url_patterns") or [])
+    ]
 
     for a in acqs:
         for u in (a.get("request_url"), a.get("actual_url")):
@@ -238,30 +376,86 @@ def export_source_fixture(
             elif up.netloc not in primary_netlocs:
                 primary_netlocs.append(up.netloc)
 
-    routes: list[dict[str, Any]] = []
-    seen_paths: set[str] = set()
-    file_index = 1
+    selected_paths: set[str] = set()
+    unselected_paths: set[str] = set()
+    for a in acqs:
+        eff = str(a.get("actual_url") or a.get("request_url") or "/")
+        rpath = _route_path_from_url(eff)
+        if a["id"] in selected_acq_ids:
+            selected_paths.add(rpath)
+        elif a["id"] in unselected_acq_ids:
+            unselected_paths.add(rpath)
+
+    best_acq_by_path: dict[str, dict[str, Any]] = {}
+    ordered_paths: list[str] = []
 
     for a in acqs:
-        aid = a["id"]
-        # Include if it belongs to selected observations OR is shared/entry/list/policy (not exclusive to unselected observations)
-        if selected_obs_ids and (aid in unselected_acq_ids and aid not in selected_acq_ids):
-            continue
-
         eff_url = str(a.get("actual_url") or a.get("request_url") or "/")
         parts = urlsplit(eff_url)
-        route_path = parts.path or "/"
-        if parts.query:
-            route_path = f"{route_path}?{parts.query}"
-
-        if route_path == "/robots.txt" or route_path in seen_paths:
+        route_path = _route_path_from_url(eff_url)
+        if route_path == "/robots.txt":
             continue
-        seen_paths.add(route_path)
+        if (
+            allowed_hosts
+            and parts.hostname
+            and parts.hostname not in allowed_hosts
+            and parts.hostname not in {"127.0.0.1", "localhost"}
+        ):
+            continue
+
+        aid = a["id"]
+        is_selected = aid in selected_acq_ids or route_path in selected_paths
+        is_unselected_ev = aid in unselected_acq_ids and not is_selected
+        is_unselected_detail = (
+            not is_selected
+            and route_path not in entry_paths
+            and bool(detail_patterns)
+            and any(
+                p.search(eff_url) or p.search(route_path) or p.search(parts.path or "/")
+                for p in detail_patterns
+            )
+        )
+        if selected_obs_ids and (is_unselected_ev or is_unselected_detail):
+            unselected_paths.add(route_path)
+            continue
+
+        if route_path not in best_acq_by_path:
+            best_acq_by_path[route_path] = a
+            ordered_paths.append(route_path)
+        else:
+            prev = best_acq_by_path[route_path]
+            prev_status = int(prev.get("http_status") or 200)
+            cur_status = int(a.get("http_status") or 200)
+            prev_key = (
+                prev["id"] in direct_selected_acq_ids,
+                200 <= prev_status < 300,
+                prev.get("acquisition_kind") == "rendered_dom",
+            )
+            cur_key = (
+                aid in direct_selected_acq_ids,
+                200 <= cur_status < 300,
+                a.get("acquisition_kind") == "rendered_dom",
+            )
+            if cur_key >= prev_key:
+                best_acq_by_path[route_path] = a
+
+    exported_paths = set(ordered_paths)
+    unselected_paths -= exported_paths
+
+    routes: list[dict[str, Any]] = []
+    file_index = 1
+
+    for route_path in ordered_paths:
+        a = best_acq_by_path[route_path]
+        aid = a["id"]
+        eff_url = str(a.get("actual_url") or a.get("request_url") or "/")
 
         raw_bytes = objects.get(str(a["archive_ref"]))
         mime_type = str(a.get("mime_type") or "text/html").split(";")[0].strip()
         charset = str(a.get("charset") or "utf-8").strip() or "utf-8"
         status_code = int(a.get("http_status") or 200)
+        if a.get("acquisition_kind") == "rendered_dom" and status_code == 202:
+            status_code = 200
 
         filename = _slug_filename(file_index, route_path, mime_type)
         file_index += 1
@@ -272,6 +466,17 @@ def export_source_fixture(
             except (UnicodeDecodeError, LookupError):
                 decoded = raw_bytes.decode("utf-8", errors="replace")
                 charset = "utf-8"
+
+            if aid not in direct_selected_acq_ids:
+                decoded = _prune_unselected_links(
+                    decoded,
+                    base_url=eff_url,
+                    exported_paths=exported_paths,
+                    unselected_paths=unselected_paths,
+                    detail_patterns=detail_patterns,
+                    allowed_prefixes=allowed_prefixes,
+                    entry_paths=entry_paths,
+                )
 
             templated, is_template = _templatize_text(
                 decoded,

@@ -183,7 +183,7 @@ class Adapter(RecordAdapter):
         tag = etree.QName(root).localname
         namespace = etree.QName(root).namespace or ""
         if not zipped and (
-            tag in {"feed", "items", "ActsRegsList"}
+            tag in {"feed", "items", "ActsRegsList", "rss"}
             or (
                 tag == "DataRoot"
                 and not (select(root, "LawTitle") or root.xpath(".//LawBody"))
@@ -213,18 +213,34 @@ class Adapter(RecordAdapter):
             entries: list[
                 tuple[Any, str | None, str | None, str | None, str | None, str | None, str | None]
             ] = [(root, title, number, key, published, issuer, doc_type)]
-        elif "uslm" in namespace.lower() or tag in {"lawDoc", "bill", "statute", "uscDoc"}:
-            title = select(root, "docTitle", "longTitle", "dcTitle", "title")
-            number = select(root, "docNumber", "number", "identifier")
+        elif "uslm" in namespace.lower() or tag in {"lawDoc", "bill", "statute", "uscDoc", "pLaw"}:
+            doc_title = select(root, "docTitle")
+            title = (
+                select(root, "dcTitle", "title", "officialTitle", "longTitle")
+                if doc_title and doc_title.strip().lower() in {"an act", "joint resolution"}
+                else (doc_title or select(root, "longTitle", "dcTitle", "title"))
+            )
+            number = select(root, "citableAs", "docNumber", "number", "identifier")
             published = (
-                select(root, "created")
+                select(root, "approvedDate")
+                or select(root, "created")
                 or select(root, "date", attribute="date")
                 or select(root, "date")
                 or ""
             )[:10] or None
-            issuer = select(root, "publisher", "creator")
+            issuer = select(root, "publisher", "creator") or (
+                "United States Congress" if tag == "pLaw" else None
+            )
             entries = [
-                (root, title, number, root.get("identifier") or number, published, issuer, "法律法规")
+                (
+                    root,
+                    title,
+                    number,
+                    root.get("identifier") or select(root, "identifier") or number,
+                    published,
+                    issuer,
+                    "法律法规",
+                )
             ]
         elif tag in {"dokumente", "norm"}:
             title = select(root, "langue", "titel", "jurabk")
@@ -448,12 +464,16 @@ class Adapter(RecordAdapter):
                             href if href.endswith(".xml") else href.rstrip("/") + "/data.xml"
                         )
             return self._filter_requests(base, links, next_links)
-        if tag == "items":
+        if tag in {"items", "rss"}:
             links = [
                 str(t).strip()
                 for t in root.xpath(".//*[local-name()='link']/text()")
                 if str(t).strip()
             ]
+            for desc in root.xpath(".//*[local-name()='description']/text()"):
+                for href in re.findall(r"""href=["']([^"']+)["']""", html.unescape(str(desc))):
+                    if href.strip():
+                        links.append(href.strip())
             return self._filter_requests(base, links)
         if tag == "ActsRegsList":
             links = [
