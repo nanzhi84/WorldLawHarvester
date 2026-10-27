@@ -8,11 +8,21 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+
+
+def _close_pooled_connections() -> None:
+    try:
+        from wlh.db import close_pool
+
+        close_pool()
+    except Exception:
+        pass
 
 
 def _ensure_test_db_and_bucket(env: dict[str, str]) -> None:
@@ -95,8 +105,8 @@ def wlh_env(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
 
 
 @pytest.fixture()
-def initialized_db(wlh_env: dict[str, str]) -> dict[str, str]:
-    """Initialize a clean wlh schema in the isolated test PostgreSQL database before the test."""
+def initialized_db(wlh_env: dict[str, str]) -> Generator[dict[str, str], None, None]:
+    """Initialize a clean wlh schema in the isolated test PostgreSQL database before the test, preserving unified real-network samples."""
     from urllib.parse import urlsplit
 
     import psycopg
@@ -107,14 +117,44 @@ def initialized_db(wlh_env: dict[str, str]) -> dict[str, str]:
             f"Refusing to DROP SCHEMA on non-test database: {db_name!r}"
         )
 
+    _close_pooled_connections()
     with psycopg.connect(wlh_env["WLH_DATABASE_URL"], autocommit=True) as conn:
+        has_backup = (
+            conn.execute(
+                "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'wlh_samples_backup'"
+            ).fetchone()
+            is not None
+        )
+        has_wlh_source = (
+            conn.execute(
+                "SELECT 1 FROM information_schema.tables WHERE table_schema = 'wlh' AND table_name = 'source'"
+            ).fetchone()
+            is not None
+        )
+        if not has_backup and has_wlh_source:
+            src_cnt_row = conn.execute("SELECT COUNT(*) FROM wlh.source").fetchone()
+            if src_cnt_row and int(src_cnt_row[0]) >= 10:
+                conn.execute("ALTER SCHEMA wlh RENAME TO wlh_samples_backup")
         conn.execute("DROP SCHEMA IF EXISTS wlh CASCADE")
 
     from wlh.db import initialize
 
     res = initialize()
     assert res["status"] in {"initialized", "already_initialized"}
-    return wlh_env
+    try:
+        yield wlh_env
+    finally:
+        _close_pooled_connections()
+        with psycopg.connect(wlh_env["WLH_DATABASE_URL"], autocommit=True) as conn:
+            has_backup = (
+                conn.execute(
+                    "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'wlh_samples_backup'"
+                ).fetchone()
+                is not None
+            )
+            if has_backup:
+                conn.execute("DROP SCHEMA IF EXISTS wlh CASCADE")
+                conn.execute("ALTER SCHEMA wlh_samples_backup RENAME TO wlh")
 
 
 def make_native_pdf(path: Path, pages_text: list[str]) -> Path:

@@ -95,6 +95,17 @@ def _release_conn(url: str, conn: DbConn, *, ok: bool) -> None:
         pass
 
 
+def close_pool() -> None:
+    with _POOL_LOCK:
+        for conns in _CONN_POOL.values():
+            for conn in conns:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        _CONN_POOL.clear()
+
+
 @contextmanager
 def _connect_ctx(url: str) -> Generator[DbConn, None, None]:
     connection = _acquire_conn(url)

@@ -20,6 +20,8 @@ from typing import Any, cast
 
 DEFAULT_CSV_PATH = Path("docs/runbooks/source-adaptation-matrix.csv")
 DEFAULT_OUTPUT_PATH = Path("docs/runbooks/source-verification-samples.html")
+DEFAULT_SAMPLES_DATABASE_URL = "postgresql://wlh:wlh@127.0.0.1:15432/wlh_test"
+DEFAULT_SAMPLES_S3_BUCKET = "wlh-archive-test"
 
 FORBIDDEN_PLACEHOLDERS = (
     "Bạn chưa Đăng nhập thành viên",
@@ -824,7 +826,7 @@ def render_source_verification_html(
     <main class="gitbook-main">
       <header class="page-header">
         <h1>多法域信源实网采集核验样本台账 (Source Verification Samples)</h1>
-        <p>本独立 HTML 双栏台账由唯一事实源 <code>source-adaptation-matrix.csv</code> 单向实时同步生成目录结构与源站元数据，并与 <code>source-adaptation-matrix.md</code> 保持章节顺序完全一致。共收录 <strong>{total_sources}</strong> 个已跑通（<code>[x]</code>）及部分跑通（<code>[~]</code>）信源、合计 <strong>{total_samples}</strong> 条核验样本（每源最多 {max_items_per_source} 条）。左栏展示实际采集请求 Payload 原文或官方附件下载链接，右栏展示解析清洗后的交付 Markdown 全文片段。</p>
+        <p>本独立 HTML 双栏台账由唯一事实源 <code>source-adaptation-matrix.csv</code> 单向实时同步生成目录结构与源站元数据，并与 <code>source-adaptation-matrix.md</code> 保持章节顺序完全一致；样本数据统一由测试数据库 <code>wlh_test</code> 与对象存储桶 <code>wlh-archive-test</code>（<code>uv run python -m wlh.runbook_samples</code>）生成。共收录 <strong>{total_sources}</strong> 个已跑通（<code>[x]</code>）及部分跑通（<code>[~]</code>）信源、合计 <strong>{total_samples}</strong> 条核验样本（每源最多 {max_items_per_source} 条）。左栏展示实际采集请求 Payload 原文或官方附件下载链接，右栏展示解析清洗后的交付 Markdown 全文片段。</p>
       </header>
 
       {sections_html}
@@ -1036,12 +1038,28 @@ def generate_verification_samples_from_db(
     output_path: Path = DEFAULT_OUTPUT_PATH,
     *,
     max_items_per_source: int = 10,
+    database_url: str | None = None,
+    s3_bucket: str | None = None,
 ) -> Path:
-    """Query PostgreSQL + S3 CAS for all `[x]`/`[~]` sources and write `source-verification-samples.html`."""
+    """Query PostgreSQL (`wlh_test`) + S3 CAS (`wlh-archive-test`) for all `[x]`/`[~]` sources and write `source-verification-samples.html`."""
+    import psycopg
     import yaml
+    from psycopg.rows import dict_row
 
-    from wlh.db import connect
     from wlh.engine.objects import Objects
+
+    target_db_url = (
+        database_url
+        or os.environ.get("WLH_SAMPLES_DATABASE_URL")
+        or os.environ.get("WLH_DATABASE_URL")
+        or DEFAULT_SAMPLES_DATABASE_URL
+    )
+    target_bucket = (
+        s3_bucket
+        or os.environ.get("WLH_SAMPLES_S3_BUCKET")
+        or os.environ.get("WLH_S3_BUCKET")
+        or DEFAULT_SAMPLES_S3_BUCKET
+    )
 
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         active_rows = [
@@ -1051,16 +1069,28 @@ def generate_verification_samples_from_db(
         ]
 
     existing_items_map = _parse_existing_html_samples(output_path)
-    objs = Objects()
+    prev_bucket = os.environ.get("WLH_S3_BUCKET")
+    os.environ["WLH_S3_BUCKET"] = target_bucket
+    try:
+        objs = Objects()
+    finally:
+        if prev_bucket is None:
+            os.environ.pop("WLH_S3_BUCKET", None)
+        else:
+            os.environ["WLH_S3_BUCKET"] = prev_bucket
     sources_payload: list[dict[str, Any]] = []
 
-    with connect() as conn:
+    with psycopg.Connection[dict[str, Any]].connect(
+        target_db_url, row_factory=dict_row
+    ) as conn:
         for csv_row in active_rows:
             source_id = csv_row["Source ID"].strip()
             source_name = csv_row["来源名称"].strip()
             status = csv_row["状态"].strip()
 
             yaml_path = csv_path.resolve().parents[2] / "sources" / f"{source_id}.yaml"
+            if not yaml_path.is_file():
+                yaml_path = Path(__file__).resolve().parents[2] / "sources" / f"{source_id}.yaml"
             content_xpath: str | None = None
             if yaml_path.is_file():
                 raw_cfg: Any = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
