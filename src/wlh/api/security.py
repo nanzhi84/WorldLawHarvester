@@ -33,6 +33,7 @@ class Caller(Strict):
     id: str = Field(min_length=1, max_length=100)
     token_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     sources: list[str] = Field(max_length=10000)
+    projection: str = Field(default="canonical")
 
     @field_validator("sources")
     @classmethod
@@ -42,6 +43,15 @@ class Caller(Strict):
         if any(not re.fullmatch(r"dd-[0-9]{3,}", value) for value in values):
             raise ValueError("invalid_source_id")
         return values
+
+    @field_validator("projection")
+    @classmethod
+    def valid_projection(cls, value: str) -> str:
+        from wlh.projections import PROJECTORS
+
+        if value not in PROJECTORS:
+            raise ValueError("invalid_projection")
+        return value
 
     def authorize(self, source_id: str) -> None:
         if source_id not in self.sources:

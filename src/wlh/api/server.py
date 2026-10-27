@@ -142,12 +142,9 @@ async def healthz(request: web.Request) -> web.Response:
 async def results(request: web.Request) -> web.Response:
     query = request.query
     try:
-        if set(query) - {"source_id", "limit", "cursor", "projection"} or any(
+        if set(query) - {"source_id", "limit", "cursor"} or any(
             len(query.getall(key)) != 1 for key in query
         ):
-            raise ValueError
-        projection = query.get("projection", "canonical")
-        if projection != "canonical":
             raise ValueError
         source_id = query.get("source_id")
         if source_id is not None and (
@@ -163,16 +160,17 @@ async def results(request: web.Request) -> web.Response:
     except (ValueError, KeyError):
         raise ApiError(400, "invalid_parameters") from None
     service = request.app[SERVICE]
+    caller: Caller = request["caller"]
     body, link = await service.run(
         request,
         result_query.results,
         service.settings,
         service.tokens,
-        request["caller"],
+        caller,
         source_id,
         limit,
         query.get("cursor"),
-        projection,
+        caller.projection,
     )
     response = web.Response(body=body, content_type="application/json")
     if link:

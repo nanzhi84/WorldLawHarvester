@@ -259,10 +259,9 @@ callers:
                 resp_can = await client.get(
                     "/results?source_id=dd-902&projection=canonical", headers=headers
                 )
-                assert resp_can.status == 200
+                assert resp_can.status == 400
                 data_can = await resp_can.json()
-                items_can = data_can["items"]
-                assert items_can == items_default
+                assert data_can == {"error": "invalid_parameters"}
 
                 # Verify keyset cursor pagination still works with streamlined payload
                 paged_items: list[dict[str, object]] = []
@@ -277,6 +276,10 @@ callers:
                     assert len(page_data["items"]) == 1
                     paged_items.extend(page_data["items"])
                     cursor = page_data["next_cursor"]
+                    if cursor is not None:
+                        link_header = resp_p.headers.get("Link", "")
+                        assert 'rel="next"' in link_header
+                        assert "projection=" not in link_header
                 assert paged_items == items_default
                 assert cursor is None
 

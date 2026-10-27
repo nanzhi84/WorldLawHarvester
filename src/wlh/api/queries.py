@@ -81,7 +81,7 @@ def results(
                 issued_at=cursor.issued_at if cursor else int(time.time()),
             )
         )
-        query = {"limit": limit, "cursor": next_cursor, "projection": projection}
+        query = {"limit": limit, "cursor": next_cursor}
         if source_id is not None:
             query = {"source_id": source_id, **query}
         link = settings.public_base_url + "/results?" + urlencode(query)
