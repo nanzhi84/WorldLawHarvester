@@ -465,7 +465,9 @@ metadata:
     <LawHasEngVersion>Y</LawHasEngVersion>
     <EngLawName>Constitution of the Republic of China (Taiwan)</EngLawName>
     <LawAttachements />
-    <LawHistories>1.中華民國三十六年一月一日國民政府令公布</LawHistories>
+    <LawHistories>1.中華民國三十六年一月一日國民政府令公布
+  中華民國三十六年十二月二十五日施行
+  中華民國三十五年十二月二十五日國民大會通過</LawHistories>
     <LawForeword>中華民國國民大會受全體國民之付託，制定本憲法。</LawForeword>
     <LawArticles>
       <Article>
@@ -493,6 +495,11 @@ metadata:
         <ArticleType>A</ArticleType>
         <ArticleNo>第 1 條</ArticleNo>
         <ArticleConctent>中央法規之制定、施行、適用、修正及廢止，除憲法規定外，依本法之規定。</ArticleConctent>
+      </Article>
+      <Article>
+        <ArticleType>A</ArticleType>
+        <ArticleNo>第 26 條</ArticleNo>
+        <ArticleConctent>本法自公布日施行。</ArticleConctent>
       </Article>
     </LawArticles>
   </Law>
@@ -718,12 +725,21 @@ metadata:
                     const_proj = project_canonical(const_row)
                     assert const_proj["doc_number"] == "A0000001"
                     assert const_proj["published_at"] == "1947-01-01"
+                    assert const_proj["effective_at"] == "1947-12-25"
+                    assert const_proj["status"] == "現行有效"
+                    assert const_proj["issuer"] == "憲法"
                     const_md = objs.get(const_row["markdown_hash"]).decode("utf-8")
                     assert "## 第 1 條" in const_md
                     assert "中華民國基於三民主義，為民有民治民享之民主共和國。" in const_md
                     assert "Constitution of the Republic of China (Taiwan)" not in const_md
                     assert "A0000001" not in const_md
                     assert "\n\nA\n\n" not in const_md
+                    assert "中央法規標準法" in by_title
+                    std_proj = project_canonical(by_title["中央法規標準法"])
+                    assert std_proj["published_at"] == "2004-05-19"
+                    assert std_proj["effective_at"] == "2004-05-19"
+                    assert std_proj["status"] == "現行有效"
+                    assert std_proj["issuer"] == "行政＞院本部＞通用目"
 
             export_dir = tmp_path / "exported_moj" / "dd-959"
             export_source_fixture("dd-959", export_dir, max_resources=2, source_yaml=moj_yaml)
@@ -1128,6 +1144,18 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         assert projected["issuer"] == "Supreme Court of the United States"
                         assert projected["published_at"] in {"2026-09-25", "2026-06-30"}
                         assert " v. " in (projected["title"] or "")
+                    if source_id == "dd-578":
+                        const_row = next(p for p in projected_rows if p["title"] == "中華民國憲法")
+                        assert const_row["published_at"] == "1947-01-01"
+                        assert const_row["effective_at"] == "1947-12-25"
+                        assert const_row["status"] == "現行有效"
+                    if source_id == "dd-579":
+                        assert projected["effective_at"] == "1947-07-19"
+                        assert projected["expired_at"] == "1991-05-17"
+                        assert projected["status"] == "已廢止"
+                    if source_id == "dd-509":
+                        assert projected["published_at"] == "2004-05-19"
+                        assert projected["effective_at"] == "2004-05-19"
 
             rp_run = prepare_run(replay_yaml, "reparse")
             rp_res = execute_run(rp_run)

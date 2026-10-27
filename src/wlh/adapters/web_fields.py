@@ -283,6 +283,130 @@ def enrich_bare_title(
     return clean_title
 
 
+_CN_DIGITS: dict[str, int] = {
+    "〇": 0,
+    "零": 0,
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+
+
+def _parse_roc_or_int(raw: str) -> int | None:
+    s = raw.strip()
+    if not s:
+        return None
+    if s.isdigit():
+        return int(s)
+    if all(ch in _CN_DIGITS for ch in s):
+        return int("".join(str(_CN_DIGITS[ch]) for ch in s))
+    total = 0
+    current = 0
+    for ch in s:
+        if ch in _CN_DIGITS:
+            current = _CN_DIGITS[ch]
+        elif ch == "十":
+            total += (current if current > 0 else 1) * 10
+            current = 0
+        elif ch == "百":
+            total += (current if current > 0 else 1) * 100
+            current = 0
+        else:
+            return None
+    total += current
+    return total if total > 0 else None
+
+
+def _infer_fallback_effective_date(
+    tree: Any | None, body_text: str | None, published_at: str | None
+) -> str | None:
+    chunks: list[str] = []
+    if tree is not None:
+        scoped_nodes = tree.xpath(
+            '//div[contains(@class, "law-reg-content") or contains(@class, "law-agree") or contains(@class, "table-title")]'
+        )
+        if scoped_nodes:
+            chunks.extend(node.text_content() for node in scoped_nodes)
+        else:
+            chunks.append(tree.text_content())
+    if body_text:
+        chunks.append(body_text)
+    combined = re.sub(
+        r"\s+",
+        " ",
+        " ".join(re.sub(r"\r?\n\s*", "", c) for c in chunks),
+    ).strip()
+    if not combined:
+        return None
+    if re.search(r"尚待生效|尚未生效|尚待互換批准|尚未互換批准|尚待通知生效", combined):
+        return None
+
+    explicit_dates: list[str] = []
+    for m_roc in re.finditer(
+        r"(?:自|於|，|；|\s)(?:(?:中華)?民國\s*)?([0-9〇零一二三四五六七八九十百]{1,5})\s*年\s*([0-9〇零一二三四五六七八九十]{1,3})\s*月\s*([0-9〇零一二三四五六七八九十]{1,3})\s*日(?:起)?(?:施行|生效)",
+        " " + combined,
+    ):
+        y = _parse_roc_or_int(m_roc.group(1))
+        m = _parse_roc_or_int(m_roc.group(2))
+        d = _parse_roc_or_int(m_roc.group(3))
+        if y and m and d:
+            greg_y = y + 1911 if 1 <= y <= 250 else (y if 1800 <= y <= 2100 else None)
+            if greg_y:
+                try:
+                    explicit_dates.append(datetime(greg_y, m, d).date().isoformat())
+                except ValueError:
+                    continue
+
+    for m_greg in re.finditer(
+        r"(?:自|於)?\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?:起)?(?:施行|生效)",
+        combined,
+    ):
+        try:
+            explicit_dates.append(
+                datetime(
+                    int(m_greg.group(1)), int(m_greg.group(2)), int(m_greg.group(3))
+                ).date().isoformat()
+            )
+        except ValueError:
+            continue
+
+    for m_en in re.finditer(
+        r"(?:Entered\s+into\s+force|Effective(?:\s+date)?(?:\s+on|\s+since|\s+from|\s*:)?|comes?\s+into\s+force(?:\s+on)?)\s*(?:on\s+)?([A-Z][a-z]+\s+\d{1,2},\s*\d{4}|\d{1,2}\s+[A-Z][a-z]+\s+\d{4}|\d{4}[./-]\d{1,2}[./-]\d{1,2})",
+        combined,
+        re.IGNORECASE,
+    ):
+        try:
+            parsed_en = parse_date(m_en.group(1).replace(".", "-"))
+            if parsed_en:
+                explicit_dates.append(parsed_en)
+        except WlhError:
+            continue
+
+    has_same_day_clause = bool(
+        re.search(
+            r"(?:本法|本條例|本通則|本規則|本辦法|本細則|本準則|本標準|本綱要|本規程|本編制表|本協定|本協議|本條約|本約定書|本備忘錄|修正條文)[^\n。；]{0,30}?自(?:公布|發布|簽署|簽字|換文)之?日(?:起)?(?:施行|生效)|自(?:公布|發布|簽署|簽字|換文)之?日(?:起)?(?:施行|生效)|enter(?:s|ed)?\s+into\s+force\s+(?:(?:at|on)\s+(?:the\s+)?same\s+date|(?:on|from)\s+the\s+date\s+of\s+sign(?:ature|ing)|upon\s+sign(?:ature|ing))|effective\s+(?:from\s+the\s+date\s+of\s+sign(?:ature|ing)|upon\s+sign(?:ature|ing))",
+            combined,
+            re.IGNORECASE,
+        )
+    )
+
+    if explicit_dates:
+        latest_explicit = max(explicit_dates)
+        if not has_same_day_clause or not published_at or latest_explicit >= published_at:
+            return latest_explicit
+
+    if has_same_day_clause and published_at:
+        return published_at
+
+    return None
+
+
 def extract_detail_fields(
     fields: Mapping[str, Any],
     data: bytes,
@@ -300,6 +424,10 @@ def extract_detail_fields(
         for name, rule in fields.items():
             values[name] = field_value(
                 tree, tree.text_content(), rule, is_date=(name in DATE_FIELDS)
+            )
+        if "effective_at" in fields and not values.get("effective_at"):
+            values["effective_at"] = _infer_fallback_effective_date(
+                tree, text, values.get("published_at")
             )
         h1: str | None = next(
             (
