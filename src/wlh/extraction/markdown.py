@@ -206,8 +206,12 @@ def html_to_markdown(
                 or raw_href.endswith("#")
             ):
                 return value
-            href = urljoin(base_url or "", raw_href)
-            if href and urlsplit(href).scheme in {"http", "https"}:
+            try:
+                href = urljoin(base_url or "", raw_href)
+                scheme = urlsplit(href).scheme if href else ""
+            except ValueError:
+                href, scheme = "", ""
+            if href and scheme in {"http", "https"}:
                 lead = " " if value[:1].isspace() else ""
                 trail = " " if value[-1:].isspace() else ""
                 return f"{lead}[{label}]({href}){trail}"

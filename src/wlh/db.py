@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import pwd
+import threading
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime, timezone
@@ -9,6 +10,7 @@ from typing import Any, LiteralString, cast
 from urllib.parse import urlsplit
 
 import psycopg
+from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
 from psycopg.sql import SQL
 from psycopg.types.json import Jsonb
@@ -18,6 +20,8 @@ from wlh.engine.run_state import eligibility_error
 
 j = Jsonb
 DbConn = psycopg.Connection[dict[str, Any]]
+_POOL_LOCK = threading.Lock()
+_CONN_POOL: dict[tuple[int, str], list[DbConn]] = {}
 
 
 def dsn() -> str:
@@ -29,15 +33,77 @@ def dsn() -> str:
     return url
 
 
-@contextmanager
-def _connect_ctx(url: str) -> Generator[DbConn, None, None]:
-    with psycopg.Connection[dict[str, Any]].connect(
+def _acquire_conn(url: str) -> DbConn:
+    pool_key = (os.getpid(), url)
+    with _POOL_LOCK:
+        bucket = _CONN_POOL.get(pool_key)
+        while bucket:
+            conn = bucket.pop()
+            if (
+                not conn.closed
+                and not conn.autocommit
+                and conn.info.transaction_status == TransactionStatus.IDLE
+            ):
+                return conn
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return psycopg.Connection[dict[str, Any]].connect(
         url,
         row_factory=dict_row,
         connect_timeout=5,
         options="-c statement_timeout=15000 -c lock_timeout=5000",
-    ) as connection:
+    )
+
+
+def _release_conn(url: str, conn: DbConn, *, ok: bool) -> None:
+    if conn.closed:
+        return
+    if conn.autocommit:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return
+    try:
+        if ok:
+            conn.commit()
+        else:
+            conn.rollback()
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return
+    if conn.info.transaction_status != TransactionStatus.IDLE:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return
+    pool_key = (os.getpid(), url)
+    with _POOL_LOCK:
+        bucket = _CONN_POOL.setdefault(pool_key, [])
+        if len(bucket) < 4:
+            bucket.append(conn)
+            return
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+@contextmanager
+def _connect_ctx(url: str) -> Generator[DbConn, None, None]:
+    connection = _acquire_conn(url)
+    ok = False
+    try:
         yield connection
+        ok = True
+    finally:
+        _release_conn(url, connection, ok=ok)
 
 
 def connect() -> AbstractContextManager[DbConn]:

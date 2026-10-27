@@ -158,9 +158,29 @@ class RecordAdapter(Base):
         self, ctx: Any, target: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]
     ) -> list[RawRecord]:
         acquisition: Mapping[str, Any] = inputs[0]["acquisition"]
-        records = self.records(ctx.read(acquisition), acquisition)
+        cache_key = (
+            acquisition.get("archive_ref"),
+            acquisition.get("actual_url"),
+            int(self.config["budget"]["documents"]),
+        )
+        cached: tuple[list[dict[str, Any]], str | None] | None = getattr(
+            self, "_records_cache", {}
+        ).get(cache_key)
+        records = (
+            cached[0]
+            if (cached is not None and cache_key[0] is not None)
+            else self.records(ctx.read(acquisition), acquisition)
+        )
         key: str = inputs[0].get("selector") or target["identity"]["external_key"]
-        matches = [(i, r) for i, r in enumerate(records) if str(r["external_key"]) == key]
+        pos = inputs[0].get("position")
+        if (
+            isinstance(pos, int)
+            and 0 <= pos < len(records)
+            and str(records[pos]["external_key"]) == key
+        ):
+            matches = [(pos, records[pos])]
+        else:
+            matches = [(i, r) for i, r in enumerate(records) if str(r["external_key"]) == key]
         if len(matches) != 1:
             raise WlhError("bridge_record_identity_ambiguous")
         index, record = matches[0]

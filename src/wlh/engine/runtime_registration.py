@@ -34,24 +34,64 @@ def register(
         ):
             self.truncated = result["truncated"]
             self.checkpoint["truncated"] = self.truncated
-        for request in result.get("requests", []):
-            self.insert_request(c, request, request.get("depth", depth))
+        requests_list = result.get("requests", [])
+        targets_list = result.get("targets", [])
+        request_ids: dict[str, str] = (
+            {
+                r["key"]: r["id"]
+                for r in c.execute(
+                    "SELECT key, id FROM wlh.task WHERE run_id=%s AND kind='request'",
+                    (self.run_id,),
+                ).fetchall()
+            }
+            if (requests_list or targets_list)
+            else {}
+        )
+
+        def ensure_request(req: Mapping[str, Any], req_depth: int) -> str:
+            rkey = request_key(req)
+            existing_req_id = request_ids.get(rkey)
+            if existing_req_id is not None:
+                return existing_req_id
+            rid = self.insert_request(c, req, req_depth)
+            request_ids[rkey] = rid
+            return rid
+
+        for request in requests_list:
+            ensure_request(request, request.get("depth", depth))
         skipped_budget = False
-        for target in result.get("targets", []):
+        existing_targets: dict[str, dict[str, Any]] = (
+            {
+                row["key"]: row
+                for row in c.execute(
+                    "SELECT * FROM wlh.task WHERE run_id=%s AND kind='target' FOR UPDATE",
+                    (self.run_id,),
+                ).fetchall()
+            }
+            if targets_list
+            else {}
+        )
+
+        def identity_pair(t_key: str, t_payload: Mapping[str, Any]) -> tuple[str, str]:
+            ident = cast(Mapping[str, Any], t_payload.get("identity") or {})
+            ns = ident.get("namespace")
+            ext = ident.get("external_key")
+            return (
+                str(ns) if ns is not None else t_key,
+                str(ext) if ext is not None else t_key,
+            )
+
+        active_identities: set[tuple[str, str]] = {
+            identity_pair(row["key"], row["payload"])
+            for row in existing_targets.values()
+            if row["state"] not in ("failed", "skipped")
+        }
+        new_targets: list[tuple[Any, ...]] = []
+        new_inputs: list[tuple[str, str, int]] = []
+        for target in targets_list:
             key = target_key(target)
-            count: int = cast(dict[str, Any], c.execute(
-                """SELECT count(DISTINCT (
-                    COALESCE(payload #>> '{identity,namespace}', key),
-                    COALESCE(payload #>> '{identity,external_key}', key)
-                )) AS n FROM wlh.task WHERE run_id=%s AND kind='target'
-                AND state NOT IN ('failed', 'skipped')""",
-                (self.run_id,),
-            ).fetchone())["n"]
-            exists: dict[str, Any] | None = c.execute(
-                """SELECT * FROM wlh.task WHERE run_id=%s AND kind='target' AND key=%s
-                FOR UPDATE""",
-                (self.run_id, key),
-            ).fetchone()
+            count: int = len(active_identities)
+            exists: dict[str, Any] | None = existing_targets.get(key)
             payload: dict[str, Any] = {
                 "identity": target.get("identity"),
                 "context": target.get("context") or {},
@@ -71,48 +111,56 @@ def register(
                 extends = all(item in payload["inputs"] for item in old["inputs"])
                 if exists["state"] == "pending" and extends:
                     amend(self, c, exists, target, depth)
+                    active_identities.add(identity_pair(key, exists["payload"]))
                     continue
                 # A later occurrence is a separate candidate, even for the same identity.
                 # Delivery validates all three fingerprints against the immutable fact.
                 key = digest(
                     {"algorithm": "wlh.delivery-task-replay.v1", "target": key, "payload": payload}
                 )
-                if c.execute(
-                    "SELECT 1 FROM wlh.task WHERE run_id=%s AND kind='target' AND key=%s",
-                    (self.run_id, key),
-                ).fetchone():
+                if key in existing_targets:
                     continue
             state = "pending"
             if not exists and count >= self.config["budget"]["documents"]:
                 state = "skipped"
             target_id = uid()
-            c.execute(
-                """INSERT INTO wlh.task(id,run_id,kind,key,payload,state,error)
-                VALUES(%s,%s,'target',%s,%s,%s,%s)""",
-                (
-                    target_id,
-                    self.run_id,
-                    key,
-                    j(payload),
-                    state,
-                    "document_budget_exceeded" if state == "skipped" else None,
-                ),
-            )
+            row_err = "document_budget_exceeded" if state == "skipped" else None
+            new_targets.append((target_id, self.run_id, key, j(payload), state, row_err))
+            existing_targets[key] = {
+                "id": target_id,
+                "run_id": self.run_id,
+                "kind": "target",
+                "key": key,
+                "payload": payload,
+                "state": state,
+                "error": row_err,
+            }
             if state == "skipped":
                 skipped_budget = True
                 if self.truncated in non_error_trunc:
                     self.truncated = "document_budget_exceeded"
                 self.checkpoint["truncated"] = self.truncated
                 continue
+            active_identities.add(identity_pair(key, payload))
             for position, item in enumerate(target["inputs"]):
-                request_id: str = self.insert_request(
-                    c, item["request"], item["request"].get("depth", depth)
+                request_id: str = ensure_request(
+                    item["request"], item["request"].get("depth", depth)
                 )
-                c.execute(
-                    """INSERT INTO wlh.task_input(target_id,request_id,position)
-                    VALUES(%s,%s,%s) ON CONFLICT DO NOTHING""",
-                    (target_id, request_id, position),
-                )
+                new_inputs.append((target_id, request_id, position))
+        if new_targets or new_inputs:
+            with c.cursor() as cur:
+                if new_targets:
+                    cur.executemany(
+                        """INSERT INTO wlh.task(id,run_id,kind,key,payload,state,error)
+                        VALUES(%s,%s,'target',%s,%s,%s,%s)""",
+                        new_targets,
+                    )
+                if new_inputs:
+                    cur.executemany(
+                        """INSERT INTO wlh.task_input(target_id,request_id,position)
+                        VALUES(%s,%s,%s) ON CONFLICT DO NOTHING""",
+                        new_inputs,
+                    )
         if parent is not None:
             c.execute(
                 """UPDATE wlh.task SET state='done',attempt_epoch=%s,
@@ -144,18 +192,7 @@ def register(
             )
 
         if skipped_budget or self.truncated == "document_budget_exceeded":
-            active_targets: int = cast(
-                dict[str, Any],
-                c.execute(
-                    """SELECT count(DISTINCT (
-                        COALESCE(payload #>> '{identity,namespace}', key),
-                        COALESCE(payload #>> '{identity,external_key}', key)
-                    )) AS n FROM wlh.task WHERE run_id=%s AND kind='target'
-                    AND state NOT IN ('failed', 'skipped')""",
-                    (self.run_id,),
-                ).fetchone(),
-            )["n"]
-            if active_targets >= self.config["budget"]["documents"]:
+            if len(active_identities) >= self.config["budget"]["documents"]:
                 c.execute(
                     """UPDATE wlh.task r SET state='skipped',error='document_budget_exceeded',
                     attempt_epoch=%s,updated_at=clock_timestamp()

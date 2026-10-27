@@ -61,6 +61,7 @@ class Runtime:
         self.adapter: Base = load(self.config["adapter"])(self.config)
         self.ocr_cache: dict[str, str] = {}
         self.derived_ocr: dict[str, dict[str, str]] = {}
+        self.acquisition_cache: dict[str, dict[str, Any]] = {}
         self.ctx: Context = Context(self)
         plan: Mapping[str, Any] = context.get("recheck_plan") or context.get("reparse_plan") or {}
         self.truncated: str | None = self.checkpoint.get("truncated") or (
@@ -118,8 +119,16 @@ class Runtime:
             return c.execute(query, params).fetchall()
 
     def acquisition(self, identity: str | None) -> dict[str, Any] | None:
+        if not identity:
+            return None
+        cached = self.acquisition_cache.get(identity)
+        if cached is not None:
+            return cached
         with connect() as c:
-            return c.execute("SELECT * FROM wlh.acquisition WHERE id=%s", (identity,)).fetchone()
+            row = c.execute("SELECT * FROM wlh.acquisition WHERE id=%s", (identity,)).fetchone()
+        if row is not None and row.get("state") == "archived":
+            self.acquisition_cache[identity] = row
+        return row
 
     def reuse(self, key: str) -> dict[str, Any] | None:
         """An archived final response from an earlier attempt is re-read, never refetched."""
@@ -205,10 +214,11 @@ class Runtime:
         return await self.session.acquire(request)
 
     async def fetch_batch(self) -> bool:
+        batch_limit = max(int(self.config["concurrency"]) * 8, int(self.config["concurrency"]))
         tasks: list[dict[str, Any]] = self.rows(
             """SELECT * FROM wlh.task WHERE run_id=%s AND kind='request' AND state='pending'
             ORDER BY seq LIMIT %s""",
-            (self.run_id, self.config["concurrency"]),
+            (self.run_id, batch_limit),
         )
         if not tasks:
             return False

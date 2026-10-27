@@ -22,7 +22,7 @@ from wlh.adapters.bridges.common import RecordAdapter
 from wlh.config import MAX_ORIGINAL_BYTES
 from wlh.core import WlhError, public_url
 from wlh.engine.scope import guard
-from wlh.extraction.markdown import normalized
+from wlh.extraction.markdown import html_to_markdown, normalized
 
 etree: Any
 lxml_html: Any
@@ -160,26 +160,31 @@ class Adapter(RecordAdapter):
         raw_bytes = data
         zipped = data.startswith(b"PK\x03\x04")
         total_nodes = 1
+        extra_xml_blobs: list[bytes] = []
         if zipped:
             max_bytes = max(int(self.config["budget"]["response_bytes"]), MAX_ORIGINAL_BYTES)
             try:
                 with zipfile.ZipFile(io.BytesIO(data)) as archive:
-                    member: zipfile.ZipInfo | None = next(
-                        (
-                            m
-                            for m in archive.infolist()
-                            if not m.is_dir() and m.filename.lower().endswith(".xml")
-                        ),
-                        None,
-                    )
-                    if member is None:
+                    members = [
+                        m
+                        for m in sorted(archive.infolist(), key=lambda item: item.filename)
+                        if not m.is_dir() and m.filename.lower().endswith(".xml")
+                    ]
+                    if not members:
                         raise WlhError("zip_without_xml")
-                    if member.file_size > max_bytes:
-                        raise WlhError("zip_expanded_size_exceeded")
-                    with archive.open(member) as source:
-                        data = source.read(max_bytes + 1)
-                    if len(data) > max_bytes:
-                        raise WlhError("zip_expanded_size_exceeded")
+                    total_expanded = 0
+                    xml_blobs: list[bytes] = []
+                    for member in members:
+                        if member.file_size > max_bytes:
+                            raise WlhError("zip_expanded_size_exceeded")
+                        with archive.open(member) as source:
+                            blob = source.read(max_bytes - total_expanded + 1)
+                        total_expanded += len(blob)
+                        if total_expanded > max_bytes:
+                            raise WlhError("zip_expanded_size_exceeded")
+                        xml_blobs.append(blob)
+                    data = xml_blobs[0]
+                    extra_xml_blobs = xml_blobs[1:]
             except (zipfile.BadZipFile, OSError, ValueError, RuntimeError):
                 raise WlhError("zip_invalid") from None
         if not zipped:
@@ -350,14 +355,100 @@ class Adapter(RecordAdapter):
                         None,
                     )
                 )
+        elif tag == "Gazette" or (
+            root.xpath('.//*[local-name()="Record" and *[local-name()="MetaId"]]')
+        ):
+            xml_parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
+            roots: list[Any] = [root]
+            for extra_blob in extra_xml_blobs:
+                if b"<!ENTITY" in extra_blob.upper():
+                    raise WlhError("legal_xml_doctype_rejected")
+                try:
+                    roots.append(etree.fromstring(extra_blob, xml_parser))
+                except etree.XMLSyntaxError:
+                    raise WlhError("legal_xml_invalid") from None
+            nodes = [
+                rec
+                for r_node in roots
+                for rec in r_node.xpath('.//*[local-name()="Record"]')
+            ]
+            total_nodes = len(nodes)
+            limit = int(self.config["budget"]["documents"])
+            if total_nodes > limit:
+                self.truncated = "document_budget_exceeded"
+                nodes = nodes[:limit]
+            entries = []
+            for n in nodes:
+                meta_id = select(n, "MetaId")
+                rec_url = (
+                    f"https://gazette.nat.gov.tw/egFront/detail.do?metaid={meta_id}&log=detailLog"
+                    if meta_id
+                    else select(n, "GazetteHTML")
+                )
+                doc_style = select(n, "Doc_Style_LName")
+                rec_title = (
+                    select(n, "Title")
+                    or select(n, "ThemeSubject")
+                    or select(n, "GazetteId")
+                    or (f"行政院公報第{meta_id}號" if meta_id else None)
+                )
+                if not rec_title or not (rec_url or rec_title):
+                    continue
+                entries.append(
+                    (
+                        n,
+                        rec_title,
+                        select(n, "GazetteId") or meta_id,
+                        rec_url or rec_title,
+                        select(n, "Date_Published", "Date_Created"),
+                        select(n, "PubGovName", "PubGov"),
+                        "法律法规" if doc_style == "法規" else None,
+                    )
+                )
         else:
             raise WlhError("unsupported_legal_xml_vocabulary")
         result: list[dict[str, Any]] = []
         for node, title, number, key, published, issuer, doc_type in entries:
             if not title or not key:
                 raise WlhError("legal_xml_identity_missing")
-            if published and re.fullmatch(r"\d{8}", published):
-                published = f"{published[:4]}-{published[4:6]}-{published[6:]}"
+            if published:
+                m_roc = re.search(
+                    r"(?:中華)?民國\s*(\d{1,3})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
+                    published,
+                )
+                if m_roc:
+                    published = (
+                        f"{int(m_roc.group(1)) + 1911:04d}-"
+                        f"{int(m_roc.group(2)):02d}-"
+                        f"{int(m_roc.group(3)):02d}"
+                    )
+                elif re.fullmatch(r"\d{8}", published):
+                    published = f"{published[:4]}-{published[4:6]}-{published[6:]}"
+            html_content = select(node, "HTMLContent") if tag == "Gazette" else None
+            if html_content:
+                cleaned_html = re.sub(r"<!--.*?-->", "", html_content, flags=re.S)
+                cleaned_html = re.sub(r"<\s*$", "", cleaned_html.strip())
+                cleaned_html = re.sub(
+                    r"</?(?:table|tbody|thead|tr|td|th)\b[^>]*>",
+                    "\n<p>",
+                    cleaned_html,
+                    flags=re.I,
+                )
+                body_md = html_to_markdown(
+                    b"<meta charset='utf-8'><div>" + cleaned_html.encode("utf-8") + b"</div>",
+                    key,
+                )
+                if not body_md.strip():
+                    body_md = normalized(
+                        "\n\n".join(
+                            part
+                            for part in (select(node, "ThemeSubject"), select(node, "Explain"))
+                            if part
+                        )
+                    )
+                text_body = "# " + title + "\n\n" + body_md
+            else:
+                text_body = "# " + title + "\n\n" + markdown(node)
             result.append(
                 {
                     "external_key": key,
@@ -366,7 +457,7 @@ class Adapter(RecordAdapter):
                     "published_at": published,
                     "issuer": issuer,
                     "doc_type": doc_type,
-                    "text": "# " + title + "\n\n" + markdown(node),
+                    "text": text_body,
                     "detail_url": acquisition["actual_url"],
                     "original": (
                         {

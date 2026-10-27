@@ -7,6 +7,7 @@ import json
 import os
 import re
 import time
+from collections import OrderedDict
 from functools import cache
 from pathlib import Path
 from typing import Any, cast
@@ -17,6 +18,30 @@ from botocore.config import Config  # type: ignore[import-untyped]
 from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[import-untyped]
 
 from wlh.core import WlhError, canonical, digest
+
+_VERIFIED_CACHE: OrderedDict[tuple[str, str], bytes] = OrderedDict()
+_verified_cache_bytes: int = 0
+_MAX_CACHE_ITEM_BYTES: int = 67108864
+_MAX_CACHE_TOTAL_BYTES: int = 134217728
+_MAX_CACHE_ENTRIES: int = 64
+
+
+def _cache_verified(bucket: str, key: str, body: bytes) -> None:
+    global _verified_cache_bytes
+    if len(body) > _MAX_CACHE_ITEM_BYTES:
+        return
+    cache_key = (bucket, key)
+    old = _VERIFIED_CACHE.pop(cache_key, None)
+    if old is not None:
+        _verified_cache_bytes -= len(old)
+    while _VERIFIED_CACHE and (
+        len(_VERIFIED_CACHE) >= _MAX_CACHE_ENTRIES
+        or _verified_cache_bytes + len(body) > _MAX_CACHE_TOTAL_BYTES
+    ):
+        _, evicted = _VERIFIED_CACHE.popitem(last=False)
+        _verified_cache_bytes -= len(evicted)
+    _VERIFIED_CACHE[cache_key] = body
+    _verified_cache_bytes += len(body)
 
 
 @cache
@@ -114,8 +139,10 @@ class Objects:
             if cast(Any, exc).response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 412:
                 raise WlhError("archive_write_failed") from None
             self.get(key)
+            return key
         except (BotoCoreError, OSError):
             raise WlhError("archive_write_failed") from None
+        _VERIFIED_CACHE.pop((self.bucket, key), None)
         self.get(key)
         return key
 
@@ -125,6 +152,12 @@ class Objects:
         self.key(key)
         if deadline is not None and time.monotonic() >= deadline:
             raise WlhError("archive_read_timeout")
+        cached = _VERIFIED_CACHE.get((self.bucket, key))
+        if cached is not None:
+            if max_bytes is not None and len(cached) > max_bytes:
+                raise WlhError("archive_too_large")
+            _VERIFIED_CACHE.move_to_end((self.bucket, key))
+            return cached
         try:
             response = self.client.get_object(Bucket=self.bucket, Key=key)
             stream = response["Body"]
@@ -156,6 +189,7 @@ class Objects:
             raise WlhError("archive_unreadable") from None
         if digest(body) != key:
             raise WlhError("archive_corrupt")
+        _cache_verified(self.bucket, key, body)
         return body
 
     def put_json(self, value: Any) -> str:

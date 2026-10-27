@@ -258,7 +258,7 @@ class SourceConfig(Strict):
     robots_redirect_urls: list[str] = Field(default_factory=list, max_length=20)
     user_agent: str = Field(default="WLH/0.1 (+authorized archival crawler)", max_length=256)
     recheck_seconds: int = Field(default=86400, ge=0, le=31536000)
-    concurrency: int = Field(default=2, ge=1, le=8)
+    concurrency: int = Field(default=2, ge=1, le=32)
     delay: float = Field(default=0.1, ge=0.0, le=60.0)
     budget: Budget = Field(default_factory=Budget)
     fetch: FetchConfig = Field(default_factory=FetchConfig)

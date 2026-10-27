@@ -292,7 +292,7 @@ class Transport:
                 connector=aiohttp.TCPConnector(
                     limit=self.config["concurrency"],
                     resolver=Resolver(),
-                    force_close=True,
+                    force_close=False,
                     ssl=ssl_ctx,
                 ),
                 timeout=aiohttp.ClientTimeout(total=self.config["fetch"]["page_timeout_ms"] / 1000),

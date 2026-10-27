@@ -542,6 +542,52 @@ allowed_path_prefixes:
                     f"{cfg.id} attachment_url_pattern {att_pat!r} must not match both .docx and .pdf simultaneously"
                 )
 
+    def test_concurrency_up_to_32_loads_and_above_32_raises_validation_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Source configs with `concurrency` up to 32 load cleanly, whereas `concurrency` of 0 or above 32 raises `invalid_source_config`."""
+        from wlh.config import load_file
+        from wlh.core import WlhError
+
+        base_template = """
+id: dd-499
+adapter: federal_register
+archive_approved: true
+scope: "Federal Register API concurrency test"
+concurrency: {concurrency}
+entry_urls:
+  - "https://www.federalregister.gov/api/v1/documents.json?per_page=2"
+allowed_hosts:
+  - "www.federalregister.gov"
+allowed_path_prefixes:
+  - "/api/v1/"
+metadata:
+  source_name: "Federal Register"
+  document_type: "法律法规"
+  language: "en"
+  jurisdiction: "US"
+""".strip()
+
+        for allowed_c in (12, 32):
+            yaml_path = tmp_path / f"concurrency_{allowed_c}.yaml"
+            yaml_path.write_text(
+                base_template.format(concurrency=allowed_c),
+                encoding="utf-8",
+            )
+            cfg = load_file(yaml_path)
+            assert cfg.concurrency == allowed_c
+
+        for invalid_c in (0, 33):
+            yaml_path = tmp_path / f"concurrency_{invalid_c}.yaml"
+            yaml_path.write_text(
+                base_template.format(concurrency=invalid_c),
+                encoding="utf-8",
+            )
+            with pytest.raises(WlhError) as exc_info:
+                load_file(yaml_path)
+            assert exc_info.value.code == "invalid_source_config"
+
+
 
 class TestRunbookVerificationSamples:
     def test_sample_renderer_builds_two_column_payload_and_markdown_table_capped_at_ten_items(
