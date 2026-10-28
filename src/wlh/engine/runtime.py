@@ -9,11 +9,12 @@ the same transaction that completes their parent request, before any watermark m
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 from wlh.adapters import Base, CasSessionProxy, RawRecord, load
-from wlh.core import WlhError, uid
+from wlh.core import WlhError, digest, uid
 from wlh.db import DbConn, connect, fenced, j, locked_run, one, record_error
 from wlh.domain.document import build
 from wlh.domain.resources import commit, fail, save_checkpoint
@@ -22,6 +23,8 @@ from wlh.engine.objects import Objects
 from wlh.engine.runtime_registration import register
 from wlh.engine.runtime_report import build_report
 from wlh.engine.transport import Budget, Recorder, Transport, request_key
+from wlh.extraction.office import detect_real_format
+from wlh.extraction.process import run_extraction
 
 if TYPE_CHECKING:
     from wlh.engine.browser import Browser
@@ -62,6 +65,8 @@ class Runtime:
         self.ocr_cache: dict[str, str] = {}
         self.derived_ocr: dict[str, dict[str, str]] = {}
         self.acquisition_cache: dict[str, dict[str, Any]] = {}
+        self.extract_cache: dict[tuple[str, str], dict[str, Any] | WlhError] = {}
+        self._inflight: dict[str, tuple[dict[str, Any], asyncio.Task[Mapping[str, Any]]]] = {}
         self.ctx: Context = Context(self)
         plan: Mapping[str, Any] = context.get("recheck_plan") or context.get("reparse_plan") or {}
         self.truncated: str | None = self.checkpoint.get("truncated") or (
@@ -215,15 +220,58 @@ class Runtime:
 
     async def fetch_batch(self) -> bool:
         batch_limit = max(int(self.config["concurrency"]) * 8, int(self.config["concurrency"]))
-        tasks: list[dict[str, Any]] = self.rows(
-            """SELECT * FROM wlh.task WHERE run_id=%s AND kind='request' AND state='pending'
-            ORDER BY seq LIMIT %s""",
-            (self.run_id, batch_limit),
-        )
-        if not tasks:
+        slots_avail = max(0, batch_limit - len(self._inflight))
+        tasks: list[dict[str, Any]] = []
+        if slots_avail > 0:
+            inflight_ids = list(self._inflight.keys())
+            excl_sql = "AND id != ALL(%s)" if inflight_ids else ""
+            base_params: tuple[Any, ...] = (
+                (self.run_id, inflight_ids) if inflight_ids else (self.run_id,)
+            )
+            page_tasks: list[dict[str, Any]] = self.rows(
+                f"""SELECT * FROM wlh.task WHERE run_id=%s AND kind='request' AND state='pending'
+                {excl_sql} AND COALESCE(payload->>'role', 'page') != 'attachment'
+                ORDER BY seq LIMIT %s""",
+                (*base_params, slots_avail),
+            )
+            attachment_backlog = (
+                self.rows(
+                    f"""SELECT count(*) AS n FROM wlh.task WHERE run_id=%s AND kind='request'
+                    AND state='pending' {excl_sql} AND payload->>'role' = 'attachment'""",
+                    base_params,
+                )[0]["n"]
+                if page_tasks
+                else 0
+            )
+            if page_tasks and attachment_backlog < 240:
+                tasks = page_tasks
+            else:
+                tasks = self.rows(
+                    f"""SELECT * FROM wlh.task WHERE run_id=%s AND kind='request' AND state='pending'
+                    {excl_sql}
+                    ORDER BY (COALESCE(payload->>'role', 'page') != 'attachment'), seq LIMIT %s""",
+                    (*base_params, slots_avail),
+                )
+        for t in tasks:
+            self._inflight[t["id"]] = (t, asyncio.create_task(self.fetch(t)))
+        if not self._inflight:
             return False
-        results = await asyncio.gather(*(self.fetch(t) for t in tasks), return_exceptions=True)
-        for task, result in zip(tasks, results, strict=True):
+        futs = [fut for _, fut in self._inflight.values()]
+        await asyncio.wait(futs, return_when=asyncio.FIRST_COMPLETED)
+        pending_futs = [fut for fut in futs if not fut.done()]
+        if pending_futs:
+            await asyncio.wait(pending_futs, timeout=2.5, return_when=asyncio.ALL_COMPLETED)
+        completed_entries = sorted(
+            (entry for entry in self._inflight.values() if entry[1].done()),
+            key=lambda item: item[0]["seq"],
+        )
+        for task, fut in completed_entries:
+            self._inflight.pop(task["id"], None)
+            result: Mapping[str, Any] | BaseException
+            try:
+                result = fut.result()
+            except BaseException as exc:
+                result = exc
             if isinstance(result, WlhError):
                 if result.code in {"request_budget_exceeded", "crawl_time_budget_exceeded"}:
                     self.truncated = result.code
@@ -408,11 +456,94 @@ class Runtime:
         )
         return result
 
+    def _prewarm_chunk(self, chunk: Sequence[Mapping[str, Any]]) -> None:
+        if len(chunk) <= 1:
+            return
+        jobs: dict[tuple[str, str], tuple[bytes, str, dict[str, Any] | None]] = {}
+        binary_kinds = {"pdf", "doc", "docx", "rtf", "xls", "xlsx", "zip"}
+        for target in chunk:
+            frozen = target["payload"].get("frozen")
+            acq_ids: list[str] = []
+            if frozen:
+                acq_ids = [
+                    str(item["acquisition_id"])
+                    for item in frozen.get("inputs", [])
+                    if item.get("acquisition_id")
+                ]
+            else:
+                acq_ids = [
+                    str(row["acquisition_id"])
+                    for row in self.target_inputs(target)
+                    if row.get("acquisition_id")
+                ]
+            for aid in acq_ids:
+                acq = self.acquisition(aid)
+                if not acq or acq.get("state") != "archived" or acq.get("outcome") != "ok":
+                    continue
+                try:
+                    data = self.ctx.read(acq)
+                except WlhError:
+                    continue
+                kind = detect_real_format(
+                    data, "html" if acq.get("mime_type") == "text/html" else ""
+                )
+                if kind not in binary_kinds:
+                    continue
+                d_hash = digest(data)
+                ck = (d_hash, kind)
+                if ck in jobs or ck in self.extract_cache:
+                    continue
+                ocr_key = digest(
+                    {
+                        "original": d_hash,
+                        "model": self.config["ocr"]["model"],
+                        "contract": "wlh.ocr-cache.v1",
+                    }
+                )
+                cached_ref = self.ocr_cache.get(ocr_key)
+                cached_ocr = self.ctx.objects.json(cached_ref) if cached_ref else None
+                jobs[ck] = (data, kind, cached_ocr)
+        if len(jobs) <= 1:
+            return
+
+        def _extract_one(
+            item: tuple[tuple[str, str], tuple[bytes, str, dict[str, Any] | None]],
+        ) -> tuple[tuple[str, str], dict[str, Any] | WlhError]:
+            ck, (payload, knd, cached) = item
+            try:
+                res = run_extraction(
+                    payload, knd, self.config, active=self.budget.active, cached_ocr=cached
+                )
+                return ck, res
+            except WlhError as exc:
+                if exc.code in {
+                    "interrupted",
+                    "crawl_time_budget_exceeded",
+                    "deadline_exceeded",
+                    "stale_attempt",
+                    "inactive_attempt",
+                    "run_not_started",
+                    "extraction_cleanup_failed",
+                }:
+                    raise
+                return ck, exc
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            for ck, outcome in pool.map(_extract_one, jobs.items()):
+                self.extract_cache[ck] = outcome
+
     def deliver_ready(self) -> bool:
         targets = self.ready_targets()
-        for target in targets:
-            self.budget.active()
-            self.deliver(target)
+        chunk_size = 32
+        for start in range(0, len(targets), chunk_size):
+            chunk = targets[start : start + chunk_size]
+            try:
+                self._prewarm_chunk(chunk)
+                for target in chunk:
+                    self.budget.active()
+                    self.deliver(target)
+            finally:
+                self.extract_cache.clear()
         return bool(targets)
 
     def close_unfinished(self) -> None:
@@ -468,6 +599,13 @@ class Runtime:
             if exc.code != "interrupted":
                 record_error(self.run_id, self.epoch, exc.code)
         finally:
+            if self._inflight:
+                for _, fut in self._inflight.values():
+                    fut.cancel()
+                await asyncio.gather(
+                    *(fut for _, fut in self._inflight.values()), return_exceptions=True
+                )
+                self._inflight.clear()
             await self.transport.close()
             if self.browser is not None:
                 await self.browser.close()

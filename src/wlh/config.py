@@ -45,6 +45,7 @@ ADAPTERS = (
     "web",
     "federal_register",
     "structured_xml",
+    "japan_courts",
     "worldwidelaw_bridge",
     "juriscraper_bridge",
     "oldp_bridge",
@@ -124,7 +125,7 @@ class Strict(BaseModel):
 
 
 class Budget(Strict):
-    requests: int = Field(default=100, ge=1, le=100000)
+    requests: int = Field(default=100, ge=1, le=200000)
     seconds: int = Field(default=120, ge=1, le=86400)
     response_bytes: int = Field(default=10485760, ge=1024, le=MAX_ORIGINAL_BYTES)
     documents: int = Field(default=10, ge=1, le=1000000)
@@ -168,6 +169,7 @@ class FieldRule(Strict):
 
 class DocumentRules(Strict):
     detail_url_patterns: list[str] = Field(default_factory=list, max_length=50)
+    detail_xpath: str | None = Field(default=None, max_length=2000)
     attachment_url_pattern: str = r"(?i)\.(?:pdf|docx?|rtf|xlsx?|zip)(?:$|[?#])"
     volume_pattern: str | None = Field(
         default=r"(?i)(?:phần|quyển|tập|part|vol\.?|volume|卷|第)\s*0*([1-9][0-9]{0,2})\b",
@@ -176,6 +178,8 @@ class DocumentRules(Strict):
     attachment_title: str = Field(default="link_text", pattern="^(link_text|file_name)$")
     detail_body: str = Field(default="auto", pattern="^(auto|always|never)$")
     content_xpath: str | None = Field(default=None, max_length=1000)
+    require_complete_text: bool = False
+    binary_title_from_link: bool = False
     fields: dict[str, FieldRule] = Field(default_factory=dict)
 
     @field_validator("detail_url_patterns")
@@ -188,7 +192,7 @@ class DocumentRules(Strict):
     def valid_pattern(cls, value: str | None) -> str | None:
         return regex(value)
 
-    @field_validator("content_xpath")
+    @field_validator("content_xpath", "detail_xpath")
     @classmethod
     def valid_content(cls, value: str | None) -> str | None:
         return xpath(value)

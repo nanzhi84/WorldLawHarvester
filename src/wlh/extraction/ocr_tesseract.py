@@ -17,6 +17,17 @@ import pymupdf as _fitz  # type: ignore[import-untyped]
 from wlh.core import WlhError
 
 fitz: Any = _fitz
+_TESSERACT_META: dict[str, tuple[set[str], str]] = {}
+
+
+def _tesseract_meta(executable: str) -> tuple[set[str], str]:
+    cached = _TESSERACT_META.get(executable)
+    if cached is not None:
+        return cached
+    available = set(command([executable, "--list-langs"], 65536, 5).splitlines()[1:])
+    version = command([executable, "--version"], 65536, 5).splitlines()[0]
+    _TESSERACT_META[executable] = (available, version)
+    return available, version
 
 
 def command(args: Sequence[str], limit: int, timeout: float) -> str:
@@ -40,12 +51,17 @@ def command(args: Sequence[str], limit: int, timeout: float) -> str:
 
 
 def tesseract_pages(
-    path: str | Path, numbers: Sequence[int], cfg: Mapping[str, Any], deadline: float
+    path: str | Path,
+    numbers: Sequence[int],
+    cfg: Mapping[str, Any],
+    deadline: float,
+    *,
+    nonblank_scans: set[int] | None = None,
 ) -> tuple[dict[int, str], dict[str, Any]]:
     executable = shutil.which(os.environ.get("WLH_TESSERACT", "tesseract"))
     if not executable:
         raise WlhError("ocr_engine_unavailable")
-    available = command([executable, "--list-langs"], 65536, 5).splitlines()[1:]
+    available, version = _tesseract_meta(executable)
     if not set(cfg["languages"].split("+")).issubset(available):
         raise WlhError("ocr_language_unavailable")
     if len(numbers) > cfg["max_pages"]:
@@ -57,15 +73,17 @@ def tesseract_pages(
         fitz.open(path) as document,
         tempfile.TemporaryDirectory(prefix="wlh-ocr-", dir=Path(path).resolve().parent) as folder,
     ):
+        scale = cfg["dpi"] / 72
         for number in numbers:
+            page = document[number - 1]
+            pixels = math.ceil(page.rect.width * scale) * math.ceil(page.rect.height * scale)
+            if pixels <= 0 or pixels > cfg["max_page_pixels"]:
+                raise WlhError("pdf_ocr_pixel_limit_exceeded")
+        for idx, number in enumerate(numbers):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise WlhError("pdf_ocr_timeout")
             page = document[number - 1]
-            scale = cfg["dpi"] / 72
-            pixels = math.ceil(page.rect.width * scale) * math.ceil(page.rect.height * scale)
-            if pixels <= 0 or pixels > cfg["max_page_pixels"]:
-                raise WlhError("pdf_ocr_pixel_limit_exceeded")
             image = Path(folder) / f"page-{number}.png"
             page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csGRAY).save(image)
             try:
@@ -88,5 +106,8 @@ def tesseract_pages(
                 image.unlink(missing_ok=True)
             size += len(text.encode())
             result[number] = text
-    version = command([executable, "--version"], 65536, 5).splitlines()[0]
+            if nonblank_scans and number in nonblank_scans and len(text.strip()) < 30:
+                for rest in numbers[idx + 1 :]:
+                    result[rest] = ""
+                break
     return result, {"engine": "tesseract", "version": version, "languages": cfg["languages"]}

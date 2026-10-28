@@ -99,11 +99,14 @@ columns:
     description: 效力状态（如现行有效、尚未生效、已修改、已废止或源站原始状态）
 
   - index: 13
-    canonical_key: source_name
-    zh_label: 来源名称
+    canonical_key:
+      - source_id
+      - source_name
+      - jurisdiction
+    zh_label: 来源标识与名称
     type: string
     nullable: false
-    description: 官方来源名称（默认继承自 sources/dd-xxx.yaml 的 metadata.source_name）
+    description: 稳定来源编号（如 dd-578）、官方来源名称（metadata.source_name）与 ISO 法域二字码（metadata.jurisdiction，如 TW）
 
   - index: 14
     canonical_key: detail_url

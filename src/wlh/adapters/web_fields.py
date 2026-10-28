@@ -10,12 +10,12 @@ from typing import Any, cast
 from urllib.parse import parse_qs, unquote, urljoin, urlsplit, urlunsplit
 
 import lxml.etree as etree
-from lxml import html  # type: ignore[import-untyped]
 
+from wlh.adapters.japanese_dates import era_date
 from wlh.core import WlhError, public_url
+from wlh.extraction.html_tree import document_tree
 
 etree: Any
-html: Any
 DATE_FIELDS: set[str] = {"published_at", "effective_at", "expired_at"}
 
 
@@ -27,6 +27,10 @@ def decode(data: bytes, charset: str | None) -> tuple[str, str]:
         )
         if match:
             detected = match.group(1).decode("ascii", errors="ignore")
+    # Browser Shift_JIS decoding includes the Windows Japanese extensions used
+    # in official tax pages (circled numbers, compatibility kanji and symbols).
+    if detected and detected.lower().replace("-", "_") in {"shift_jis", "sjis", "ms_kanji"}:
+        detected = "cp932"
     for encoding in (detected, "utf-8"):
         if encoding:
             try:
@@ -39,7 +43,7 @@ def decode(data: bytes, charset: str | None) -> tuple[str, str]:
 def parse_html(data: bytes, charset: str | None) -> tuple[Any, str, str]:
     text, encoding = decode(data, charset)
     try:
-        tree: Any = html.document_fromstring(text)
+        tree: Any = document_tree(text)
     except (etree.ParserError, ValueError):
         raise WlhError("html_unparseable") from None
     return tree, text, encoding
@@ -93,6 +97,9 @@ def parse_date(value: str, fmt: str | None = None) -> str | None:
             return datetime.strptime(text, fmt).date().isoformat()
         except ValueError:
             raise WlhError("document_date_unparseable") from None
+    japanese = era_date(text)
+    if japanese is not None:
+        return japanese
     roc_zh_match: re.Match[str] | None = re.search(
         r"(?:中華民國|民國)\s*(\d{1,3})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", text
     )

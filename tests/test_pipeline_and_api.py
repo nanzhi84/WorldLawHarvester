@@ -209,10 +209,13 @@ callers:
 
                 from wlh.projections.canonical import COLUMNS
 
+                assert "source_id" in COLUMNS
+                assert "jurisdiction" in COLUMNS
                 for item in items_default:
                     assert tuple(item.keys()) == COLUMNS
+                    assert item["source_id"] == "dd-902"
+                    assert item["jurisdiction"] == "VN"
                     for hidden_key in (
-                        "source_id",
                         "resource_id",
                         "version_id",
                         "row_index",

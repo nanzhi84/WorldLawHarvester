@@ -6,7 +6,9 @@ when a document also contains scans. Quality failures are never successful Versi
 
 from __future__ import annotations
 
+import re
 import time
+import unicodedata
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
@@ -17,12 +19,13 @@ from wlh.core import WlhError
 from wlh.extraction.markdown import normalized, text_to_markdown
 from wlh.extraction.ocr_br import br_ocr
 from wlh.extraction.ocr_tesseract import tesseract_pages
+from wlh.extraction.pdf_markdown import clean_soft_hyphens, page_markdown
 from wlh.extraction.quality import block_text, json_value, quality_check
 from wlh.extraction.vi_tcvn3 import normalize_detected_tcvn3
 
 fitz: Any = _fitz
 
-PDF_CONTRACT = "wlh.pdf-scan.v2"
+PDF_CONTRACT = "wlh.pdf-scan.v12"
 SCAN_TEXT_CHARS = 30
 SCAN_INK_RATIO = 0.003
 INK_THRESHOLD = 210
@@ -115,10 +118,25 @@ def extract_pdf(
 ) -> tuple[str, dict[str, Any], dict[str, Any], list[str]]:
     analysis, native = analyze(path)
     scans = analysis["suspected_scan_pages"]
+    if any(
+        page["embedded_images"] and not page["suspected_scan"] for page in analysis["pages"]
+    ):
+        # A native text layer can coexist with image-only diagrams/forms. Until
+        # those assets are archived and presented in the rendered document, a
+        # text-length score cannot establish complete delivery. No size-based
+        # guess that an image is decorative is safe for a legal document.
+        raise WlhError("pdf_images_unverified")
+    if any(unicodedata.category(char) == "Cc" and not char.isspace()
+           for text in native for char in text):
+        # Broken font mappings can yield plenty of native characters, including
+        # invisible C0/C1 values. Deleting those bytes would conceal lost words.
+        raise WlhError("pdf_native_text_unreadable")
     texts: dict[int, str] = {}
     recovered = False
     for i, text in enumerate(native, 1):
-        texts[i], changed = normalize_detected_tcvn3(text)
+        # Section signs, currencies and diacritics are ordinary legal text in
+        # other languages; their presence is not evidence of Vietnamese fonts.
+        texts[i], changed = normalize_detected_tcvn3(text) if profile == "vi" else (text, False)
         recovered |= changed
     info: dict[str, Any] = {"kind": "pdf", "analysis": analysis, "method": "native", "ocr": None}
     parsers: list[str] = ["pdf", "quality"]
@@ -160,18 +178,43 @@ def extract_pdf(
                 service_blocks = []
         if recognized is None or not all(recognized.values()):
             # Local fallback receives its own bounded budget after a failed service job.
+            nonblank_scans = {
+                p["page"]
+                for p in analysis["pages"]
+                if p["suspected_scan"] and (p["ink_ratio"] >= 0.012 or p["native_text_chars"] >= 20)
+            }
             recognized, local = tesseract_pages(
-                path, scans, ocr, time.monotonic() + ocr["timeout_seconds"]
+                path,
+                scans,
+                ocr,
+                time.monotonic() + ocr["timeout_seconds"],
+                nonblank_scans=nonblank_scans,
             )
             engine.update(local)
         texts.update(recognized)
         info.update(method="hybrid_ocr" if len(scans) < len(native) else "ocr", ocr=engine)
         parsers.append("ocr")
-    markdown: str = normalized(
-        "\n".join(text_to_markdown(texts[n]) for n in sorted(texts) if texts[n].strip())
-    )
+    rendered: list[str] = []
+    with fitz.open(path) as document:
+        for n in sorted(texts):
+            if n in scans:
+                rendered.append(text_to_markdown(clean_soft_hyphens(texts[n])))
+            else:
+                page_text = page_markdown(document[n - 1], native[n - 1])
+                if profile == "vi":
+                    page_text, _ = normalize_detected_tcvn3(page_text)
+                rendered.append(page_text)
+    markdown: str = normalized("\n".join(rendered))
     if not markdown.strip():
         raise WlhError("pdf_no_text")
+    for page_text in rendered:
+        lines = [line.strip() for line in page_text.splitlines() if line.strip()]
+        fragments = sum(bool(re.fullmatch(r"[\u3040-\u30ff\u3400-\u9fff]", line)) for line in lines)
+        # Native glyph availability does not prove reading order. Vertical CJK
+        # forms can become many isolated characters while passing text counts.
+        # Do not guess how to join rows or columns whose layout was not recovered.
+        if fragments >= 12 and fragments / max(len(lines), 1) >= 0.25:
+            raise WlhError("pdf_layout_unverified")
     blocks = (
         service_blocks + page_blocks({n: t for n, t in texts.items() if n not in scans})
         if service_blocks

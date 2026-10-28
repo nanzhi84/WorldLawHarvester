@@ -22,7 +22,7 @@ class PDFSlots:
             raise WlhError("extraction_cleanup_failed")
 
     def try_acquire(self) -> int | None:
-        for index in range(4):
+        for index in range(8):
             slot = os.open(self.folder / str(index), os.O_CREAT | os.O_RDWR, 0o600)
             try:
                 fcntl.flock(slot, fcntl.LOCK_EX | fcntl.LOCK_NB)

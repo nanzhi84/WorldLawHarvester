@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 from wlh.core import WlhError, digest
@@ -53,31 +54,43 @@ class Context:
             raise WlhError("input_not_archived")
         return self.runtime.session.read(acquisition).content
 
+    def adapter_state(self) -> dict[str, Any]:
+        """Detached run checkpoint; changes become durable only through parse's result."""
+        state: dict[str, Any] = self.runtime.checkpoint.get("adapter_state") or {}
+        return deepcopy(state)
+
     def store(self, data: bytes) -> str:
         ref = self.objects.put(data)
         self.objects.get(ref)
         return ref
 
     def extract(self, data: bytes, kind: str) -> dict[str, Any]:
+        data_hash = digest(data)
         key: str = digest(
             {
-                "original": digest(data),
+                "original": data_hash,
                 "model": self.config["ocr"]["model"],
                 "contract": "wlh.ocr-cache.v1",
             }
         )
-        cached_ref = self.runtime.ocr_cache.get(key)
-        cached = self.objects.json(cached_ref) if cached_ref else None
-        result: dict[str, Any] = run_extraction(
-            data, kind, self.config, active=self.runtime.budget.active, cached_ocr=cached
-        )
+        pre = self.runtime.extract_cache.get((data_hash, kind))
+        if isinstance(pre, WlhError):
+            raise pre
+        if isinstance(pre, dict):
+            result: dict[str, Any] = deepcopy(pre)
+        else:
+            cached_ref = self.runtime.ocr_cache.get(key)
+            cached = self.objects.json(cached_ref) if cached_ref else None
+            result = run_extraction(
+                data, kind, self.config, active=self.runtime.budget.active, cached_ocr=cached
+            )
         info: dict[str, Any] = result.get("info") or {}
         engine: dict[str, Any] = info.get("ocr") or {}
         raw: Any = engine.pop("result", None)
         if raw is not None and engine.get("engine") == "br-ocr-v1":
             ref = self.objects.put_json(raw)
             self.runtime.ocr_cache[key] = ref
-            self.runtime.derived_ocr[digest(data)] = {"ref": ref, "key": key}
+            self.runtime.derived_ocr[data_hash] = {"ref": ref, "key": key}
             engine["result_ref"] = ref
         return result
 

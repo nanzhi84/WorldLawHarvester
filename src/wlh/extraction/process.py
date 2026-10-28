@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import select
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -19,6 +22,78 @@ from wlh.engine.objects import work_directory
 from wlh.extraction.slots import PDFSlots
 
 MAX_OUTPUT_BYTES = 80 * 1024 * 1024
+MAX_WARM_WORKERS = 8
+_POOL_LOCK = threading.Lock()
+_IDLE_WORKERS: list[subprocess.Popen[bytes]] = []
+
+
+def _worker_env() -> dict[str, str]:
+    env: dict[str, str] = {
+        k: os.environ[k]
+        for k in (
+            "PATH",
+            "LANG",
+            "LC_ALL",
+            "TMPDIR",
+            "SSL_CERT_FILE",
+            "TESSDATA_PREFIX",
+            "WLH_TESSERACT",
+            "WLH_SOFFICE",
+            "WLH_BR_OCR_URL",
+            "HOME",
+        )
+        if k in os.environ
+    }
+    env["OMP_THREAD_LIMIT"] = "1"
+    # Select this checkout without forwarding ambient PYTHONPATH or storage credentials.
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
+    return env
+
+
+def _checkout_worker() -> subprocess.Popen[bytes]:
+    with _POOL_LOCK:
+        while _IDLE_WORKERS:
+            proc = _IDLE_WORKERS.pop()
+            if proc.poll() is None and proc.stdin is not None and proc.stdout is not None:
+                return proc
+            try:
+                stop_group(proc)
+            except Exception:
+                pass
+    return subprocess.Popen(
+        [sys.executable, "-m", "wlh.extraction.extract_worker", "--daemon"],
+        cwd=work_directory(),
+        env=_worker_env(),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def _checkin_worker(proc: subprocess.Popen[bytes]) -> None:
+    if proc.poll() is not None:
+        return
+    with _POOL_LOCK:
+        if len(_IDLE_WORKERS) < MAX_WARM_WORKERS:
+            _IDLE_WORKERS.append(proc)
+            return
+    try:
+        stop_group(proc)
+    except Exception:
+        pass
+
+
+@atexit.register
+def _shutdown_warm_workers() -> None:
+    with _POOL_LOCK:
+        workers = list(_IDLE_WORKERS)
+        _IDLE_WORKERS.clear()
+    for proc in workers:
+        try:
+            stop_group(proc)
+        except Exception:
+            pass
 
 
 def stop_group(process: subprocess.Popen[bytes]) -> None:
@@ -64,51 +139,45 @@ def run_extraction(
     slots = PDFSlots()
     slot = slots.acquire_blocking(active)
     folder = Path(tempfile.mkdtemp(prefix="wlh-extract-", dir=work_directory()))
-    process = None
+    process: subprocess.Popen[bytes] | None = None
+    reusable = False
     try:
         job["path"] = str(folder / "input")
         (folder / "input").write_bytes(data)
-        env: dict[str, str] = {
-            k: os.environ[k]
-            for k in (
-                "PATH",
-                "LANG",
-                "LC_ALL",
-                "TMPDIR",
-                "SSL_CERT_FILE",
-                "TESSDATA_PREFIX",
-                "WLH_TESSERACT",
-                "WLH_SOFFICE",
-                "WLH_BR_OCR_URL",
-                "HOME",
-            )
-            if k in os.environ
-        }
-        env["OMP_THREAD_LIMIT"] = "1"
-        # Select this checkout without forwarding ambient PYTHONPATH or storage credentials.
-        env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
+        job_path = folder / "job.json"
         output_path = folder / "result.json"
-        with (folder / "job.json").open("w") as handle:
-            json.dump(job, handle)
-        with (folder / "job.json").open("rb") as stdin, output_path.open("wb") as stdout:
-            process = subprocess.Popen(
-                [sys.executable, "-m", "wlh.extraction.extract_worker"],
-                cwd=folder,
-                env=env,
-                stdin=stdin,
-                stdout=stdout,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            deadline = time.monotonic() + timeout
-            while process.poll() is None:
-                if active is not None:
-                    active()
-                if time.monotonic() >= deadline:
-                    raise WlhError("extraction_timeout")
-                if output_path.stat().st_size > MAX_OUTPUT_BYTES:
-                    raise WlhError("extraction_output_too_large")
-                time.sleep(0.05)
+        job_path.write_text(json.dumps(job), encoding="utf-8")
+        process = _checkout_worker()
+        assert process.stdin is not None and process.stdout is not None
+        req_line = (
+            json.dumps({"job_file": str(job_path), "output_file": str(output_path)}) + "\n"
+        ).encode("utf-8")
+        process.stdin.write(req_line)
+        process.stdin.flush()
+        deadline = time.monotonic() + timeout
+        stdout_fd = process.stdout.fileno()
+        buf = b""
+        while True:
+            if active is not None:
+                active()
+            if time.monotonic() >= deadline:
+                raise WlhError("extraction_timeout")
+            if output_path.exists() and output_path.stat().st_size > MAX_OUTPUT_BYTES:
+                raise WlhError("extraction_output_too_large")
+            wait_sec = min(0.05, max(0.001, deadline - time.monotonic()))
+            ready, _, _ = select.select([stdout_fd], [], [], wait_sec)
+            if ready:
+                chunk = os.read(stdout_fd, 4096)
+                if not chunk:
+                    break
+                buf += chunk
+                if b"__WLH_DONE__\n" in buf:
+                    reusable = True
+                    break
+            elif process.poll() is not None:
+                break
+        if not output_path.exists():
+            raise WlhError("extraction_output_invalid")
         if output_path.stat().st_size > MAX_OUTPUT_BYTES:
             raise WlhError("extraction_output_too_large")
         try:
@@ -139,7 +208,10 @@ def run_extraction(
     finally:
         try:
             if process is not None:
-                stop_group(process)
+                if reusable and process.poll() is None:
+                    _checkin_worker(process)
+                else:
+                    stop_group(process)
         except WlhError:
             slots.block()
             raise

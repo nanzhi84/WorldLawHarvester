@@ -13,61 +13,30 @@ from collections.abc import Mapping, Sequence
 from typing import Any, cast
 from urllib.parse import unquote, urlsplit, urlunsplit
 
-import lxml.etree as etree
-
 from wlh.adapters import Base
+from wlh.adapters.web_document import (
+    BINARY_KINDS,
+    GENERIC_ATTACHMENT_LABELS,
+    TEXT_KINDS,
+    WebDocumentBuilder,
+)
 from wlh.adapters.web_fields import (
     DATE_FIELDS,
     clean_url,
     decode,
-    enrich_bare_title,
-    extract_detail_fields,
     field_value,
     file_name,
     parse_date,
     parse_html,
 )
 from wlh.adapters.web_pagination import aspnet_next_page
-from wlh.core import WlhError, canonical, digest, public_url
+from wlh.core import WlhError, public_url
 from wlh.engine.scope import guard
-from wlh.engine.transport import blocked
-from wlh.extraction.markdown import clean_html_tree, html_to_markdown, text_to_markdown
 from wlh.extraction.office import detect_real_format
 
-etree: Any
-TEXT_KINDS: set[str] = {"html", "txt"}
-BINARY_KINDS: set[str] = {"pdf", "doc", "docx", "rtf", "xls", "xlsx", "zip"}
-GENERIC_ATTACHMENT_LABELS: set[str] = {
-    "tải file đính kèm",
-    "tai file dinh kem",
-    "tải về",
-    "tai ve",
-    "tải văn bản",
-    "tai van ban",
-    "tải xuống",
-    "tai xuong",
-    "download",
-    "attachment",
-    "attachments",
-    "file đính kèm",
-    "file dinh kem",
-    "tệp đính kèm",
-    "tep dinh kem",
-    "xem chi tiết",
-    "xem toàn văn",
-    "đính kèm",
-    "dinh kem",
-    "pdf",
-    "doc",
-    "docx",
-    "odt",
-    "odf",
-    "檔案下載",
-}
 
-
-class Adapter(Base):
-    CONTRACT: str = "wlh.adapter.web.v3"
+class Adapter(WebDocumentBuilder, Base):
+    CONTRACT: str = "wlh.adapter.web.v7"
     PLANNING_OPTIONS: tuple[str, ...] = ("max_pages",)
 
     @staticmethod
@@ -91,6 +60,25 @@ class Adapter(Base):
 
     def is_detail(self, url: str) -> bool:
         return not self.details or any(p.search(url) for p in self.details)
+
+    def plan_recheck(
+        self, resources: Sequence[Mapping[str, Any]], state: dict[str, Any]
+    ) -> dict[str, Any]:
+        result = super().plan_recheck(resources, state)
+        for target in result["targets"]:
+            locator = target["identity"]["recheck_locator"]
+            context_url = locator.get("title_context_url")
+            if self.config["documents"].get("binary_title_from_link") and context_url:
+                target["inputs"][0]["request"]["meta"] = {"title_context_url": context_url}
+                target["inputs"].append(self.title_context(context_url, locator["url"], 0))
+        return result
+
+    @staticmethod
+    def title_context(url: str, document_url: str, depth: int) -> dict[str, Any]:
+        return {
+            "request": {"url": url, "role": "title_context", "depth": depth},
+            "role": "title_context", "document_url": public_url(document_url),
+        }
 
     def in_scope(self, url: str) -> bool:
         try:
@@ -152,6 +140,9 @@ class Adapter(Base):
         wlh_trunc_code: str | None = None
         if kind == "html":
             tree, _, _ = parse_html(data, acquisition["charset"])
+            qualification = self.config["documents"].get("detail_xpath")
+            if detail and qualification:
+                detail = bool(tree.xpath(qualification))
             if ctx.runtime.mode == "collect":
                 wlh_trunc = tree.xpath("//*[@data-wlh-truncated]/@data-wlh-truncated")
                 if wlh_trunc:
@@ -207,9 +198,12 @@ class Adapter(Base):
                         attachments.append({"url": link, "text": text})
                     elif not self.details or self.is_detail(link):
                         if ctx.follow_links(task):
-                            requests.append(
-                                {"url": link, "role": "page", "depth": task["depth"] + 1}
-                            )
+                            follow: dict[str, Any] = {
+                                "url": link, "role": "page", "depth": task["depth"] + 1,
+                            }
+                            if self.config["documents"].get("binary_title_from_link"):
+                                follow["meta"] = {"title_context_url": url}
+                            requests.append(follow)
                         elif (
                             ctx.runtime.mode == "collect"
                             and not detail
@@ -257,6 +251,12 @@ class Adapter(Base):
         targets: list[dict[str, Any]] = []
         if detail and not wlh_trunc_code and (kind in TEXT_KINDS | BINARY_KINDS):
             inputs = [{"request": request, "role": "detail"}]
+            locator: dict[str, Any] = {"url": public_url(request["url"]), "role": "page"}
+            context_url = cast(Mapping[str, Any], request.get("meta") or {}).get("title_context_url")
+            if kind in BINARY_KINDS and self.config["documents"].get("binary_title_from_link"):
+                if context_url:
+                    locator["title_context_url"] = public_url(context_url)
+                    inputs.append(self.title_context(context_url, request["url"], task["depth"]))
             for item in attachments:
                 inputs.append(
                     {
@@ -275,7 +275,7 @@ class Adapter(Base):
                         "namespace": "url",
                         "external_key": public_url(request["url"]),
                         "public_url": public_url(request["url"]),
-                        "recheck_locator": {"url": public_url(request["url"]), "role": "page"},
+                        "recheck_locator": locator,
                     },
                     "inputs": inputs,
                 }
@@ -290,300 +290,6 @@ class Adapter(Base):
             **({"truncated": truncated} if truncated else {}),
         }
 
-    def deliverable_text(
-        self, ctx: Any, data: bytes, kind: str, acquisition: Mapping[str, Any]
-    ) -> tuple[str, dict[str, Any] | None, list[str]]:
-        if kind == "html":
-            tree, _, _ = parse_html(data, acquisition["charset"])
-            return self.html_markdown(tree, acquisition), None, ["markdown", "quality"]
-        if kind == "txt":
-            text, _ = decode(data, acquisition["charset"])
-            return text_to_markdown(text), None, ["markdown", "quality"]
-        if kind in BINARY_KINDS:
-            result = ctx.extract(data, kind)
-            return result["markdown"], result, result["parsers"]
-        raise WlhError("unsupported_document_type")
-
-    def html_markdown(self, tree: Any, acquisition: Mapping[str, Any]) -> str:
-        wlh_trunc = tree.xpath("//*[@data-wlh-truncated]/@data-wlh-truncated")
-        if wlh_trunc:
-            raise WlhError(str(wlh_trunc[0]))
-        rule: Any = self.config["documents"]["content_xpath"]
-        nodes = tree.xpath(rule) if rule else [tree.body if tree.body is not None else tree]
-        nodes = [n for n in nodes if isinstance(n, etree._Element)]
-        node_set = set(nodes)
-        nodes = [n for n in nodes if not any(anc in node_set for anc in n.iterancestors())]
-        if not nodes:
-            if blocked(etree.tostring(tree, encoding="utf-8"), self.config):
-                raise WlhError("target_content_blocked")
-            raise WlhError("content_region_missing")
-        for node in nodes:
-            clean_html_tree(node)
-        fragment = "".join(etree.tostring(n, encoding="unicode", method="html") for n in nodes)
-        if blocked(fragment.encode("utf-8"), self.config):
-            raise WlhError("target_content_blocked")
-        base = acquisition["actual_url"] or acquisition["request_url"]
-        return html_to_markdown("<html><body>" + fragment + "</body></html>", base)
-
-    def detail_values(
-        self,
-        data: bytes,
-        kind: str,
-        acquisition: Mapping[str, Any],
-        url: str,
-        text: str | None = None,
-    ) -> tuple[dict[str, Any], str | None, str | None]:
-        """Declared field rules on the archived detail input; subclasses map source tables."""
-        return extract_detail_fields(
-            self.config["documents"]["fields"], data, kind, acquisition, url, text
-        )
-
-    def build(
-        self, ctx: Any, target: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]
-    ) -> list[dict[str, Any]]:
-        detail, attachments = inputs[0], inputs[1:]
-        acquisition = detail["acquisition"]
-        data = ctx.read(acquisition)
-        kind = detect_real_format(data, "html" if acquisition["mime_type"] == "text/html" else "")
-        meta = dict(self.config["metadata"])
-        url: str = str(acquisition["actual_url"] or acquisition["request_url"] or "")
-        values, title, encoding = self.detail_values(data, kind, acquisition, url)
-        if (
-            kind in TEXT_KINDS
-            and not (kind == "html" and self.config["documents"]["content_xpath"])
-            and blocked(data, self.config)
-        ):
-            raise WlhError("target_content_blocked")
-        candidate_inputs: list[dict[str, Any]] = [
-            {
-                "acquisition_id": acquisition["id"],
-                "archive_ref": acquisition["archive_ref"],
-                "role": "primary",
-                "locator": {"url": public_url(url), "kind": "whole_response"},
-                "charset": encoding,
-                "base_url": public_url(url),
-            }
-        ]
-        deliverables: list[dict[str, Any]] = []
-        parsers = {"markdown"}
-        quality_fail: list[str] = []
-
-        def add(
-            data: bytes,
-            kind: str,
-            item_acquisition: Mapping[str, Any],
-            input_index: int,
-            role: str,
-            title: str | None = None,
-            order: int | None = None,
-            source_url: str | None = None,
-        ) -> None:
-            markdown, result, used = self.deliverable_text(ctx, data, kind, item_acquisition)
-            parsers.update(used)
-            report = (result or {}).get("quality") or ctx.text_quality(markdown)
-            if report["recommended_route"] not in self.config["parser"]["quality_accept_routes"]:
-                quality_fail.append(report["recommended_route"])
-            for member in (result or {}).get("members", []):
-                ref = ctx.store(member["data"])
-                candidate_inputs.append(
-                    {
-                        "acquisition_id": item_acquisition["id"],
-                        "archive_ref": ref,
-                        "role": "derived",
-                        "locator": {
-                            "url": public_url(source_url or url),
-                            "zip_path": member["path"],
-                        },
-                    }
-                )
-            deliverables.append(
-                {
-                    "role": role,
-                    "title": title,
-                    "volume_order": order,
-                    "markdown": markdown,
-                    "input": input_index,
-                    "original": {
-                        "ref": item_acquisition["archive_ref"],
-                        "kind": kind,
-                        "byte_size": item_acquisition["byte_size"],
-                        "source_url": source_url or public_url(url),
-                        "original_name": file_name(source_url or url),
-                    }
-                    if kind not in TEXT_KINDS
-                    else None,
-                    "quality": report,
-                    "extraction": (result or {}).get("info") or {"kind": kind},
-                    "parsers": used,
-                }
-            )
-
-        files: list[dict[str, Any]] = []
-        for item in attachments:
-            att = item["acquisition"]
-            source = public_url(att["actual_url"] or att["request_url"])
-            if not (
-                self.attachment.search(unquote(source))
-                or self.attachment.search(file_name(source))
-            ):
-                continue
-            body = ctx.read(att)
-            att_kind = detect_real_format(body)
-            if att_kind in TEXT_KINDS and blocked(body, self.config):
-                raise WlhError("target_content_blocked")
-            if att_kind not in BINARY_KINDS | TEXT_KINDS:
-                raise WlhError("unsupported_attachment_type")
-            text = (item.get("text") or "").strip()
-            use_link_text = (
-                self.config["documents"]["attachment_title"] == "link_text"
-                and text.lower() not in GENERIC_ATTACHMENT_LABELS
-                and not text.lower().startswith("download this version")
-            )
-            base_name = file_name(source)
-            clean_base_name = re.sub(
-                r"(?:^|[-_\s]+)[0-9a-f]{32}(?=\.[a-z0-9]{2,5}$|$)",
-                "",
-                base_name,
-                flags=re.IGNORECASE,
-            )
-            clean_base_name = re.sub(
-                r"\.(?:pdf|docx?|rtf|xlsx?|zip)$",
-                "",
-                clean_base_name,
-                flags=re.IGNORECASE,
-            ).strip(" -_.")
-            if use_link_text and text:
-                att_title = text
-            elif title and clean_base_name and clean_base_name.lower() not in {"file", "download"}:
-                att_title = f"{title} - {clean_base_name}"
-            elif title:
-                att_title = title
-            else:
-                att_title = clean_base_name or base_name
-            match: re.Match[str] | None = (
-                (self.volume.search(text) or self.volume.search(base_name))
-                if self.volume
-                else None
-            )
-            files.append(
-                {
-                    "acquisition": att,
-                    "body": body,
-                    "kind": att_kind,
-                    "url": source,
-                    "title": att_title,
-                    "order": int(match.group(1)) if match else None,
-                }
-            )
-        numbered = [f for f in files if f["order"] is not None]
-        volumes = numbered if len(numbered) >= 2 else []
-        if volumes:
-            orders = [f["order"] for f in volumes]
-            if len(set(orders)) != len(orders):
-                for f in volumes:
-                    f["order"] = None
-        others = [f for f in files if f not in volumes]
-        body_mode = self.config["documents"]["detail_body"]
-        use_body = not volumes and (body_mode == "always" or (body_mode == "auto" and not files))
-        if kind not in TEXT_KINDS | BINARY_KINDS:
-            raise WlhError("unsupported_document_type")
-        if use_body:
-            add(data, kind, acquisition, 0, "primary", None)
-            if kind in BINARY_KINDS and deliverables:
-                values, title, encoding = self.detail_values(
-                    data, kind, acquisition, url, deliverables[0]["markdown"]
-                )
-        else:
-            candidate_inputs[0]["role"] = "context"
-        for f in volumes:
-            candidate_inputs.append(self.input_for(f, "volume", f["order"]))
-            add(
-                f["body"],
-                f["kind"],
-                f["acquisition"],
-                len(candidate_inputs) - 1,
-                "volume",
-                None,
-                f["order"],
-                f["url"],
-            )
-        for position, f in enumerate(others):
-            role: str = (
-                "primary"
-                if not use_body and not volumes and position == 0
-                else "independent_attachment"
-            )
-            candidate_inputs.append(self.input_for(f, role, None))
-            add(
-                f["body"],
-                f["kind"],
-                f["acquisition"],
-                len(candidate_inputs) - 1,
-                role,
-                None if role == "primary" else f["title"],
-                None,
-                f["url"],
-            )
-        if quality_fail:
-            raise WlhError("quality_check_failed:" + sorted(set(quality_fail))[0])
-        if not deliverables:
-            raise WlhError("document_deliverables_required")
-        if not use_body and deliverables:
-            att_vals, _, _ = self.detail_values(
-                data, kind, acquisition, url, deliverables[0]["markdown"]
-            )
-            for k, v in att_vals.items():
-                if not values.get(k) and v:
-                    values[k] = v
-            title = enrich_bare_title(
-                title,
-                values.get("document_number"),
-                tree=None,
-                body_text=deliverables[0]["markdown"],
-            )
-            candidate_inputs[0]["slice_hash"] = digest(
-                {
-                    "title": title,
-                    "fields": values,
-                    "files": sorted(
-                        ({k: f[k] for k in ("url", "title", "order")} for f in files),
-                        key=canonical,
-                    ),
-                }
-            )
-        if kind in TEXT_KINDS and use_body:
-            candidate_inputs[0]["slice_hash"] = digest(
-                {"body": deliverables[0]["markdown"], "fields": values, "title": title}
-            )
-        meta["title"] = title
-        for name in ("document_number", "issuer", "status"):
-            if values.get(name):
-                meta[name] = values[name]
-        dates: dict[str, Any] = {
-            k: values[k] for k in ("published_at", "effective_at", "expired_at") if values.get(k)
-        }
-        return [
-            {
-                **target["identity"],
-                "metadata": meta,
-                "dates": dates,
-                "deliverables": deliverables,
-                "inputs": candidate_inputs,
-                "parsers": sorted(parsers),
-            }
-        ]
-
-    @staticmethod
-    def input_for(file: Mapping[str, Any], role: str, order: int | None) -> dict[str, Any]:
-        acquisition = file["acquisition"]
-        return {
-            "acquisition_id": acquisition["id"],
-            "archive_ref": acquisition["archive_ref"],
-            "role": role,
-            "locator": {"url": file["url"], "kind": "whole_response"},
-            "charset": acquisition["charset"],
-            "volume_order": order,
-        }
 
 
 __all__ = [

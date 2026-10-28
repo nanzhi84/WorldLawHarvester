@@ -16,6 +16,7 @@ from wlh.core import WlhError
 
 MODULES: dict[str, str] = {
     "structured_xml": "wlh.adapters.structured_xml",
+    "japan_courts": "wlh.adapters.japan_courts",
     **{
         name: "wlh.adapters.bridges." + name
         for name in (

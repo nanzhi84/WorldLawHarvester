@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 日本来源继续按 CSV 原入口适配：增加完整目录分页与身份对账、必需附件原子交付及二进制文献目录标题证据核验。有限回放和预算结束不再用作整源完成的证据，当前范围及阻断结论见[来源台账](docs/runbooks/source-adaptation-matrix.md)。
+- 法律 XML 与 HTML 保留混合文本、上下标、脚注及可验证表格；生效日期仅来自对应法律版本的明确证据，不用公布、裁判或汇编日期补齐。PDF 增加原生乱码、复杂布局及未验证图片阻断。
+- 移除将日本官报目录当作正文的旧配置。NTA 的矢量图与公式、官报竖排扫描 OCR 等仍保留明确验收缺口，不以局部样本通过宣称整源完成。
+
 ### Added
 - **全量 40 源实网收尾闭环与全局快照发布（Issue #4 Batch 4）**：在全新独立验证库 `wlh_issue4_full` 完成全量 40 个已适配来源实网采集与离线重解析（100% complete，离线重解析 external_requests=0，除单行本法典外其余集合型源均满足 resources >= 10）；完成全局快照创建、发布与只读 Canonical API（`GET /results?projection=canonical` 与 `GET /files/{sha256}`）实测核验。
 - **固定入口去时间化与动态目录发现（Issue #4 Batch 3）**：消除 `entry_urls` 中的硬编码年份、日期、期号与单章限制（dd-501 国务院公报总目录动态重定向、dd-559 eCFR `titles.json` 结构索引跨 Title 自动展开、dd-560 Open States `sort=updated_desc` 倒序检索、dd-565 加拿大最高法院无年份 Decisia 入口、dd-562 美国最高法院 `opinions.aspx` 动态 Term 跨期回落、dd-520 日本国税厅通达跨章条文发现）。

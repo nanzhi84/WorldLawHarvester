@@ -8,14 +8,15 @@ from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import lxml.etree as _etree  # type: ignore[import-untyped]
-from lxml import html as _dom  # type: ignore[import-untyped]
 
 from wlh.core import WlhError
+from wlh.extraction.html_semantics import ordered_marker, spanning_table
+from wlh.extraction.html_tree import document_tree
+from wlh.extraction.table_grid import expand_rows, span
 
 etree: Any = _etree
-dom: Any = _dom
 
-MARKDOWN_CONTRACT = "wlh.markdown.v1"
+MARKDOWN_CONTRACT = "wlh.markdown.v5"
 
 UI_ACTION_LABELS: set[str] = {
     "【打印】",
@@ -33,6 +34,7 @@ UI_ACTION_LABELS: set[str] = {
     "to the top",
     "skip to document content",
     "report a problem",
+    "トップに戻る",
 }
 
 
@@ -125,7 +127,9 @@ def html_to_markdown(
     html: str | bytes, base_url: str | None = None, content_xpath: str | None = None
 ) -> str:
     try:
-        tree = dom.document_fromstring(html)
+        tree = document_tree(html)
+        for comment in list(tree.xpath("//comment()")):
+            _remove_element(comment)
         nodes: list[Any] = (
             tree.xpath(content_xpath)
             if content_xpath
@@ -141,26 +145,45 @@ def html_to_markdown(
     def inline(text: str | None) -> str:
         return re.sub(r"\s+", " ", text or "")
 
+    def escape_literal_order(text: str) -> str:
+        return re.sub(r"^(\s*\d{1,9})([.)])(?=\s)", r"\1\\\2", text)
+
     def children(node: Any) -> str:
-        return inline(node.text) + "".join(render(c) + inline(c.tail) for c in node)
+        has_br = any(isinstance(c.tag, str) and c.tag.lower() == "br" for c in node)
+        head = escape_literal_order(inline(node.text)) if has_br else inline(node.text)
+        chunks: list[str] = [head]
+        for c in node:
+            chunks.append(render(c))
+            tail = inline(c.tail)
+            if isinstance(c.tag, str) and c.tag.lower() == "br":
+                tail = escape_literal_order(tail)
+            chunks.append(tail)
+        return "".join(chunks)
 
     def table(node: Any) -> str:
-        rows: list[list[str]] = []
+        raw_rows: list[list[tuple[str, int, int]]] = []
         for tr in node.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr"):
-            cells: list[str] = [
-                re.sub(r"\s+", " ", children(c)).strip().replace("|", "\\|")
+            cells = [
+                (re.sub(r"\s+", " ", children(c)).strip().replace("|", "\\|"),
+                 span(c.get("colspan")), span(c.get("rowspan")))
                 for c in tr.xpath("./th|./td")
             ]
             if cells:
-                rows.append(cells)
+                raw_rows.append(cells)
+        rows = expand_rows(raw_rows)
         if not rows:
             return ""
         if len(rows) == 1 and node.xpath('ancestor::*[contains(@class, "hmc4Table")]'):
             return ""
+        if (any(colspan > 1 or rowspan > 1 for row in raw_rows for _, colspan, rowspan in row)
+                or node.xpath(".//table | .//th[@scope]")):
+            return spanning_table(node, base_url, UI_ACTION_LABELS)
+        caption = " ".join(children(c).strip() for c in node.xpath("./caption")).strip()
         width = max(map(len, rows))
         rows = [row + [""] * (width - len(row)) for row in rows]
         rows.insert(1, ["---"] * width)
-        return "\n\n" + "\n".join("| " + " | ".join(row) + " |" for row in rows) + "\n\n"
+        return ("\n\n" + (caption + "\n\n" if caption else "")
+                + "\n".join("| " + " | ".join(row) + " |" for row in rows) + "\n\n")
 
     def render(node: Any) -> str:
         if not isinstance(node.tag, str):
@@ -233,21 +256,37 @@ def html_to_markdown(
         if tag == "code":
             return "`" + value.strip() + "`"
         if tag == "br":
-            return "\n"
+            return "\n\n"
         if re.fullmatch(r"h[1-6]", tag):
-            return "\n\n" + "#" * int(tag[1]) + " " + value.strip() + "\n\n"
+            heading = re.sub(r"\s+", " ", value).strip()
+            return "\n\n" + "#" * int(tag[1]) + " " + heading + "\n\n" if heading else ""
         if tag == "li":
             if not value.strip():
                 return ""
-            parent = node.getparent()
-            marker: str = (
-                f"{parent.index(node) + 1}. " if parent is not None and parent.tag == "ol" else "- "
-            )
-            return "\n" + marker + value.strip().replace("\n", "\n  ") + "\n"
+            marker = ordered_marker(node)
+            if not marker:
+                literal = re.sub(r"(?m)^(\s*\d{1,9})([.)])(?=\s)", r"\1\\\2", value.strip())
+                return "\n\n" + literal + "\n\n"
+            return "\n" + marker + re.sub(r"\n+", "\n  ", value.strip()) + "\n"
         if tag == "blockquote":
             return "\n\n" + "\n".join("> " + line for line in value.strip().splitlines()) + "\n\n"
         if tag in {"p", "div", "section", "article", "main", "ul", "ol", "header", "body", "hr"}:
-            return "\n\n" + value.strip() + "\n\n"
+            body_text = value.strip()
+            if tag == "p" and "\n" in body_text:
+                body_text = re.sub(r"(?m)^(\s*\d{1,9})([.)])(?=\s)", r"\1\\\2", body_text)
+            return "\n\n" + body_text + "\n\n"
         return value
 
-    return normalized("\n\n".join(render(node) for node in nodes))
+    selected = {id(n) for n in nodes}
+    parts: list[str] = []
+    seen_parents: set[int] = set()
+    for node in nodes:
+        parent = node.getparent()
+        if parent is not None and id(parent) not in selected and id(parent) not in seen_parents:
+            seen_parents.add(id(parent))
+            if node.getprevious() is None and inline(parent.text).strip():
+                parts.append(escape_literal_order(inline(parent.text).strip()))
+        parts.append(render(node))
+        if parent is not None and id(parent) not in selected and inline(node.tail).strip():
+            parts.append(escape_literal_order(inline(node.tail).strip()))
+    return normalized("\n\n".join(parts))

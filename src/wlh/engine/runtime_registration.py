@@ -36,15 +36,19 @@ def register(
             self.checkpoint["truncated"] = self.truncated
         requests_list = result.get("requests", [])
         targets_list = result.get("targets", [])
+        candidate_req_keys = list({
+            *(request_key(req) for req in requests_list),
+            *(request_key(item["request"]) for t in targets_list for item in t.get("inputs", [])),
+        })
         request_ids: dict[str, str] = (
             {
                 r["key"]: r["id"]
                 for r in c.execute(
-                    "SELECT key, id FROM wlh.task WHERE run_id=%s AND kind='request'",
-                    (self.run_id,),
+                    "SELECT key, id FROM wlh.task WHERE run_id=%s AND kind='request' AND key = ANY(%s)",
+                    (self.run_id, candidate_req_keys),
                 ).fetchall()
             }
-            if (requests_list or targets_list)
+            if candidate_req_keys
             else {}
         )
 
@@ -60,17 +64,6 @@ def register(
         for request in requests_list:
             ensure_request(request, request.get("depth", depth))
         skipped_budget = False
-        existing_targets: dict[str, dict[str, Any]] = (
-            {
-                row["key"]: row
-                for row in c.execute(
-                    "SELECT * FROM wlh.task WHERE run_id=%s AND kind='target' FOR UPDATE",
-                    (self.run_id,),
-                ).fetchall()
-            }
-            if targets_list
-            else {}
-        )
 
         def identity_pair(t_key: str, t_payload: Mapping[str, Any]) -> tuple[str, str]:
             ident = cast(Mapping[str, Any], t_payload.get("identity") or {})
@@ -81,11 +74,36 @@ def register(
                 str(ext) if ext is not None else t_key,
             )
 
-        active_identities: set[tuple[str, str]] = {
-            identity_pair(row["key"], row["payload"])
-            for row in existing_targets.values()
-            if row["state"] not in ("failed", "skipped")
-        }
+        existing_targets: dict[str, dict[str, Any]] = {}
+        active_identities: set[tuple[str, str]] = set()
+        if targets_list:
+            cand_tkeys = list({target_key(t) for t in targets_list})
+            matched = c.execute(
+                "SELECT id FROM wlh.task WHERE run_id=%s AND kind='target' AND key = ANY(%s) LIMIT 1",
+                (self.run_id, cand_tkeys),
+            ).fetchone()
+            active_rows_row = c.execute(
+                "SELECT count(*) AS n FROM wlh.task WHERE run_id=%s AND kind='target' AND state NOT IN ('failed','skipped')",
+                (self.run_id,),
+            ).fetchone()
+            active_rows = int(active_rows_row["n"]) if active_rows_row else 0
+            if (
+                matched is not None
+                or self.truncated == "document_budget_exceeded"
+                or active_rows + len(targets_list) >= self.config["budget"]["documents"]
+            ):
+                existing_targets = {
+                    row["key"]: row
+                    for row in c.execute(
+                        "SELECT * FROM wlh.task WHERE run_id=%s AND kind='target' FOR UPDATE",
+                        (self.run_id,),
+                    ).fetchall()
+                }
+                active_identities = {
+                    identity_pair(row["key"], row["payload"])
+                    for row in existing_targets.values()
+                    if row["state"] not in ("failed", "skipped")
+                }
         new_targets: list[tuple[Any, ...]] = []
         new_inputs: list[tuple[str, str, int]] = []
         for target in targets_list:

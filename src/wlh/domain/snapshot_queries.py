@@ -10,8 +10,9 @@ from typing import Any
 
 from wlh.db import DbConn
 
-ROW_QUERY = """SELECT i.source_id,i.resource_id,d.*
+ROW_QUERY = """SELECT i.source_id,i.resource_id,s.config->'metadata'->>'jurisdiction' AS jurisdiction,d.*
 FROM wlh.snapshot_item i
+JOIN wlh.source s ON s.id=i.source_id
 JOIN wlh.document_row d ON d.version_id=i.version_id
 WHERE i.snapshot_id=%(snapshot)s AND i.source_id = ANY(%(sources)s)
 AND (i.source_id COLLATE "C", i.resource_id COLLATE "C", d.row_index)

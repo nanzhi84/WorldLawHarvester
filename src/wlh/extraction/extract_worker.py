@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 from collections.abc import Sequence
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -116,18 +117,13 @@ def watch_parent(parent_pid: int) -> None:
         time.sleep(0.1)
 
 
-def main() -> None:
-    def terminate(*_: Any) -> NoReturn:
-        return (_ for _ in ()).throw(SystemExit(143))
-
-    signal.signal(signal.SIGTERM, terminate)
-    threading.Thread(target=watch_parent, args=(os.getppid(),), daemon=True).start()
-    job = json.loads(sys.stdin.read())
+def _run_job(job: dict[str, Any]) -> dict[str, Any]:
     try:
-        markdown, info, report, parsers, members = extract(Path(job["path"]), job["kind"], job)
+        with redirect_stdout(sys.stderr):
+            markdown, info, report, parsers, members = extract(Path(job["path"]), job["kind"], job)
         if not markdown.strip():
             raise WlhError("extracted_text_empty")
-        value: dict[str, Any] = {
+        return {
             "markdown": markdown,
             "info": info,
             "quality": report,
@@ -135,11 +131,35 @@ def main() -> None:
             "members": members,
         }
     except WlhError as exc:
-        value = {"error": exc.code}
+        return {"error": exc.code}
     except MemoryError:
-        value = {"error": "extraction_memory_exceeded"}
+        return {"error": "extraction_memory_exceeded"}
     except Exception as exc:
-        value = {"error": "extraction_failed", "category": type(exc).__name__}
+        return {"error": "extraction_failed", "category": type(exc).__name__}
+
+
+def main() -> None:
+    def terminate(*_: Any) -> NoReturn:
+        return (_ for _ in ()).throw(SystemExit(143))
+
+    signal.signal(signal.SIGTERM, terminate)
+    threading.Thread(target=watch_parent, args=(os.getppid(),), daemon=True).start()
+    if "--daemon" in sys.argv[1:]:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            req = json.loads(line)
+            job = json.loads(Path(req["job_file"]).read_text(encoding="utf-8"))
+            value = _run_job(job)
+            Path(req["output_file"]).write_text(
+                json.dumps(value, ensure_ascii=False), encoding="utf-8"
+            )
+            sys.stdout.write("__WLH_DONE__\n")
+            sys.stdout.flush()
+        return
+    job = json.loads(sys.stdin.read())
+    value = _run_job(job)
     sys.stdout.write(json.dumps(value, ensure_ascii=False))
     sys.stdout.flush()
 
