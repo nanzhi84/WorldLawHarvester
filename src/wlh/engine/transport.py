@@ -285,6 +285,7 @@ class Transport:
             )
             ssl_ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
             ssl_ctx.load_verify_locations(cadata=EXTRA_INTERMEDIATE_CAS_PEM)
+            total_timeout = self.config["fetch"]["page_timeout_ms"] / 1000
             self.session = aiohttp.ClientSession(
                 headers={"User-Agent": self.config["user_agent"]},
                 cookie_jar=aiohttp.CookieJar(unsafe=True),
@@ -295,7 +296,11 @@ class Transport:
                     force_close=False,
                     ssl=ssl_ctx,
                 ),
-                timeout=aiohttp.ClientTimeout(total=self.config["fetch"]["page_timeout_ms"] / 1000),
+                timeout=aiohttp.ClientTimeout(
+                    total=total_timeout,
+                    sock_connect=min(5.0, total_timeout),
+                    sock_read=min(30.0, total_timeout),
+                ),
                 auto_decompress=True,
             )
 
@@ -350,13 +355,15 @@ class Transport:
         """Exactly one real HTTP request and one Acquisition fact."""
         if self.session is None:
             raise WlhError("transport_not_started")
-        self.budget.request()
-        identity = self.recorder.start(key, "http", role, method, url, meta, parent, relation)
         limit = self.config["budget"]["response_bytes"]
+        identity: str | None = None
         try:
             async with self.slots:
                 await self.paced()
-                self.budget.active()
+                self.budget.request()
+                identity = self.recorder.start(
+                    key, "http", role, method, url, meta, parent, relation
+                )
                 req_headers = dict(headers) if headers else {}
                 if urlsplit(url).hostname == "v3.openstates.org" and os.environ.get("OPENSTATES_API_KEY"):
                     req_headers.setdefault("X-API-KEY", os.environ["OPENSTATES_API_KEY"])
@@ -383,14 +390,23 @@ class Transport:
             self.objects.get(ref)  # Read back before any database reference is committed.
             self.budget.active()
         except WlhError as exc:
-            if exc.code in {"stale_attempt", "inactive_attempt", "run_not_started"}:
+            if identity is None or exc.code in {
+                "stale_attempt",
+                "inactive_attempt",
+                "run_not_started",
+            }:
                 raise
             state = "cancelled" if exc.code == "interrupted" else "failed"
             return self.recorder.finish(identity, state, outcome="blocked", error=exc.code)
         except asyncio.CancelledError:
-            self.recorder.finish(identity, "cancelled", outcome="cancelled", error="interrupted")
+            if identity is not None:
+                self.recorder.finish(
+                    identity, "cancelled", outcome="cancelled", error="interrupted"
+                )
             raise
         except (aiohttp.ClientError, TimeoutError, OSError):
+            if identity is None:
+                raise
             return self.recorder.finish(
                 identity, "failed", outcome="network_failed", error="network_failed"
             )

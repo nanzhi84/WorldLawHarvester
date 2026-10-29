@@ -546,3 +546,162 @@ documents:
         assert reparse_elapsed < 2.5, (
             f"Expected parallel PDF pool reparse < 2.5s, took {reparse_elapsed:.2f}s"
         )
+
+    def test_streaming_inflight_harvest_and_japan_tier3_source_configs_avoid_straggler_stall(
+        self, initialized_db: dict[str, str], tmp_path: Path
+    ) -> None:
+        """Japan Tier 3 sources (`dd-517`, `dd-519`, `dd-582`) declare `concurrency: 24, delay: 0.0`, and `fetch_batch()` harvests completed responses in a streaming fashion without blocking behind a slow attachment straggler."""
+        import time
+        from typing import Any
+
+        import fitz  # type: ignore[import-untyped]
+
+        from wlh.config import load_file
+        from wlh.engine.runs import execute_run, prepare_run
+
+        repo_root = Path(__file__).resolve().parents[1]
+        for source_id in ("dd-517", "dd-519", "dd-582"):
+            cfg = load_file(repo_root / "sources" / f"{source_id}.yaml")
+            assert cfg.concurrency == 24, f"Expected {source_id} concurrency == 24, got {cfg.concurrency}"
+            assert cfg.delay == 0.0, f"Expected {source_id} delay == 0.0, got {cfg.delay}"
+
+        fitz_mod: Any = fitz
+        pdf_payloads: dict[str, bytes] = {}
+        for idx in range(1, 13):
+            doc = fitz_mod.open()
+            page = doc.new_page(width=595, height=842)
+            page.insert_text(
+                (72, 100),
+                f"Annex for Document {idx} statutory text. Mandatory statutory compliance provisions for annex {idx}.",
+                fontname="helv",
+                fontsize=11,
+            )
+            pdf_payloads[f"/portal/att-{idx}.pdf"] = bytes(doc.tobytes())
+            doc.close()
+
+        port_holder: list[int] = []
+        ts_lock = threading.Lock()
+        doc7_requested_at: list[float] = []
+        att1_finished_sleep_at: list[float] = []
+
+        class _StreamingCatalogHandler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def do_GET(self) -> None:
+                port = port_holder[0]
+                if self.path == "/robots.txt":
+                    body = b"User-agent: *\nAllow: /\n"
+                    ctype = "text/plain; charset=utf-8"
+                elif self.path == "/portal/page1.html":
+                    doc_links = "\n".join(
+                        f'<li><a href="http://127.0.0.1:{port}/portal/doc-{i}.html">Document {i}</a></li>'
+                        for i in range(1, 7)
+                    )
+                    body = (
+                        "<html><body>"
+                        f'<a href="http://127.0.0.1:{port}/portal/page2.html">Next Page</a>'
+                        f"<ul>{doc_links}</ul>"
+                        "</body></html>"
+                    ).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                elif self.path == "/portal/page2.html":
+                    doc_links = "\n".join(
+                        f'<li><a href="http://127.0.0.1:{port}/portal/doc-{i}.html">Document {i}</a></li>'
+                        for i in range(7, 13)
+                    )
+                    body = f"<html><body><ul>{doc_links}</ul></body></html>".encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                elif self.path.startswith("/portal/doc-") and self.path.endswith(".html"):
+                    idx_str = self.path.removeprefix("/portal/doc-").removesuffix(".html")
+                    idx = int(idx_str)
+                    if idx == 7:
+                        with ts_lock:
+                            doc7_requested_at.append(time.monotonic())
+                    body = (
+                        "<html><body>"
+                        f"<h1>Document {idx}</h1>"
+                        f'<div class="law-body">Mandatory legal provision text for document {idx} with sufficient length for quality checks.</div>'
+                        f'<a href="/portal/att-{idx}.pdf">Annex {idx}</a>'
+                        "</body></html>"
+                    ).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                elif self.path in pdf_payloads:
+                    if self.path == "/portal/att-1.pdf":
+                        time.sleep(0.9)
+                        with ts_lock:
+                            att1_finished_sleep_at.append(time.monotonic())
+                    body = pdf_payloads[self.path]
+                    ctype = "application/pdf"
+                else:
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), _StreamingCatalogHandler)
+        port = srv.server_address[1]
+        port_holder.append(port)
+        srv_thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        srv_thread.start()
+
+        portal_yaml = tmp_path / "dd-964.yaml"
+        try:
+            portal_yaml.write_text(
+                f"""
+id: dd-964
+adapter: web
+archive_approved: true
+scope: "Streaming in-flight harvest test avoiding slow attachment straggler stall"
+concurrency: 24
+delay: 0.0
+budget:
+  requests: 50
+  documents: 12
+  seconds: 60
+  response_bytes: 10485760
+entry_urls:
+  - "http://127.0.0.1:{port}/portal/page1.html"
+allowed_hosts:
+  - "127.0.0.1"
+allowed_path_prefixes:
+  - "/portal/"
+metadata:
+  source_name: "Streaming Portal"
+  document_type: "法律法规"
+  language: "en"
+  jurisdiction: "INTL"
+documents:
+  detail_url_patterns:
+    - "^http://127\\\\.0\\\\.0\\\\.1:{port}/portal/doc-\\\\d+\\\\.html$"
+  detail_body: always
+  content_xpath: '//div[@class="law-body"]'
+  fields:
+    title:
+      xpath: '//h1'
+""".strip(),
+                encoding="utf-8",
+            )
+
+            run_id = prepare_run(portal_yaml, "collect")
+            res = execute_run(run_id)
+            assert res["status"] == "complete", f"dd-964 collect failed: {res}"
+            assert res["report"]["counts"]["resources"] == 12
+            assert doc7_requested_at, "Expected /portal/doc-7.html to be requested"
+            assert att1_finished_sleep_at, "Expected /portal/att-1.pdf to be requested"
+            assert doc7_requested_at[0] < att1_finished_sleep_at[0], (
+                f"Expected /portal/doc-7.html (t={doc7_requested_at[0]:.3f}) to be requested before "
+                f"/portal/att-1.pdf finished sleeping (t={att1_finished_sleep_at[0]:.3f})"
+            )
+        finally:
+            srv.shutdown()
+            srv_thread.join(timeout=2.0)
+            srv.server_close()

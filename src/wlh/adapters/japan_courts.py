@@ -279,4 +279,10 @@ class Adapter(WebDocumentBuilder, Base):
         for item in inputs[1:]:
             if detect_real_format(ctx.read(item["acquisition"])) != "pdf":
                 raise WlhError("court_required_document_not_pdf")
-        return super().build(ctx, target, inputs)
+        records = super().build(ctx, target, inputs)
+        for rec in records:
+            for deliv in cast(list[dict[str, Any]], rec.get("deliverables") or []):
+                md = str(deliv.get("markdown") or "")
+                if len(re.sub(r"\s+", "", md)) < 15:
+                    raise WlhError("quality_check_failed:vision_reparse_pages")
+        return records

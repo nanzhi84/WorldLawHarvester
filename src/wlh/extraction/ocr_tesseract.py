@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import math
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -15,9 +17,18 @@ from typing import Any
 import pymupdf as _fitz  # type: ignore[import-untyped]
 
 from wlh.core import WlhError
+from wlh.extraction.markdown import text_to_markdown
+from wlh.extraction.pdf_markdown import clean_soft_hyphens
 
 fitz: Any = _fitz
 _TESSERACT_META: dict[str, tuple[set[str], str]] = {}
+
+
+def _is_vertical_cjk_fragmented(text: str) -> bool:
+    rendered = text_to_markdown(clean_soft_hyphens(text))
+    lines = [line.strip() for line in rendered.splitlines() if line.strip()]
+    fragments = sum(bool(re.fullmatch(r"[\u3040-\u30ff\u3400-\u9fff]", line)) for line in lines)
+    return fragments >= 12 and fragments / max(len(lines), 1) >= 0.25
 
 
 def _tesseract_meta(executable: str) -> tuple[set[str], str]:
@@ -50,6 +61,34 @@ def command(args: Sequence[str], limit: int, timeout: float) -> str:
     return output.decode("utf-8", errors="strict")
 
 
+def _ocr_single_page(
+    executable: str,
+    img: Path,
+    languages: str,
+    dpi: int,
+    limit: int,
+    timeout: float,
+) -> str:
+    try:
+        return command(
+            [
+                executable,
+                str(img),
+                "stdout",
+                "-l",
+                languages,
+                "--dpi",
+                str(dpi),
+                "--psm",
+                "3",
+            ],
+            limit,
+            timeout,
+        )
+    finally:
+        img.unlink(missing_ok=True)
+
+
 def tesseract_pages(
     path: str | Path,
     numbers: Sequence[int],
@@ -79,35 +118,62 @@ def tesseract_pages(
             pixels = math.ceil(page.rect.width * scale) * math.ceil(page.rect.height * scale)
             if pixels <= 0 or pixels > cfg["max_page_pixels"]:
                 raise WlhError("pdf_ocr_pixel_limit_exceeded")
-        for idx, number in enumerate(numbers):
+        pos = 0
+        while pos < len(numbers):
+            batch_len = 1 if pos == 0 else min(4, len(numbers) - pos)
+            batch = numbers[pos : pos + batch_len]
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise WlhError("pdf_ocr_timeout")
-            page = document[number - 1]
-            image = Path(folder) / f"page-{number}.png"
-            page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csGRAY).save(image)
-            try:
-                text: str = command(
-                    [
-                        executable,
-                        str(image),
-                        "stdout",
-                        "-l",
-                        cfg["languages"],
-                        "--dpi",
-                        str(cfg["dpi"]),
-                        "--psm",
-                        "3",
-                    ],
-                    cfg["max_result_bytes"] - size,
-                    remaining,
+            images: dict[int, Path] = {}
+            for number in batch:
+                page = document[number - 1]
+                image = Path(folder) / f"page-{number}.png"
+                page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csGRAY).save(
+                    image
                 )
-            finally:
-                image.unlink(missing_ok=True)
-            size += len(text.encode())
-            result[number] = text
-            if nonblank_scans and number in nonblank_scans and len(text.strip()) < 30:
-                for rest in numbers[idx + 1 :]:
-                    result[rest] = ""
+                images[number] = image
+            max_each = max(1, int(cfg["max_result_bytes"]) - size)
+            langs = str(cfg["languages"])
+            dpi_val = int(cfg["dpi"])
+            batch_texts: dict[int, str]
+            if len(batch) == 1:
+                batch_texts = {
+                    batch[0]: _ocr_single_page(
+                        executable, images[batch[0]], langs, dpi_val, max_each, remaining
+                    )
+                }
+            else:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=len(batch)) as pool:
+                    futs = {
+                        num: pool.submit(
+                            _ocr_single_page,
+                            executable,
+                            images[num],
+                            langs,
+                            dpi_val,
+                            max_each,
+                            remaining,
+                        )
+                        for num in batch
+                    }
+                    batch_texts = {num: futs[num].result() for num in batch}
+
+            stopped = False
+            for offset, number in enumerate(batch):
+                text = batch_texts[number]
+                size += len(text.encode())
+                if size > cfg["max_result_bytes"]:
+                    raise WlhError("pdf_output_too_large")
+                result[number] = text
+                if (
+                    nonblank_scans and number in nonblank_scans and len(text.strip()) < 30
+                ) or _is_vertical_cjk_fragmented(text):
+                    for rest in numbers[pos + offset + 1 :]:
+                        result[rest] = ""
+                    stopped = True
+                    break
+            if stopped:
                 break
+            pos += batch_len
     return result, {"engine": "tesseract", "version": version, "languages": cfg["languages"]}

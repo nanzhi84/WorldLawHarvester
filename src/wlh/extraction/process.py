@@ -22,7 +22,7 @@ from wlh.engine.objects import work_directory
 from wlh.extraction.slots import PDFSlots
 
 MAX_OUTPUT_BYTES = 80 * 1024 * 1024
-MAX_WARM_WORKERS = 8
+MAX_WARM_WORKERS = 12
 _POOL_LOCK = threading.Lock()
 _IDLE_WORKERS: list[subprocess.Popen[bytes]] = []
 

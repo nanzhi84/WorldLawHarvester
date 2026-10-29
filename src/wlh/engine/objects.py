@@ -22,8 +22,8 @@ from wlh.core import WlhError, canonical, digest
 _VERIFIED_CACHE: OrderedDict[tuple[str, str], bytes] = OrderedDict()
 _verified_cache_bytes: int = 0
 _MAX_CACHE_ITEM_BYTES: int = 67108864
-_MAX_CACHE_TOTAL_BYTES: int = 134217728
-_MAX_CACHE_ENTRIES: int = 64
+_MAX_CACHE_TOTAL_BYTES: int = 536870912
+_MAX_CACHE_ENTRIES: int = 512
 
 
 def _cache_verified(bucket: str, key: str, body: bytes) -> None:

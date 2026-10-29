@@ -29,11 +29,18 @@ PDF_CONTRACT = "wlh.pdf-scan.v12"
 SCAN_TEXT_CHARS = 30
 SCAN_INK_RATIO = 0.003
 INK_THRESHOLD = 210
+_INK_LUT = bytes(1 if b < INK_THRESHOLD else 0 for b in range(256))
 ANALYSIS_SCALE = 0.5
 NORMAL_PAGE_TEXT_CHARS = 350
 SIGNATURE_DOC_MAX_TEXT_CHARS = 500
 SIGNATURE_PAGE_MIN_COVERAGE = 0.85
 SIGNATURE_PAGE_MIN_INK = 0.01
+
+
+def _has_unverified_vertical_fragments(page_text: str) -> bool:
+    lines = [line.strip() for line in page_text.splitlines() if line.strip()]
+    fragments = sum(bool(re.fullmatch(r"[\u3040-\u30ff\u3400-\u9fff]", line)) for line in lines)
+    return fragments >= 12 and fragments / max(len(lines), 1) >= 0.25
 
 
 def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
@@ -48,7 +55,8 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
                 text = str(page.get_text("text"))
                 native = len(text.strip())
                 pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5), colorspace=fitz.csGRAY)
-                ink = sum(v < INK_THRESHOLD for v in pix.samples) / len(pix.samples)
+                samples = bytes(pix.samples)
+                ink = samples.translate(_INK_LUT).count(1) / len(samples)
                 rect = page.rect
                 page_area = max(rect.width * rect.height, 1.0)
                 img_area_total = sum(
@@ -143,6 +151,18 @@ def extract_pdf(
     service_blocks: list[dict[str, Any]] = []
     if recovered:
         parsers.append("tcvn3")
+    scan_set = set(scans)
+    native_rendered: dict[int, str] = {}
+    if len(scan_set) < len(native):
+        with fitz.open(path) as document:
+            for n in range(1, len(native) + 1):
+                if n not in scan_set:
+                    page_text = page_markdown(document[n - 1], native[n - 1])
+                    if profile == "vi":
+                        page_text, _ = normalize_detected_tcvn3(page_text)
+                    if _has_unverified_vertical_fragments(page_text):
+                        raise WlhError("pdf_layout_unverified")
+                    native_rendered[n] = page_text
     if scans:
         deadline = time.monotonic() + ocr["timeout_seconds"]
         recognized: dict[int, str] | None = None
@@ -195,25 +215,19 @@ def extract_pdf(
         info.update(method="hybrid_ocr" if len(scans) < len(native) else "ocr", ocr=engine)
         parsers.append("ocr")
     rendered: list[str] = []
-    with fitz.open(path) as document:
-        for n in sorted(texts):
-            if n in scans:
-                rendered.append(text_to_markdown(clean_soft_hyphens(texts[n])))
-            else:
-                page_text = page_markdown(document[n - 1], native[n - 1])
-                if profile == "vi":
-                    page_text, _ = normalize_detected_tcvn3(page_text)
-                rendered.append(page_text)
+    for n in sorted(texts):
+        if n in scan_set:
+            rendered.append(text_to_markdown(clean_soft_hyphens(texts[n])))
+        else:
+            rendered.append(native_rendered[n])
     markdown: str = normalized("\n".join(rendered))
     if not markdown.strip():
         raise WlhError("pdf_no_text")
     for page_text in rendered:
-        lines = [line.strip() for line in page_text.splitlines() if line.strip()]
-        fragments = sum(bool(re.fullmatch(r"[\u3040-\u30ff\u3400-\u9fff]", line)) for line in lines)
         # Native glyph availability does not prove reading order. Vertical CJK
         # forms can become many isolated characters while passing text counts.
         # Do not guess how to join rows or columns whose layout was not recovered.
-        if fragments >= 12 and fragments / max(len(lines), 1) >= 0.25:
+        if _has_unverified_vertical_fragments(page_text):
             raise WlhError("pdf_layout_unverified")
     blocks = (
         service_blocks + page_blocks({n: t for n, t in texts.items() if n not in scans})

@@ -67,6 +67,12 @@ class Runtime:
         self.acquisition_cache: dict[str, dict[str, Any]] = {}
         self.extract_cache: dict[tuple[str, str], dict[str, Any] | WlhError] = {}
         self._inflight: dict[str, tuple[dict[str, Any], asyncio.Task[Mapping[str, Any]]]] = {}
+        self._extract_pool = concurrent.futures.ThreadPoolExecutor(max_workers=12)
+        self._extract_futures: dict[
+            tuple[str, str],
+            asyncio.Future[tuple[tuple[str, str], dict[str, Any] | WlhError]],
+        ] = {}
+        self._extract_targets: dict[str, tuple[dict[str, Any], list[tuple[str, str]]]] = {}
         self.ctx: Context = Context(self)
         plan: Mapping[str, Any] = context.get("recheck_plan") or context.get("reparse_plan") or {}
         self.truncated: str | None = self.checkpoint.get("truncated") or (
@@ -218,9 +224,10 @@ class Runtime:
             return await self.browser.acquire(request)
         return await self.session.acquire(request)
 
-    async def fetch_batch(self) -> bool:
+    def _fill_inflight(self) -> None:
         batch_limit = max(int(self.config["concurrency"]) * 8, int(self.config["concurrency"]))
-        slots_avail = max(0, batch_limit - len(self._inflight))
+        active_inflight = sum(1 for _, fut in self._inflight.values() if not fut.done())
+        slots_avail = max(0, batch_limit - active_inflight)
         tasks: list[dict[str, Any]] = []
         if slots_avail > 0:
             inflight_ids = list(self._inflight.keys())
@@ -254,13 +261,16 @@ class Runtime:
                 )
         for t in tasks:
             self._inflight[t["id"]] = (t, asyncio.create_task(self.fetch(t)))
+
+    async def fetch_batch(self) -> bool:
+        self._fill_inflight()
         if not self._inflight:
             return False
         futs = [fut for _, fut in self._inflight.values()]
         await asyncio.wait(futs, return_when=asyncio.FIRST_COMPLETED)
         pending_futs = [fut for fut in futs if not fut.done()]
         if pending_futs:
-            await asyncio.wait(pending_futs, timeout=2.5, return_when=asyncio.ALL_COMPLETED)
+            await asyncio.wait(pending_futs, timeout=0.15, return_when=asyncio.ALL_COMPLETED)
         completed_entries = sorted(
             (entry for entry in self._inflight.values() if entry[1].done()),
             key=lambda item: item[0]["seq"],
@@ -289,6 +299,7 @@ class Runtime:
             elif isinstance(result, BaseException):
                 raise result
             elif result["state"] == "archived" and result["outcome"] == "ok":
+                self.acquisition_cache[str(result["id"])] = dict(result)
                 self.mark_request(task["id"], "archived", result["id"])
             elif result["state"] == "cancelled" or result["error"] == "interrupted":
                 raise WlhError("interrupted")
@@ -299,12 +310,25 @@ class Runtime:
                 record_error(self.run_id, self.epoch, result["error"] or "request_failed")
         return True
 
-    def parse_archived(self) -> bool:
+    def parse_archived(self, *, limit: int | None = None) -> bool:
+        limit_sql = f"LIMIT {limit}" if limit is not None else ""
         tasks: list[dict[str, Any]] = self.rows(
-            """SELECT * FROM wlh.task WHERE run_id=%s AND kind='request' AND state='archived'
-            ORDER BY seq""",
+            f"""SELECT * FROM wlh.task WHERE run_id=%s AND kind='request' AND state='archived'
+            ORDER BY seq {limit_sql}""",
             (self.run_id,),
         )
+        missing_aids = [
+            str(t["acquisition_id"])
+            for t in tasks
+            if t.get("acquisition_id") and str(t["acquisition_id"]) not in self.acquisition_cache
+        ]
+        if missing_aids:
+            for acq in self.rows(
+                "SELECT * FROM wlh.acquisition WHERE id = ANY(%s)",
+                (list(set(missing_aids)),),
+            ):
+                if acq.get("state") == "archived":
+                    self.acquisition_cache[str(acq["id"])] = acq
         for task in tasks:
             self.budget.active()
             acquisition = self.acquisition(task["acquisition_id"])
@@ -334,7 +358,46 @@ class Runtime:
             (self.run_id,),
         )
 
+    def _preload_targets(self, targets: Sequence[Mapping[str, Any]]) -> None:
+        missing_tids = [str(t["id"]) for t in targets if "_cached_inputs" not in t]
+        missing_aids: list[str] = []
+        if missing_tids:
+            rows = self.rows(
+                """SELECT r.*, i.position, i.target_id FROM wlh.task_input i
+                JOIN wlh.task r ON r.id=i.request_id
+                WHERE i.target_id = ANY(%s) ORDER BY i.target_id, i.position""",
+                (missing_tids,),
+            )
+            by_target: dict[str, list[dict[str, Any]]] = {tid: [] for tid in missing_tids}
+            for row in rows:
+                tid = str(row["target_id"])
+                by_target.setdefault(tid, []).append(row)
+                aid = row.get("acquisition_id")
+                if aid and str(aid) not in self.acquisition_cache:
+                    missing_aids.append(str(aid))
+            for t in targets:
+                if isinstance(t, dict) and str(t["id"]) in by_target:
+                    t["_cached_inputs"] = by_target[str(t["id"])]
+        for t in targets:
+            frozen = t["payload"].get("frozen")
+            if frozen:
+                for item in frozen.get("inputs", []):
+                    aid = item.get("acquisition_id")
+                    if aid and str(aid) not in self.acquisition_cache:
+                        missing_aids.append(str(aid))
+        if missing_aids:
+            acq_rows = self.rows(
+                "SELECT * FROM wlh.acquisition WHERE id = ANY(%s)",
+                (list(set(missing_aids)),),
+            )
+            for acq in acq_rows:
+                if acq.get("state") == "archived":
+                    self.acquisition_cache[str(acq["id"])] = acq
+
     def target_inputs(self, target: Mapping[str, Any]) -> list[dict[str, Any]]:
+        cached = target.get("_cached_inputs")
+        if isinstance(cached, list):
+            return cast(list[dict[str, Any]], cached)
         return self.rows(
             """SELECT r.*, i.position FROM wlh.task_input i JOIN wlh.task r ON r.id=i.request_id
             WHERE i.target_id=%s ORDER BY i.position""",
@@ -456,85 +519,108 @@ class Runtime:
         )
         return result
 
-    def _prewarm_chunk(self, chunk: Sequence[Mapping[str, Any]]) -> None:
-        if len(chunk) <= 1:
-            return
-        jobs: dict[tuple[str, str], tuple[bytes, str, dict[str, Any] | None]] = {}
+    def _target_binary_jobs(
+        self, target: Mapping[str, Any]
+    ) -> tuple[list[tuple[str, str]], dict[tuple[str, str], tuple[bytes, str, dict[str, Any] | None]]]:
         binary_kinds = {"pdf", "doc", "docx", "rtf", "xls", "xlsx", "zip"}
-        for target in chunk:
-            frozen = target["payload"].get("frozen")
-            acq_ids: list[str] = []
-            if frozen:
-                acq_ids = [
-                    str(item["acquisition_id"])
-                    for item in frozen.get("inputs", [])
-                    if item.get("acquisition_id")
-                ]
-            else:
-                acq_ids = [
-                    str(row["acquisition_id"])
-                    for row in self.target_inputs(target)
-                    if row.get("acquisition_id")
-                ]
-            for aid in acq_ids:
-                acq = self.acquisition(aid)
-                if not acq or acq.get("state") != "archived" or acq.get("outcome") != "ok":
-                    continue
-                try:
-                    data = self.ctx.read(acq)
-                except WlhError:
-                    continue
-                kind = detect_real_format(
-                    data, "html" if acq.get("mime_type") == "text/html" else ""
-                )
-                if kind not in binary_kinds:
-                    continue
-                d_hash = digest(data)
-                ck = (d_hash, kind)
-                if ck in jobs or ck in self.extract_cache:
-                    continue
-                ocr_key = digest(
-                    {
-                        "original": d_hash,
-                        "model": self.config["ocr"]["model"],
-                        "contract": "wlh.ocr-cache.v1",
-                    }
-                )
-                cached_ref = self.ocr_cache.get(ocr_key)
-                cached_ocr = self.ctx.objects.json(cached_ref) if cached_ref else None
-                jobs[ck] = (data, kind, cached_ocr)
-        if len(jobs) <= 1:
-            return
-
-        def _extract_one(
-            item: tuple[tuple[str, str], tuple[bytes, str, dict[str, Any] | None]],
-        ) -> tuple[tuple[str, str], dict[str, Any] | WlhError]:
-            ck, (payload, knd, cached) = item
+        cks: list[tuple[str, str]] = []
+        jobs: dict[tuple[str, str], tuple[bytes, str, dict[str, Any] | None]] = {}
+        frozen = target["payload"].get("frozen")
+        if frozen:
+            acq_ids = [
+                str(item["acquisition_id"])
+                for item in frozen.get("inputs", [])
+                if item.get("acquisition_id")
+            ]
+        else:
+            acq_ids = [
+                str(row["acquisition_id"])
+                for row in self.target_inputs(target)
+                if row.get("acquisition_id")
+            ]
+        for aid in acq_ids:
+            acq = self.acquisition(aid)
+            if not acq or acq.get("state") != "archived" or acq.get("outcome") != "ok":
+                continue
             try:
-                res = run_extraction(
-                    payload, knd, self.config, active=self.budget.active, cached_ocr=cached
-                )
-                return ck, res
-            except WlhError as exc:
-                if exc.code in {
-                    "interrupted",
-                    "crawl_time_budget_exceeded",
-                    "deadline_exceeded",
-                    "stale_attempt",
-                    "inactive_attempt",
-                    "run_not_started",
-                    "extraction_cleanup_failed",
-                }:
-                    raise
-                return ck, exc
+                data = self.ctx.read(acq)
+            except WlhError:
+                continue
+            kind = detect_real_format(
+                data, "html" if acq.get("mime_type") == "text/html" else ""
+            )
+            if kind not in binary_kinds:
+                continue
+            d_hash = digest(data)
+            ck = (d_hash, kind)
+            if ck not in cks:
+                cks.append(ck)
+            if ck in jobs or ck in self.extract_cache or ck in self._extract_futures:
+                continue
+            ocr_key = digest(
+                {
+                    "original": d_hash,
+                    "model": self.config["ocr"]["model"],
+                    "contract": "wlh.ocr-cache.v1",
+                }
+            )
+            cached_ref = self.ocr_cache.get(ocr_key)
+            cached_ocr = self.ctx.objects.json(cached_ref) if cached_ref else None
+            jobs[ck] = (data, kind, cached_ocr)
+        return cks, jobs
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            for ck, outcome in pool.map(_extract_one, jobs.items()):
-                self.extract_cache[ck] = outcome
+    def _collect_prewarm_jobs(
+        self, chunk: Sequence[Mapping[str, Any]]
+    ) -> dict[tuple[str, str], tuple[bytes, str, dict[str, Any] | None]]:
+        if len(chunk) <= 1:
+            return {}
+        self._preload_targets(chunk)
+        jobs: dict[tuple[str, str], tuple[bytes, str, dict[str, Any] | None]] = {}
+        for target in chunk:
+            _, t_jobs = self._target_binary_jobs(target)
+            for ck, val in t_jobs.items():
+                if ck not in jobs:
+                    jobs[ck] = val
+        return jobs
+
+    def _extract_one_job(
+        self, item: tuple[tuple[str, str], tuple[bytes, str, dict[str, Any] | None]]
+    ) -> tuple[tuple[str, str], dict[str, Any] | WlhError]:
+        ck, (payload, knd, cached) = item
+        try:
+            res = run_extraction(
+                payload, knd, self.config, active=self.budget.active, cached_ocr=cached
+            )
+            return ck, res
+        except WlhError as exc:
+            if exc.code in {
+                "interrupted",
+                "crawl_time_budget_exceeded",
+                "deadline_exceeded",
+                "stale_attempt",
+                "inactive_attempt",
+                "run_not_started",
+                "extraction_cleanup_failed",
+            }:
+                raise
+            return ck, exc
+
+    def _run_prewarm_jobs(
+        self, jobs: Mapping[tuple[str, str], tuple[bytes, str, dict[str, Any] | None]]
+    ) -> dict[tuple[str, str], dict[str, Any] | WlhError]:
+        if len(jobs) <= 1:
+            return {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+            return dict(pool.map(self._extract_one_job, jobs.items()))
+
+    def _prewarm_chunk(self, chunk: Sequence[Mapping[str, Any]]) -> None:
+        jobs = self._collect_prewarm_jobs(chunk)
+        if len(jobs) > 1:
+            self.extract_cache.update(self._run_prewarm_jobs(jobs))
 
     def deliver_ready(self) -> bool:
         targets = self.ready_targets()
-        chunk_size = 32
+        chunk_size = 48
         for start in range(0, len(targets), chunk_size):
             chunk = targets[start : start + chunk_size]
             try:
@@ -545,6 +631,84 @@ class Runtime:
             finally:
                 self.extract_cache.clear()
         return bool(targets)
+
+    def _harvest_extract_futures(self) -> None:
+        for ck, fut in list(self._extract_futures.items()):
+            if fut.done():
+                self._extract_futures.pop(ck, None)
+                _, res = fut.result()
+                self.extract_cache[ck] = res
+
+    async def deliver_ready_async(self, *, max_chunks: int | None = None) -> bool:
+        self._harvest_extract_futures()
+        targets = self.ready_targets()
+        loop = asyncio.get_running_loop()
+        max_queued = 96 if max_chunks is not None else len(targets) + len(self._extract_targets)
+        new_targets: list[dict[str, Any]] = []
+        for target in targets:
+            if len(self._extract_targets) + len(new_targets) >= max_queued:
+                break
+            tid = str(target["id"])
+            if tid in self._extract_targets:
+                continue
+            new_targets.append(target)
+        if new_targets:
+            self._preload_targets(new_targets)
+        for target in new_targets:
+            tid = str(target["id"])
+            cks, new_jobs = self._target_binary_jobs(target)
+            for ck, job_data in new_jobs.items():
+                self._extract_futures[ck] = loop.run_in_executor(
+                    self._extract_pool, self._extract_one_job, (ck, job_data)
+                )
+            self._extract_targets[tid] = (target, cks)
+
+        if self.mode != "reparse" and self.truncated not in STOPPING:
+            self._fill_inflight()
+            if self._inflight:
+                await asyncio.sleep(0)
+
+        if max_chunks is None or not self._inflight:
+            while self._extract_futures:
+                await asyncio.wait(
+                    list(self._extract_futures.values()),
+                    return_when=asyncio.ALL_COMPLETED,
+                )
+                self._harvest_extract_futures()
+        elif self._extract_futures:
+            has_ready_target = any(
+                all(ck in self.extract_cache for ck in cks)
+                for _, cks in self._extract_targets.values()
+            )
+            if not has_ready_target:
+                await asyncio.wait(
+                    list(self._extract_futures.values()),
+                    timeout=0.15,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                rem_futs = [f for f in self._extract_futures.values() if not f.done()]
+                if rem_futs:
+                    await asyncio.wait(
+                        rem_futs,
+                        timeout=0.05,
+                        return_when=asyncio.ALL_COMPLETED,
+                    )
+                self._harvest_extract_futures()
+
+        delivered_any = False
+        for tid, (target, cks) in list(self._extract_targets.items()):
+            if all(ck in self.extract_cache for ck in cks):
+                self._extract_targets.pop(tid, None)
+                self.budget.active()
+                self.deliver(target)
+                delivered_any = True
+                await asyncio.sleep(0)
+
+        still_needed = {ck for _, cks in self._extract_targets.values() for ck in cks}
+        for ck in list(self.extract_cache.keys()):
+            if ck not in still_needed:
+                self.extract_cache.pop(ck, None)
+        return delivered_any or bool(self._extract_targets)
 
     def close_unfinished(self) -> None:
         """Targets that can no longer complete are reported, not invented as failures."""
@@ -563,15 +727,23 @@ class Runtime:
             self.plan()
             while True:
                 self.budget.active()
-                progressed = self.parse_archived()
-                progressed |= self.deliver_ready()
+                if self.mode != "reparse" and self.truncated not in STOPPING:
+                    self._fill_inflight()
+                    if self._inflight:
+                        await asyncio.sleep(0)
+                progressed = self.parse_archived(limit=64)
+                if self.mode != "reparse" and self.truncated not in STOPPING:
+                    self._fill_inflight()
+                    if self._inflight:
+                        await asyncio.sleep(0)
+                progressed |= await self.deliver_ready_async(max_chunks=1)
                 if self.truncated in STOPPING:
                     break
                 fetched = await self.fetch_batch()
                 if not (progressed or fetched):
                     break
             self.parse_archived()
-            self.deliver_ready()
+            await self.deliver_ready_async()
             self.close_unfinished()
             self.save(watermark=self.watermark())
         except asyncio.CancelledError:
@@ -606,6 +778,10 @@ class Runtime:
                     *(fut for _, fut in self._inflight.values()), return_exceptions=True
                 )
                 self._inflight.clear()
+            self._extract_pool.shutdown(wait=False, cancel_futures=True)
+            self._extract_futures.clear()
+            self._extract_targets.clear()
+            self.extract_cache.clear()
             await self.transport.close()
             if self.browser is not None:
                 await self.browser.close()
