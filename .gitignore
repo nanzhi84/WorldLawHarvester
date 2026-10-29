@@ -1,6 +1,7 @@
 # Universal Harness runtime & verification sandboxes
 work/
 artifacts/
+tests/fixtures/
 
 .venv/
 __pycache__/
