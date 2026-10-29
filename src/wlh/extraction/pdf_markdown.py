@@ -13,13 +13,15 @@ from collections import Counter
 from contextlib import redirect_stdout
 from dataclasses import dataclass
 from statistics import median
-from typing import Any
+from typing import Any, cast
 
 from wlh.core import WlhError
 from wlh.extraction.markdown import normalized
 
 _KEY = re.compile(r"\d[\w.()–/−-]{0,24}\Z")
 _PAGE_FOLIO = re.compile(r"[\s\d\-–—―Page頁ページ()/]+\Z", re.I)
+_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]+")
+_VERT_CJK_CHAR = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
 
 
 def clean_soft_hyphens(text: str) -> str:
@@ -69,12 +71,93 @@ def _has_vertical_rule_between(
     return any(x0 - 1 <= rx <= x1 + 1 and ry0 - 2 <= mid <= ry1 + 2 for rx, ry0, ry1 in rules)
 
 
-def native_lines(page: Any) -> list[Line]:
+def native_lines(page: Any, tables: list[Any] | None = None) -> list[Line]:
     rules = _vertical_rules(page)
+    for tbl in tables or []:
+        for row in tbl.rows:
+            for cell_box in row.cells:
+                if cell_box is not None:
+                    rules.append((float(cell_box[0]), float(cell_box[1]), float(cell_box[3])))
+                    rules.append((float(cell_box[2]), float(cell_box[1]), float(cell_box[3])))
     raw: list[Line] = []
-    for block in page.get_text("dict", flags=0)["blocks"]:
+    for block in page.get_text("rawdict", flags=0)["blocks"]:
         for line in block.get("lines", []):
-            spans = [span for span in line.get("spans", []) if span.get("text")]
+            raw_spans_val = line.get("spans")
+            raw_spans: list[dict[str, Any]] = (
+                [
+                    cast(dict[str, Any], s)
+                    for s in cast(list[object], raw_spans_val)
+                    if isinstance(s, dict)
+                ]
+                if isinstance(raw_spans_val, list)
+                else []
+            )
+            spans: list[dict[str, Any]] = []
+            for s in raw_spans:
+                raw_chars = s.get("chars")
+                chars: list[dict[str, Any]] = (
+                    [
+                        cast(dict[str, Any], ch)
+                        for ch in cast(list[object], raw_chars)
+                        if isinstance(ch, dict)
+                    ]
+                    if isinstance(raw_chars, list)
+                    else []
+                )
+                if not chars:
+                    t = _CTRL_RE.sub(" ", str(s.get("text") or ""))
+                    if t:
+                        spans.append({"text": t, "bbox": s["bbox"]})
+                    continue
+                sb = tuple(float(v) for v in s["bbox"])
+                if _has_vertical_rule_between(rules, sb[0] + 1.0, sb[2] - 1.0, sb[1], sb[3]):
+                    cur_chars: list[dict[str, Any]] = [chars[0]]
+                    for c in chars[1:]:
+                        prev_c = cur_chars[-1]
+                        if _has_vertical_rule_between(
+                            rules,
+                            float(prev_c["bbox"][0]),
+                            float(c["bbox"][2]),
+                            sb[1],
+                            sb[3],
+                        ):
+                            ctext = _CTRL_RE.sub(
+                                " ", "".join(str(ch["c"]) for ch in cur_chars if "c" in ch)
+                            )
+                            if ctext:
+                                spans.append(
+                                    {
+                                        "text": ctext,
+                                        "bbox": (
+                                            min(float(ch["bbox"][0]) for ch in cur_chars),
+                                            min(float(ch["bbox"][1]) for ch in cur_chars),
+                                            max(float(ch["bbox"][2]) for ch in cur_chars),
+                                            max(float(ch["bbox"][3]) for ch in cur_chars),
+                                        ),
+                                    }
+                                )
+                            cur_chars = [c]
+                        else:
+                            cur_chars.append(c)
+                    ctext = _CTRL_RE.sub(
+                        " ", "".join(str(ch["c"]) for ch in cur_chars if "c" in ch)
+                    )
+                    if ctext:
+                        spans.append(
+                            {
+                                "text": ctext,
+                                "bbox": (
+                                    min(float(ch["bbox"][0]) for ch in cur_chars),
+                                    min(float(ch["bbox"][1]) for ch in cur_chars),
+                                    max(float(ch["bbox"][2]) for ch in cur_chars),
+                                    max(float(ch["bbox"][3]) for ch in cur_chars),
+                                ),
+                            }
+                        )
+                else:
+                    ctext = _CTRL_RE.sub(" ", "".join(str(ch["c"]) for ch in chars if "c" in ch))
+                    if ctext:
+                        spans.append({"text": ctext, "bbox": s["bbox"]})
             if not spans:
                 continue
             groups: list[list[dict[str, Any]]] = [[spans[0]]]
@@ -86,13 +169,19 @@ def native_lines(page: Any) -> list[Line]:
                     span["text"].strip()
                     and prev_span["text"].strip()
                     and sb[0] >= pb[2] - 1
-                    and _has_vertical_rule_between(rules, pb[2], sb[0], min(pb[1], sb[1]), max(pb[3], sb[3]))
+                    and _has_vertical_rule_between(
+                        rules, pb[2], sb[0], min(pb[1], sb[1]), max(pb[3], sb[3])
+                    )
                 ):
                     groups.append([span])
-                elif not span["text"].strip() and len(groups[-1]) == 1 and prev_span["text"].strip():
+                elif (
+                    not span["text"].strip() and len(groups[-1]) == 1 and prev_span["text"].strip()
+                ):
                     groups[-1].append(span)
                 else:
-                    stripped_prev = next((s for s in reversed(groups[-1]) if s["text"].strip()), None)
+                    stripped_prev = next(
+                        (s for s in reversed(groups[-1]) if s["text"].strip()), None
+                    )
                     if (
                         span["text"].strip()
                         and stripped_prev is not None
@@ -128,13 +217,21 @@ def native_lines(page: Any) -> list[Line]:
         if (
             h > 0
             and abs(curr.middle - prev.middle) <= h * 0.35
-            and -1.0 <= gap <= h * 6.0
+            and -1.0 <= gap <= h * 9.0
             and not _has_vertical_rule_between(
-                rules, prev.box[2], curr.box[0], min(prev.box[1], curr.box[1]), max(prev.box[3], curr.box[3])
+                rules,
+                prev.box[2],
+                curr.box[0],
+                min(prev.box[1], curr.box[1]),
+                max(prev.box[3], curr.box[3]),
             )
             and (len(prev.text.strip()) <= 4 or len(curr.text.strip()) <= 4)
         ):
-            sep = " " if gap >= h * 0.8 and not prev.text.endswith(" ") and not curr.text.startswith(" ") else ""
+            sep = (
+                " "
+                if gap >= h * 0.8 and not prev.text.endswith(" ") and not curr.text.startswith(" ")
+                else ""
+            )
             box = (
                 min(prev.box[0], curr.box[0]),
                 min(prev.box[1], curr.box[1]),
@@ -148,7 +245,9 @@ def native_lines(page: Any) -> list[Line]:
 
 
 def _cell(lines: list[Line]) -> str:
-    text = "\n".join(line.text for line in sorted(lines, key=lambda line: (line.middle, line.box[0])))
+    text = "\n".join(
+        line.text for line in sorted(lines, key=lambda line: (line.middle, line.box[0]))
+    )
     text = clean_soft_hyphens(text).replace("|", r"\|")
     return re.sub(r"\s+", " ", text).strip()
 
@@ -172,26 +271,57 @@ def _inside(line: Line, box: tuple[float, ...], tolerance: float = 2) -> bool:
 def _ruled(table: Any, lines: list[Line]) -> tuple[set[int], str] | None:
     if table.row_count < 2 or table.col_count < 2:
         return None
-    if any(box is None for row in table.rows for box in row.cells):
-        # A merged or incomplete cell cannot be represented as an empty column:
-        # that would falsely attach its text to just one of the covered headers.
+    col_xs: list[list[float]] = [[] for _ in range(table.col_count)]
+    row_ys: list[list[float]] = [[] for _ in range(table.row_count)]
+    for r_idx, row in enumerate(table.rows):
+        for c_idx, cell_box in enumerate(row.cells):
+            if cell_box is not None:
+                col_xs[c_idx].append(float(cell_box[0] + cell_box[2]) / 2.0)
+                row_ys[r_idx].append(float(cell_box[1] + cell_box[3]) / 2.0)
+    if any(not xs for xs in col_xs) or any(not ys for ys in row_ys):
+        if any(cell_box is None for row in table.rows for cell_box in row.cells):
+            raise WlhError("pdf_layout_unverified")
+        return None
+    col_x = [median(xs) for xs in col_xs]
+    row_y = [median(ys) for ys in row_ys]
+    owner: dict[tuple[int, int], tuple[int, int]] = {}
+    owner_box: dict[tuple[int, int], tuple[float, float, float, float]] = {}
+    for r_idx, row in enumerate(table.rows):
+        for c_idx, cell_box in enumerate(row.cells):
+            if cell_box is None:
+                continue
+            bx0, by0, bx1, by1 = (
+                float(cell_box[0]),
+                float(cell_box[1]),
+                float(cell_box[2]),
+                float(cell_box[3]),
+            )
+            owner_box[(r_idx, c_idx)] = (bx0, by0, bx1, by1)
+            for rr in range(table.row_count):
+                if by0 - 2.0 <= row_y[rr] <= by1 + 2.0:
+                    for cc in range(table.col_count):
+                        if bx0 - 2.0 <= col_x[cc] <= bx1 + 2.0:
+                            owner.setdefault((rr, cc), (r_idx, c_idx))
+    if len(owner) < table.row_count * table.col_count:
         raise WlhError("pdf_layout_unverified")
-    rows: list[list[list[Line]]] = [[[] for _ in row.cells] for row in table.rows]
     relevant = [line for line in lines if _inside(line, table.bbox)]
+    if not relevant:
+        return None
+    cell_lines: dict[tuple[int, int], list[Line]] = {pos: [] for pos in owner_box}
     for line in relevant:
-        cells = [
-            (i, j)
-            for i, row in enumerate(table.rows)
-            for j, box in enumerate(row.cells)
-            if box is not None and _inside(line, box)
-        ]
-        if len(cells) != 1:
-            # Merged/rotated or overlapping text needs a richer representation;
-            # preserve it as source text instead of guessing cell ownership.
+        matched = [pos for pos, box in owner_box.items() if _inside(line, box, 3.0)]
+        if len(matched) != 1:
             return None
-        i, j = cells[0]
-        rows[i][j].append(line)
-    return _table(rows) if relevant else None
+        cell_lines[matched[0]].append(line)
+    for clines in cell_lines.values():
+        vert_frags = sum(bool(_VERT_CJK_CHAR.fullmatch(ln.text.strip())) for ln in clines)
+        if vert_frags >= 4 and vert_frags / max(len(clines), 1) >= 0.5:
+            raise WlhError("pdf_layout_unverified")
+    rows: list[list[list[Line]]] = [
+        [list(cell_lines[owner[(r_idx, c_idx)]]) for c_idx in range(table.col_count)]
+        for r_idx in range(table.row_count)
+    ]
+    return _table(rows)
 
 
 def _same_row(key: Line, lines: list[Line]) -> list[Line]:
@@ -201,7 +331,7 @@ def _same_row(key: Line, lines: list[Line]) -> list[Line]:
     )
 
 
-def _find_tables(page: Any, strategy: str) -> Any:
+def find_tables(page: Any, strategy: str) -> Any:
     # Some PyMuPDF releases print a layout-package advisory on first use. The
     # extraction worker reserves stdout for its JSON protocol, including errors.
     with redirect_stdout(sys.stderr):
@@ -241,7 +371,8 @@ def _borderless(table: Any, lines: list[Line]) -> tuple[set[int], str] | None:
     # Cell starts must repeat; text fragments accidentally aligned in prose do not.
     if any(
         abs(line.box[0] - starts[column]) > height * 2
-        for row in regular for column, line in enumerate(row)
+        for row in regular
+        for column, line in enumerate(row)
     ):
         return None
 
@@ -250,7 +381,8 @@ def _borderless(table: Any, lines: list[Line]) -> tuple[set[int], str] | None:
 
     first, last = keys[0], keys[-1]
     header = [
-        line for line in lines
+        line
+        for line in lines
         if first.box[1] - height * 5 <= line.box[1] < first.box[1] - height * 0.5
         and table.bbox[0] - 3 <= line.box[0] <= table.bbox[2]
         and len(line.text) <= 120
@@ -272,13 +404,16 @@ def _borderless(table: Any, lines: list[Line]) -> tuple[set[int], str] | None:
             bottom = min(bottom, line.box[1] - 1)
             break
     body = [
-        line for line in lines
+        line
+        for line in lines
         if first.middle - height * 0.6 <= line.middle <= bottom
         and table.bbox[0] - 3 <= line.box[0] <= table.bbox[2]
     ]
     rows: list[list[list[Line]]] = [header_cells] + [[[] for _ in range(width)] for _ in keys]
     for line in body:
-        row = max((n for n, key in enumerate(keys) if key.middle <= line.middle + height * 0.6), default=0)
+        row = max(
+            (n for n, key in enumerate(keys) if key.middle <= line.middle + height * 0.6), default=0
+        )
         cell = column(line)
         if cell == 0 and line.index != keys[row].index:
             return None
@@ -293,7 +428,9 @@ def _borderless(table: Any, lines: list[Line]) -> tuple[set[int], str] | None:
 def _leader_table(lines: list[Line]) -> tuple[set[int], str] | None:
     """Dotted leaders explicitly pair a left label with an aligned right value."""
     leader = re.compile(r"[.·・･…]{4,}\s*$")
-    keys = sorted([line for line in lines if leader.search(line.text)], key=lambda line: line.middle)
+    keys = sorted(
+        [line for line in lines if leader.search(line.text)], key=lambda line: line.middle
+    )
     if len(keys) < 2:
         return None
     partners: list[Line] = []
@@ -310,16 +447,23 @@ def _leader_table(lines: list[Line]) -> tuple[set[int], str] | None:
     for i, key in enumerate(keys):
         left = [line for line in _same_row(key, lines) if line.box[2] <= right_start]
         left = [Line(line.index, line.box, leader.sub("", line.text)) for line in left]
-        following = [line.middle for line in lines
-                     if line.middle > key.middle + key.height * 0.6
-                     and line.box[0] < right_start - 3]
+        following = [
+            line.middle
+            for line in lines
+            if line.middle > key.middle + key.height * 0.6 and line.box[0] < right_start - 3
+        ]
         end = keys[i + 1].middle if i + 1 < len(keys) else min(following, default=float("inf"))
-        right = [line for line in lines
-                 if abs(line.box[0] - right_start) <= 3
-                 and key.middle - key.height * 0.5 <= line.middle < end - key.height * 0.5]
+        right = [
+            line
+            for line in lines
+            if abs(line.box[0] - right_start) <= 3
+            and key.middle - key.height * 0.5 <= line.middle < end - key.height * 0.5
+        ]
         right.sort(key=lambda line: line.middle)
-        if not left or not right or any(
-            b.middle - a.middle > key.height * 2.5 for a, b in zip(right, right[1:])
+        if (
+            not left
+            or not right
+            or any(b.middle - a.middle > key.height * 2.5 for a, b in zip(right, right[1:]))
         ):
             raise WlhError("pdf_layout_unverified")
         rows.append([left, right])
@@ -356,7 +500,10 @@ def _check_box_order(page: Any, lines: list[Line]) -> list[Line]:
                 continue
             framed_all = [line for line in current if _inside(line, box)]
             framed_ids = {line.index for line in framed_all}
-            first, last = min(line.index for line in framed_prose), max(line.index for line in framed_prose)
+            first, last = (
+                min(line.index for line in framed_prose),
+                max(line.index for line in framed_prose),
+            )
             out_of_order = False
             for line in prose:
                 if line.index in framed_ids or line.box[2] <= box[0] or line.box[0] >= box[2]:
@@ -393,29 +540,127 @@ def _check_box_order(page: Any, lines: list[Line]) -> list[Line]:
     return current
 
 
+def _join_vertical_columns(lines: list[Line]) -> list[Line]:
+    vert_count = sum(bool(_VERT_CJK_CHAR.fullmatch(ln.text.strip())) for ln in lines)
+    if vert_count < 12 or vert_count / max(len(lines), 1) < 0.25:
+        return lines
+    vert: list[Line] = []
+    horiz: list[Line] = []
+    for ln in lines:
+        w = ln.box[2] - ln.box[0]
+        if len(ln.text.strip()) <= 2 and w <= max(ln.height * 1.8, 24.0):
+            vert.append(ln)
+        else:
+            horiz.append(ln)
+    if len(vert) < 12:
+        return lines
+    med_h = max(median(ln.height for ln in vert), 8.0)
+    x_tol = max(med_h * 0.65, 6.0)
+    vert_by_x = sorted(vert, key=lambda ln: -((ln.box[0] + ln.box[2]) / 2.0))
+    x_cols: list[list[Line]] = []
+    col_cxs: list[float] = []
+    for ln in vert_by_x:
+        cx = (ln.box[0] + ln.box[2]) / 2.0
+        if x_cols and abs(cx - col_cxs[-1]) <= x_tol:
+            x_cols[-1].append(ln)
+            col_cxs[-1] = sum((item.box[0] + item.box[2]) / 2.0 for item in x_cols[-1]) / len(
+                x_cols[-1]
+            )
+        else:
+            x_cols.append([ln])
+            col_cxs.append(cx)
+    segments: list[tuple[float, float, float, Line]] = []
+    y_gap_max = max(med_h * 3.0, 36.0)
+    for col in x_cols:
+        col_sorted = sorted(col, key=lambda ln: (ln.box[1], -ln.box[0]))
+        cur_seg = [col_sorted[0]]
+        for ln in col_sorted[1:]:
+            if ln.box[1] - cur_seg[-1].box[3] > y_gap_max:
+                cx = sum((item.box[0] + item.box[2]) / 2.0 for item in cur_seg) / len(cur_seg)
+                box = (
+                    min(item.box[0] for item in cur_seg),
+                    min(item.box[1] for item in cur_seg),
+                    max(item.box[2] for item in cur_seg),
+                    max(item.box[3] for item in cur_seg),
+                )
+                segments.append(
+                    (
+                        box[1],
+                        box[3],
+                        cx,
+                        Line(0, box, "".join(item.text.strip() for item in cur_seg)),
+                    )
+                )
+                cur_seg = [ln]
+            else:
+                cur_seg.append(ln)
+        cx = sum((item.box[0] + item.box[2]) / 2.0 for item in cur_seg) / len(cur_seg)
+        box = (
+            min(item.box[0] for item in cur_seg),
+            min(item.box[1] for item in cur_seg),
+            max(item.box[2] for item in cur_seg),
+            max(item.box[3] for item in cur_seg),
+        )
+        segments.append(
+            (box[1], box[3], cx, Line(0, box, "".join(item.text.strip() for item in cur_seg)))
+        )
+    segments.sort(key=lambda item: item[0])
+    tiers: list[list[tuple[float, float, float, Line]]] = []
+    for seg in segments:
+        if not tiers:
+            tiers.append([seg])
+            continue
+        tier_y0 = min(s[0] for s in tiers[-1])
+        tier_y1 = max(s[1] for s in tiers[-1])
+        overlap = min(tier_y1, seg[1]) - max(tier_y0, seg[0])
+        if overlap > -med_h * 1.5:
+            tiers[-1].append(seg)
+        else:
+            tiers.append([seg])
+    ordered_vert: list[Line] = []
+    for tier in tiers:
+        tier.sort(key=lambda item: -item[2])
+        ordered_vert.extend(item[3] for item in tier)
+    min_vy = min(ln.box[1] for ln in ordered_vert)
+    top_horiz = sorted(
+        [ln for ln in horiz if ln.middle < min_vy], key=lambda ln: (ln.middle, ln.box[0])
+    )
+    bot_horiz = sorted(
+        [ln for ln in horiz if ln.middle >= min_vy], key=lambda ln: (ln.middle, ln.box[0])
+    )
+    combined = top_horiz + ordered_vert + bot_horiz
+    return [Line(idx, ln.box, ln.text) for idx, ln in enumerate(combined)]
+
+
 def page_markdown(page: Any, text: str) -> str:
-    lines = _check_box_order(page, native_lines(page))
+    clean_text = _CTRL_RE.sub(" ", text)
+    strict_tables = (
+        list(find_tables(page, "lines_strict")) if len(page.get_drawings()) >= 4 else []
+    )
+    lines = _check_box_order(page, native_lines(page, strict_tables))
+    if not strict_tables:
+        lines = _join_vertical_columns(lines)
+
     # Text dictionaries and plain extraction can differ for unusual fonts. In
     # that case, keep the authoritative native string rather than lose glyphs.
     def compact(value: str) -> Counter[str]:
         return Counter(char for char in value if not char.isspace())
 
-    if compact("".join(line.text for line in lines)) != compact(text):
-        return normalized(clean_soft_hyphens(text))
+    if compact("".join(line.text for line in lines)) != compact(clean_text):
+        return normalized(clean_soft_hyphens(clean_text))
     tables: list[tuple[set[int], str]] = []
-    if len(page.get_drawings()) >= 4:
-        for table in _find_tables(page, "lines_strict"):
-            parsed = _ruled(table, lines)
-            if parsed:
-                tables.append(parsed)
-            elif table.row_count >= 2 and table.col_count >= 2:
-                raise WlhError("pdf_layout_unverified")
+    for table in strict_tables:
+        parsed = _ruled(table, lines)
+        if parsed:
+            tables.append(parsed)
+        elif table.row_count >= 2 and table.col_count >= 2:
+            raise WlhError("pdf_layout_unverified")
     leaders = _leader_table(lines)
     if leaders and not any(leaders[0] & used for used, _ in tables):
         tables.append(leaders)
     keys = [line for line in lines if _KEY.fullmatch(line.text.strip())]
     if len(keys) >= 5 and sum(len(_same_row(key, lines)) >= 3 for key in keys) >= 5:
-        for table in _find_tables(page, "text"):
+        for table in find_tables(page, "text"):
             parsed = _borderless(table, lines)
             if parsed and not any(parsed[0] & used for used, _ in tables):
                 tables.append(parsed)

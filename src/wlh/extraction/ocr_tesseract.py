@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import math
 import os
 import re
@@ -22,6 +23,7 @@ from wlh.extraction.pdf_markdown import clean_soft_hyphens
 
 fitz: Any = _fitz
 _TESSERACT_META: dict[str, tuple[set[str], str]] = {}
+_IMAGE_OCR_CACHE: dict[tuple[str, str], str] = {}
 
 
 def _is_vertical_cjk_fragmented(text: str) -> bool:
@@ -134,7 +136,11 @@ def tesseract_pages(
                 )
                 images[number] = image
             max_each = max(1, int(cfg["max_result_bytes"]) - size)
-            langs = str(cfg["languages"])
+            lang_parts = str(cfg["languages"]).split("+")
+            if "jpn" in lang_parts and len(lang_parts) > 1:
+                langs = "+".join(part for part in lang_parts if part != "eng")
+            else:
+                langs = str(cfg["languages"])
             dpi_val = int(cfg["dpi"])
             batch_texts: dict[int, str]
             if len(batch) == 1:
@@ -177,3 +183,44 @@ def tesseract_pages(
                 break
             pos += batch_len
     return result, {"engine": "tesseract", "version": version, "languages": cfg["languages"]}
+
+
+def tesseract_image_bytes(
+    data: bytes,
+    languages: str = "jpn+jpn_vert",
+    timeout: float = 15.0,
+) -> str:
+    """Run Tesseract OCR on an archived raster image (PNG/GIF/JPEG) and return normalized text."""
+    if not data:
+        return ""
+    digest_key = (hashlib.sha256(data).hexdigest(), languages)
+    cached = _IMAGE_OCR_CACHE.get(digest_key)
+    if cached is not None:
+        return cached
+    executable = shutil.which(os.environ.get("WLH_TESSERACT", "tesseract"))
+    if not executable:
+        return ""
+    available, _ = _tesseract_meta(executable)
+    lang_parts = [p for p in languages.split("+") if p in available]
+    if "jpn" in lang_parts and len(lang_parts) > 1:
+        lang_parts = [p for p in lang_parts if p != "eng"]
+    langs = "+".join(lang_parts) if lang_parts else "eng"
+    work_root = Path("work")
+    work_root.mkdir(parents=True, exist_ok=True)
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="wlh-img-ocr-", dir=work_root.resolve()
+        ) as folder:
+            png_path = Path(folder) / "image.png"
+            pix = fitz.Pixmap(data)
+            if pix.alpha or pix.n > 3:
+                pix = fitz.Pixmap(fitz.csRGB, pix)
+            pix.save(png_path)
+            raw_text = _ocr_single_page(executable, png_path, langs, 200, 65536, timeout)
+    except Exception:
+        _IMAGE_OCR_CACHE[digest_key] = ""
+        return ""
+    cleaned = re.sub(r"\s+", " ", clean_soft_hyphens(raw_text)).strip()
+    _IMAGE_OCR_CACHE[digest_key] = cleaned
+    return cleaned
+

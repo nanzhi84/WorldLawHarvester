@@ -196,8 +196,45 @@ class RecordAdapter(Base):
             }
         ]
         units: list[RawUnitSource] = []
-        downloads: list[Any] = list(record.get("downloads") or [])
-        for idx, item in enumerate(inputs[1:]):
+        inline_zip_inputs = [
+            item
+            for item in inputs[1:]
+            if cast(Mapping[str, Any], item.get("unit") or {}).get("role")
+            == "inline_attachment_zip"
+        ]
+        regular_inputs = [
+            item
+            for item in inputs[1:]
+            if cast(Mapping[str, Any], item.get("unit") or {}).get("role")
+            != "inline_attachment_zip"
+        ]
+        req_att_srcs = record.get("required_attachment_srcs")
+        if (
+            isinstance(req_att_srcs, list)
+            and req_att_srcs
+            and not record.get("attachment_zip_b64")
+        ):
+            from wlh.adapters.japan_law import verify_attachment_zip
+
+            if not inline_zip_inputs:
+                raise WlhError("egov_attachments_unverified")
+            zip_acq: Mapping[str, Any] = inline_zip_inputs[0]["acquisition"]
+            zip_bytes: bytes = ctx.read(zip_acq)
+            verify_attachment_zip([str(s) for s in cast(list[Any], req_att_srcs)], zip_bytes)
+            lineage.append(
+                {
+                    "acquisition_id": zip_acq["id"],
+                    "archive_ref": zip_acq["archive_ref"],
+                    "role": "context",
+                    "locator": {"kind": "whole_response", "url": zip_acq["actual_url"]},
+                }
+            )
+        downloads: list[Any] = [
+            d
+            for d in list(record.get("downloads") or [])
+            if not (isinstance(d, Mapping) and cast(Mapping[str, Any], d).get("role") == "inline_attachment_zip")
+        ]
+        for idx, item in enumerate(regular_inputs):
             acq: Mapping[str, Any] = item["acquisition"]
             data: bytes = ctx.read(acq)
             kind = detect_real_format(data)

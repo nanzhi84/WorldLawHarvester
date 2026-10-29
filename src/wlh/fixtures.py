@@ -14,7 +14,7 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
 import lxml.etree as etree
 
@@ -121,18 +121,28 @@ def _should_prune_candidate_url(
         r"/content/pkg/\1/uslm/\1.xml",
         cand_path,
     )
+    unquoted_exported = {unquote(p) for p in exported_paths}
+    unquoted_unselected = {unquote(p) for p in unselected_paths}
     if (
         cand_route in exported_paths
         or cand_path in exported_paths
         or plaw_mapped in exported_paths
+        or unquote(cand_route) in unquoted_exported
+        or unquote(cand_path) in unquoted_exported
     ):
         return False
-    if entry_paths and (cand_route in entry_paths or cand_path in entry_paths):
+    if entry_paths and (
+        cand_route in entry_paths
+        or cand_path in entry_paths
+        or unquote(cand_route) in {unquote(p) for p in entry_paths}
+    ):
         return False
     if (
         cand_route in unselected_paths
         or cand_path in unselected_paths
         or plaw_mapped in unselected_paths
+        or unquote(cand_route) in unquoted_unselected
+        or unquote(cand_path) in unquoted_unselected
     ):
         return True
     plaw_full = f"{parts.scheme}://{parts.netloc}{plaw_mapped}"
@@ -176,14 +186,36 @@ def _prune_unselected_links(
             return f"{attr}={quote}#unselected{quote}"
         return m.group(0)
 
+    if text.lstrip().startswith("{") and '"pagedList"' in text:
+        try:
+            payload = json.loads(text)
+            if isinstance(payload, dict):
+                payload_dict = cast(dict[str, Any], payload)
+                paged_raw = payload_dict.get("pagedList")
+                if isinstance(paged_raw, dict):
+                    paged_list = cast(dict[str, Any], paged_raw)
+                    items_raw = paged_list.get("items")
+                    if isinstance(items_raw, list):
+                        items_list = cast(list[Any], items_raw)
+                        filtered_items: list[dict[str, Any]] = []
+                        for raw_item in items_list:
+                            if isinstance(raw_item, dict):
+                                item_dict = cast(dict[str, Any], raw_item)
+                                if f"/api/Datasets/{item_dict.get('datasetId')}" in exported_paths:
+                                    filtered_items.append(item_dict)
+                        paged_list["items"] = filtered_items
+                        return json.dumps(payload_dict, ensure_ascii=False, indent=2)
+        except ValueError:
+            pass
+
     out = re.sub(
-        r'\b(href|docurl|data-url|data-href)\s*=\s*(["\'])([^"\']+)\2',
+        r'\b(href|src|docurl|data-url|data-href)\s*=\s*(["\'])([^"\']+)\2',
         _replace_attr,
         text,
         flags=re.IGNORECASE,
     )
     out = re.sub(
-        r"\b(href|docurl|data-url|data-href)\s*=\s*(&quot;|&#34;|&#x22;|&#39;|&#x27;)(.*?)\2",
+        r"\b(href|src|docurl|data-url|data-href)\s*=\s*(&quot;|&#34;|&#x22;|&#39;|&#x27;)(.*?)\2",
         _replace_attr,
         out,
         flags=re.IGNORECASE,
@@ -401,6 +433,7 @@ def export_source_fixture(
     best_acq_by_path: dict[str, dict[str, Any]] = {}
     ordered_paths: list[str] = []
 
+    has_parent_links = any(x.get("parent_acquisition_id") for x in acqs)
     for a in acqs:
         eff_url = str(a.get("actual_url") or a.get("request_url") or "/")
         parts = urlsplit(eff_url)
@@ -418,6 +451,9 @@ def export_source_fixture(
         aid = a["id"]
         is_selected = aid in selected_acq_ids or route_path in selected_paths
         is_unselected_ev = aid in unselected_acq_ids and not is_selected
+        is_unselected_branch = (
+            has_parent_links and not is_selected and route_path not in entry_paths
+        )
         is_unselected_detail = (
             not is_selected
             and route_path not in entry_paths
@@ -427,7 +463,9 @@ def export_source_fixture(
                 for p in detail_patterns
             )
         )
-        if selected_obs_ids and (is_unselected_ev or is_unselected_detail):
+        if selected_obs_ids and (
+            is_unselected_ev or is_unselected_detail or is_unselected_branch
+        ):
             unselected_paths.add(route_path)
             continue
 
@@ -635,8 +673,10 @@ class FixtureRouter:
         source_id = str(manifest["source_id"])
         routes: list[Mapping[str, Any]] = manifest.get("routes") or []
         for route in routes:
-            if route.get("match", "exact") == "exact" and route.get("path") == path:
-                return source_id, route
+            if route.get("match", "exact") == "exact":
+                rpath = str(route.get("path") or "")
+                if rpath == path or unquote(rpath) == unquote(path):
+                    return source_id, route
         for route in routes:
             if route.get("match") == "prefix" and path.startswith(str(route.get("path") or "")):
                 return source_id, route

@@ -31,7 +31,7 @@ from wlh.extraction.vi_tcvn3 import (
 
 OFFICE_CONTRACT = "wlh.office.v2"
 OFFICE_KINDS = {"doc", "docx", "rtf", "xls", "xlsx"}
-ZIP_MEMBER_KINDS = OFFICE_KINDS | {"pdf", "txt", "html"}
+ZIP_MEMBER_KINDS = OFFICE_KINDS | {"pdf", "txt", "html", "json"}
 MAX_ZIP_MEMBERS = 50
 MAX_ZIP_DEPTH = 2
 
@@ -329,12 +329,18 @@ def unpack_zip(path: str | Path, folder: str | Path, max_bytes: int) -> list[dic
                 raise WlhError("zip_member_limit_exceeded")
             if sum(i.file_size for i in infos) > max_bytes:
                 raise WlhError("zip_expanded_size_exceeded")
+            has_json_member = any(
+                (sm := safe_member(i.filename)) is not None and sm.lower().endswith(".json")
+                for i in infos
+            )
             total = 0
             for index, info in enumerate(sorted(infos, key=lambda i: i.filename)):
                 name = safe_member(info.filename)
                 if name is None:
                     raise WlhError("zip_member_path_invalid")
                 if name.startswith("__MACOSX/") or Path(name).name.startswith("._"):
+                    continue
+                if has_json_member and name.upper().endswith(".PDF"):
                     continue
                 with archive.open(info) as stream:
                     data = stream.read(max_bytes - total + 1)

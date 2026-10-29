@@ -31,7 +31,7 @@ def decode(data: bytes, charset: str | None) -> tuple[str, str]:
     # in official tax pages (circled numbers, compatibility kanji and symbols).
     if detected and detected.lower().replace("-", "_") in {"shift_jis", "sjis", "ms_kanji"}:
         detected = "cp932"
-    for encoding in (detected, "utf-8"):
+    for encoding in (detected, "utf-8", "cp932"):
         if encoding:
             try:
                 return data.decode(encoding), encoding
@@ -459,7 +459,11 @@ def extract_detail_fields(
             body_text=text,
         )
         return values, resolved_title, encoding
-    source_text = f"{url}\n{text}" if text else url
+    body_source = text
+    resolved_encoding = acquisition.get("charset")
+    if body_source is None and kind in {"txt", "json"} and data:
+        body_source, resolved_encoding = decode(data, acquisition.get("charset"))
+    source_text = f"{url}\n{body_source}" if body_source else url
     for name, rule in fields.items():
         if rule.get("value") is not None:
             values[name] = rule["value"]
@@ -469,6 +473,6 @@ def extract_detail_fields(
         values.get("title") or file_name(url),
         values.get("document_number"),
         tree=None,
-        body_text=text,
+        body_text=body_source,
     )
-    return values, resolved_title, acquisition["charset"]
+    return values, resolved_title, resolved_encoding

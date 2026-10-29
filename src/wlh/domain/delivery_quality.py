@@ -88,25 +88,58 @@ def _is_signature_only_stub(md_text: str, non_ws_len: int) -> bool:
 def _has_duplicated_substantive_paragraph(md_text: str) -> bool:
     blocks = re.split(r"\n\s*\n+", md_text.strip())
     substantive_blocks: list[str] = []
+    contextual_blocks: list[str] = []
+    headings_by_level: dict[int, str] = {}
+    sub_headers: list[str] = []
     prev_compact: str | None = None
     has_adjacent_dup = False
     for block in blocks:
         stripped = block.strip()
-        if not stripped or stripped.startswith(("#", "|", "```", "- ", "* ")):
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            m_head = re.match(r"^(#+)\s*(.*)$", stripped)
+            if m_head:
+                head_text = re.sub(r"\s+", " ", m_head.group(2)).strip()
+                lvl = (
+                    1
+                    if head_text.startswith(("附則", "附 則")) and len(m_head.group(1)) >= 2
+                    else len(m_head.group(1))
+                )
+                for k in [k for k in headings_by_level if k >= lvl]:
+                    headings_by_level.pop(k, None)
+                headings_by_level[lvl] = head_text
+            sub_headers.clear()
+            prev_compact = None
+            continue
+        if (
+            stripped.startswith(("|", "```", "- ", "* ", "<table"))
+            or "<table" in stripped.lower()
+        ):
+            prev_compact = None
             continue
         compact = re.sub(r"\s+", " ", stripped)
         if len(compact) < 60:
+            sub_headers = (sub_headers + [compact])[-2:]
+            prev_compact = None
             continue
         if prev_compact is not None and compact == prev_compact:
             has_adjacent_dup = True
         substantive_blocks.append(compact)
+        context_parts = [v for _, v in sorted(headings_by_level.items())]
+        context_parts.extend(sub_headers)
+        context_trail = " > ".join(context_parts)
+        contextual_blocks.append(f"{context_trail} || {compact}" if context_trail else compact)
         prev_compact = compact
     if has_adjacent_dup and len(substantive_blocks) <= 40:
         return True
-    if len(substantive_blocks) >= 2:
-        unique_count = len(set(substantive_blocks))
-        dup_instances = len(substantive_blocks) - unique_count
-        if dup_instances * 2 >= len(substantive_blocks) or unique_count <= len(substantive_blocks) * 0.6:
+    if len(contextual_blocks) >= 2:
+        unique_count = len(set(contextual_blocks))
+        dup_instances = len(contextual_blocks) - unique_count
+        if (
+            dup_instances * 2 >= len(contextual_blocks)
+            or unique_count <= len(contextual_blocks) * 0.6
+        ):
             return True
     return False
 

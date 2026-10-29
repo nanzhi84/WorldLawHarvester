@@ -230,6 +230,12 @@ def commit(
             ),
         )
         if outcome != "unchanged":
+            seq_row = one(
+                c,
+                "SELECT COALESCE(max(sequence), 0) + 1 AS seq FROM wlh.version WHERE resource_id=%s",
+                (r["id"],),
+            )
+            next_seq = int(seq_row["seq"]) if seq_row else 1
             c.execute(
                 """INSERT INTO wlh.version(id,resource_id,sequence,observation_id,result_ref,
                 inputs_ref,input_fingerprint,parser_fingerprint,version_fingerprint,content_hash,
@@ -237,7 +243,7 @@ def commit(
                 (
                     version_id,
                     r["id"],
-                    current["sequence"] + 1 if current else 1,
+                    next_seq,
                     oid,
                     built["result_ref"],
                     built["inputs_ref"],

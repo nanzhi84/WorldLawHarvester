@@ -29,7 +29,7 @@ from wlh.extraction.vi_tcvn3 import TCVN3_CONTRACT
 
 MANIFEST_ALGORITHM = "wlh.parser-manifest.v4"
 FINGERPRINT_ALGORITHM = "wlh.fingerprint.v2"
-ZIP_CONTRACT = "wlh.zip.v2"
+ZIP_CONTRACT = "wlh.zip.v3"
 ALWAYS = ("algorithm", "adapter", "fetch", "markdown")
 
 

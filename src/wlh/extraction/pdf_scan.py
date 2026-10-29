@@ -6,6 +6,7 @@ when a document also contains scans. Quality failures are never successful Versi
 
 from __future__ import annotations
 
+import math
 import re
 import time
 import unicodedata
@@ -19,7 +20,7 @@ from wlh.core import WlhError
 from wlh.extraction.markdown import normalized, text_to_markdown
 from wlh.extraction.ocr_br import br_ocr
 from wlh.extraction.ocr_tesseract import tesseract_pages
-from wlh.extraction.pdf_markdown import clean_soft_hyphens, page_markdown
+from wlh.extraction.pdf_markdown import clean_soft_hyphens, find_tables, page_markdown
 from wlh.extraction.quality import block_text, json_value, quality_check
 from wlh.extraction.vi_tcvn3 import normalize_detected_tcvn3
 
@@ -30,6 +31,7 @@ SCAN_TEXT_CHARS = 30
 SCAN_INK_RATIO = 0.003
 INK_THRESHOLD = 210
 _INK_LUT = bytes(1 if b < INK_THRESHOLD else 0 for b in range(256))
+_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]+")
 ANALYSIS_SCALE = 0.5
 NORMAL_PAGE_TEXT_CHARS = 350
 SIGNATURE_DOC_MAX_TEXT_CHARS = 500
@@ -43,6 +45,62 @@ def _has_unverified_vertical_fragments(page_text: str) -> bool:
     return fragments >= 12 and fragments / max(len(lines), 1) >= 0.25
 
 
+def _rect_has_ink(pix: Any, rect: Any, page_rect: Any) -> bool:
+    sx = float(pix.width) / max(float(page_rect.width), 1.0)
+    sy = float(pix.height) / max(float(page_rect.height), 1.0)
+    x0 = max(0, min(int(pix.width) - 1, int((float(rect.x0) - float(page_rect.x0)) * sx)))
+    y0 = max(0, min(int(pix.height) - 1, int((float(rect.y0) - float(page_rect.y0)) * sy)))
+    x1 = max(x0 + 1, min(int(pix.width), math.ceil((float(rect.x1) - float(page_rect.x0)) * sx)))
+    y1 = max(y0 + 1, min(int(pix.height), math.ceil((float(rect.y1) - float(page_rect.y0)) * sy)))
+    mv = memoryview(pix.samples)
+    stride = pix.stride
+    for row_y in range(y0, y1):
+        row_slice = mv[row_y * stride + x0 : row_y * stride + x1]
+        if any(b < INK_THRESHOLD for b in row_slice):
+            return True
+    return False
+
+
+def _inspect_native_encoding(page: Any, text: str, pix: Any) -> tuple[str, bool]:
+    has_cc = any(unicodedata.category(c) == "Cc" and not c.isspace() for c in text)
+    non_space = [c for c in text if not c.isspace()]
+    co_count = sum(1 for c in non_space if unicodedata.category(c) == "Co")
+    has_heavy_pua = bool(non_space) and (co_count / len(non_space) > 0.05)
+    if not has_cc and not has_heavy_pua:
+        return text, False
+    rect = page.rect
+    body_cc_with_ink = has_heavy_pua
+    if not body_cc_with_ink:
+        for block in page.get_text("dict").get("blocks", []):
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    st = str(span.get("text") or "")
+                    if not any(unicodedata.category(c) == "Cc" and not c.isspace() for c in st):
+                        continue
+                    sb = span.get("bbox")
+                    if not sb:
+                        continue
+                    is_margin_folio = (
+                        float(sb[1]) >= rect.height * 0.90 or float(sb[3]) <= rect.height * 0.06
+                    ) and len(st.strip()) <= 16
+                    if is_margin_folio:
+                        continue
+                    if _rect_has_ink(pix, fitz.Rect(sb), rect):
+                        body_cc_with_ink = True
+                        break
+                if body_cc_with_ink:
+                    break
+            if body_cc_with_ink:
+                break
+    if not body_cc_with_ink:
+        return _CTRL_RE.sub(" ", text), False
+    if len(page.get_drawings()) >= 4 and any(
+        t.row_count >= 2 and t.col_count >= 2 for t in find_tables(page, "lines_strict")
+    ):
+        return text, False
+    return _CTRL_RE.sub(" ", text), True
+
+
 def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
     raw_pages: list[dict[str, Any]] = []
     texts: list[str] = []
@@ -52,26 +110,30 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
                 raise WlhError("pdf_invalid_or_encrypted")
             for number in range(1, len(document) + 1):
                 page = document[number - 1]
-                text = str(page.get_text("text"))
-                native = len(text.strip())
+                raw_text = str(page.get_text("text"))
                 pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5), colorspace=fitz.csGRAY)
+                text, unreadable_body = _inspect_native_encoding(page, raw_text, pix)
+                native = len(text.strip())
                 samples = bytes(pix.samples)
                 ink = samples.translate(_INK_LUT).count(1) / len(samples)
                 rect = page.rect
                 page_area = max(rect.width * rect.height, 1.0)
-                img_area_total = sum(
-                    r.width * r.height
+                placed_rects = [
+                    r
                     for img in page.get_images(full=True)
                     for r in page.get_image_rects(img[0])
-                )
+                    if r.width > 1.5 and r.height > 1.5 and _rect_has_ink(pix, r, rect)
+                ]
+                img_area_total = sum(r.width * r.height for r in placed_rects)
                 image_coverage = min(img_area_total / page_area, 1.0)
                 raw_pages.append(
                     {
                         "page": number,
                         "native_text_chars": native,
-                        "embedded_images": len(page.get_images(full=True)),
+                        "embedded_images": len(placed_rects),
                         "image_coverage": round(image_coverage, 4),
                         "ink_ratio": round(ink, 5),
+                        "_unreadable_body": unreadable_body,
                     }
                 )
                 texts.append(text)
@@ -81,14 +143,18 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
         raise WlhError("pdf_invalid_or_encrypted") from None
 
     total_native = sum(p["native_text_chars"] for p in raw_pages)
-    has_normal_text_page = any(p["native_text_chars"] >= NORMAL_PAGE_TEXT_CHARS for p in raw_pages)
+    has_normal_text_page = any(
+        p["native_text_chars"] >= NORMAL_PAGE_TEXT_CHARS and not p.get("_unreadable_body")
+        for p in raw_pages
+    )
     max_sparse_doc_chars = max(SIGNATURE_DOC_MAX_TEXT_CHARS, 220 * len(raw_pages))
 
     pages: list[dict[str, Any]] = []
     for p in raw_pages:
+        unreadable_body = bool(p.pop("_unreadable_body", False))
         is_pure_scan = (
             p["native_text_chars"] < SCAN_TEXT_CHARS
-            and p["ink_ratio"] > SCAN_INK_RATIO
+            and (p["ink_ratio"] > SCAN_INK_RATIO or p["embedded_images"] > 0)
             and (not has_normal_text_page or p["embedded_images"] > 0 or p["image_coverage"] > 0)
         )
         is_signature_scan = (
@@ -98,7 +164,7 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
             and float(p["image_coverage"]) >= 0.25
             and float(p["ink_ratio"]) >= SIGNATURE_PAGE_MIN_INK
         )
-        suspected = is_pure_scan or is_signature_scan
+        suspected = is_pure_scan or is_signature_scan or unreadable_body
         pages.append(dict(p, suspected_scan=suspected))
 
     return {
@@ -126,16 +192,17 @@ def extract_pdf(
 ) -> tuple[str, dict[str, Any], dict[str, Any], list[str]]:
     analysis, native = analyze(path)
     scans = analysis["suspected_scan_pages"]
-    if any(
-        page["embedded_images"] and not page["suspected_scan"] for page in analysis["pages"]
-    ):
+    if any(page["embedded_images"] and not page["suspected_scan"] for page in analysis["pages"]):
         # A native text layer can coexist with image-only diagrams/forms. Until
         # those assets are archived and presented in the rendered document, a
         # text-length score cannot establish complete delivery. No size-based
         # guess that an image is decorative is safe for a legal document.
         raise WlhError("pdf_images_unverified")
-    if any(unicodedata.category(char) == "Cc" and not char.isspace()
-           for text in native for char in text):
+    if any(
+        unicodedata.category(char) == "Cc" and not char.isspace()
+        for text in native
+        for char in text
+    ):
         # Broken font mappings can yield plenty of native characters, including
         # invisible C0/C1 values. Deleting those bytes would conceal lost words.
         raise WlhError("pdf_native_text_unreadable")

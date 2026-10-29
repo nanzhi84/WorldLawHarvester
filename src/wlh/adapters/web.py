@@ -8,6 +8,8 @@ attachments); other pages are navigation only.
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
@@ -32,6 +34,8 @@ from wlh.adapters.web_fields import (
 from wlh.adapters.web_pagination import aspnet_next_page
 from wlh.core import WlhError, public_url
 from wlh.engine.scope import guard
+from wlh.extraction.html_images import inline_glyph_text
+from wlh.extraction.markdown import clean_html_tree
 from wlh.extraction.office import detect_real_format
 
 
@@ -59,6 +63,8 @@ class Adapter(WebDocumentBuilder, Base):
         )
 
     def is_detail(self, url: str) -> bool:
+        if re.search(r"/service/(?:JP|MP)/(?:\d+/)?index\.html$", urlsplit(url).path):
+            return False
         return not self.details or any(p.search(url) for p in self.details)
 
     def plan_recheck(
@@ -136,6 +142,7 @@ class Adapter(WebDocumentBuilder, Base):
         detail = self.is_detail(url)
         requests: list[dict[str, Any]] = []
         attachments: list[dict[str, Any]] = []
+        inline_images: list[str] = []
         truncated: str | None = None
         wlh_trunc_code: str | None = None
         if kind == "html":
@@ -143,6 +150,10 @@ class Adapter(WebDocumentBuilder, Base):
             qualification = self.config["documents"].get("detail_xpath")
             if detail and qualification:
                 detail = bool(tree.xpath(qualification))
+            if detail and re.search(
+                r"/service/(?:JP|MP)/(?:\d+/)?index\.html$", urlsplit(url).path
+            ):
+                detail = False
             if ctx.runtime.mode == "collect":
                 wlh_trunc = tree.xpath("//*[@data-wlh-truncated]/@data-wlh-truncated")
                 if wlh_trunc:
@@ -151,9 +162,18 @@ class Adapter(WebDocumentBuilder, Base):
             seen: set[str] = set()
             detail_paths: set[str] = set()
             unexpanded_paths: set[str] = set()
-            for anchor in tree.xpath(
-                "//a[@href] | //a[@docurl] | //a[@data-url] | //a[@data-href] | //a[@onclick] | //frame[@src] | //iframe[@src]"
-            ):
+            if not detail and tree.xpath("//iframe[@id='iframe-data' and @src]"):
+                anchors = tree.xpath("//iframe[@id='iframe-data' and @src]")
+            elif not detail and tree.xpath("//table[@id='jud']//a[@href]"):
+                anchors = tree.xpath(
+                    "//table[@id='jud']//a[@href]"
+                    + (" | //a[@id='hlNext' and @href]" if self.max_pages > 1 else "")
+                )
+            else:
+                anchors = tree.xpath(
+                    "//a[@href] | //a[@docurl] | //a[@data-url] | //a[@data-href] | //a[@onclick] | //frame[@src] | //iframe[@src]"
+                )
+            for anchor in anchors:
                 raw_href: str | None = (
                     anchor.get("href")
                     or anchor.get("docurl")
@@ -248,6 +268,91 @@ class Adapter(WebDocumentBuilder, Base):
                     )
                     if next_req is not None or asp_trunc:
                         truncated = truncated or asp_trunc or "max_depth_exceeded"
+            elif self.config["documents"].get("require_complete_text"):
+                img_tree, _, _ = parse_html(data, acquisition["charset"])
+                content_xpath = self.config["documents"].get("content_xpath")
+                region_nodes = (
+                    img_tree.xpath(content_xpath)
+                    if content_xpath
+                    else [img_tree.body if img_tree.body is not None else img_tree]
+                )
+                seen_imgs: set[str] = set()
+                for r_node in region_nodes:
+                    clean_html_tree(r_node)
+                    for img in r_node.xpath("descendant-or-self::img"):
+                        if inline_glyph_text(img) is not None:
+                            continue
+                        img_link = self.resolve_link(url, img.get("src"))
+                        if img_link and img_link not in seen_imgs and self.in_scope(img_link):
+                            seen_imgs.add(img_link)
+                            inline_images.append(img_link)
+        elif kind == "json":
+            json_text, _ = decode(data, acquisition["charset"])
+            try:
+                parsed_json = json.loads(json_text)
+            except ValueError:
+                parsed_json = None
+            if isinstance(parsed_json, dict):
+                json_obj = cast(dict[str, Any], parsed_json)
+                seen_json_links: set[str] = set()
+                if self.details and detail:
+                    ds_raw = json_obj.get("dataset")
+                    ds_obj: dict[str, Any] = (
+                        cast(dict[str, Any], ds_raw) if isinstance(ds_raw, dict) else json_obj
+                    )
+                    fs_raw = ds_obj.get("filesetLists")
+                    if isinstance(fs_raw, list):
+                        for fs_item in cast(list[Any], fs_raw):
+                            if not isinstance(fs_item, dict):
+                                continue
+                            fs_map = cast(dict[str, Any], fs_item)
+                            fs_id = fs_map.get("fileSetId")
+                            if fs_id is None:
+                                continue
+                            att_link = self.resolve_link(url, f"/api/FilesetLists/{fs_id}/file")
+                            if (
+                                att_link
+                                and att_link not in seen_json_links
+                                and self.in_scope(att_link)
+                                and (
+                                    self.attachment.search(unquote(att_link))
+                                    or self.attachment.search(file_name(att_link))
+                                )
+                            ):
+                                seen_json_links.add(att_link)
+                                desc = str(
+                                    fs_map.get("resourceDescription")
+                                    or ds_obj.get("title")
+                                    or ""
+                                ).strip()
+                                attachments.append({"url": att_link, "text": desc})
+                elif not detail:
+                    pl_raw = json_obj.get("pagedList")
+                    if isinstance(pl_raw, dict):
+                        pl_obj = cast(dict[str, Any], pl_raw)
+                        items_raw = pl_obj.get("items")
+                        has_bearer = bool(os.environ.get("JUDICIAL_OPENDATA_BEARER_TOKEN"))
+                        if isinstance(items_raw, list):
+                            for it_raw in cast(list[Any], items_raw):
+                                if not isinstance(it_raw, dict):
+                                    continue
+                                it_map = cast(dict[str, Any], it_raw)
+                                if it_map.get("categoryDataset") == "B" and not has_bearer:
+                                    continue
+                                did = it_map.get("datasetId")
+                                if did is None:
+                                    continue
+                                det_link = self.resolve_link(url, f"/api/Datasets/{did}")
+                                if (
+                                    det_link
+                                    and det_link not in seen_json_links
+                                    and self.in_scope(det_link)
+                                    and ctx.follow_links(task)
+                                ):
+                                    seen_json_links.add(det_link)
+                                    requests.append(
+                                        {"url": det_link, "role": "page", "depth": task["depth"] + 1}
+                                    )
         targets: list[dict[str, Any]] = []
         if detail and not wlh_trunc_code and (kind in TEXT_KINDS | BINARY_KINDS):
             inputs = [{"request": request, "role": "detail"}]
@@ -267,6 +372,18 @@ class Adapter(WebDocumentBuilder, Base):
                         },
                         "role": "attachment",
                         "text": item["text"],
+                    }
+                )
+            for img_url in inline_images:
+                inputs.append(
+                    {
+                        "request": {
+                            "url": img_url,
+                            "role": "attachment",
+                            "depth": task["depth"],
+                        },
+                        "role": "inline_image",
+                        "image_url": public_url(img_url),
                     }
                 )
             targets.append(

@@ -8,10 +8,12 @@ in the official v2 schema; unresolved commencement conditions stay in the text.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import re
 import unicodedata
-from collections.abc import Mapping
+import zipfile
+from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
@@ -170,6 +172,38 @@ def _xml(value: Any) -> Any:
     return root
 
 
+def _normalize_attachment_src(raw_src: str) -> str:
+    cleaned = raw_src.strip().replace("\\", "/")
+    while cleaned.startswith("./") or cleaned.startswith("/"):
+        cleaned = cleaned[2:] if cleaned.startswith("./") else cleaned[1:]
+    return cleaned
+
+
+def verify_attachment_zip(required_srcs: Sequence[str], zip_bytes: bytes | None) -> None:
+    if not zip_bytes:
+        raise WlhError("egov_attachments_unverified")
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            members: dict[str, bytes] = {}
+            basenames: dict[str, bytes] = {}
+            for name in zf.namelist():
+                if name.endswith("/"):
+                    continue
+                norm_name = _normalize_attachment_src(name)
+                member_bytes = zf.read(name)
+                members[norm_name] = member_bytes
+                basenames[norm_name.rsplit("/", 1)[-1]] = member_bytes
+    except (zipfile.BadZipFile, OSError, KeyError):
+        raise WlhError("egov_attachments_unverified") from None
+    if not members or any(len(b) == 0 for b in members.values()):
+        raise WlhError("egov_attachments_unverified")
+    for req_src in required_srcs:
+        norm_req = _normalize_attachment_src(req_src)
+        matched = members.get(norm_req) or basenames.get(norm_req.rsplit("/", 1)[-1])
+        if not matched:
+            raise WlhError("egov_attachments_unverified")
+
+
 def records(
     data: bytes, acquisition: Mapping[str, Any], config: Mapping[str, Any]
 ) -> list[dict[str, Any]] | None:
@@ -196,18 +230,43 @@ def records(
         raise WlhError("egov_title_missing")
     root = _xml(obj.get("law_full_text"))
     attachments = obj.get("attached_files_info")
-    if root.xpath(".//Fig") or (
-        isinstance(attachments, dict)
-        and cast(dict[str, Any], attachments).get("attached_files")
-    ):
-        # Links alone would silently lose legal diagrams or PDF annexes. Until
-        # those bytes and their visible content pass the attachment pipeline,
-        # this revision is an explicit failed delivery, never a text-only success.
-        raise WlhError("egov_attachments_unverified")
+    att_map = cast(dict[str, Any], attachments) if isinstance(attachments, dict) else {}
+    att_list_raw = att_map.get("attached_files")
+    att_srcs: list[str] = []
+    if isinstance(att_list_raw, list):
+        for item in cast(list[Any], att_list_raw):
+            if isinstance(item, dict):
+                raw_s = str(cast(dict[str, Any], item).get("src") or "").strip()
+                if raw_s:
+                    att_srcs.append(_normalize_attachment_src(raw_s))
+    fig_srcs: list[str] = []
+    fig_placeholders: list[tuple[str, str]] = []
+    for fig in root.xpath(".//Fig[normalize-space(@src)!='']"):
+        norm_fig_src = _normalize_attachment_src(str(fig.get("src") or ""))
+        if norm_fig_src:
+            token = f"@@WLHFIG{len(fig_placeholders)}@@"
+            fig_srcs.append(norm_fig_src)
+            fig_placeholders.append((token, f"[添付ファイル: {norm_fig_src}]"))
+            fig.text = token
+            fig.attrib.pop("src", None)
+    required_srcs = list(dict.fromkeys([*fig_srcs, *att_srcs]))
+    inline_zip_b64 = str(att_map.get("image_data") or "").strip()
+    if required_srcs and inline_zip_b64:
+        try:
+            verify_attachment_zip(required_srcs, base64.b64decode(inline_zip_b64, validate=True))
+        except ValueError:
+            raise WlhError("egov_attachments_unverified") from None
     body = root.find("LawBody")
     for heading in list(body.findall("LawTitle")):
         body.remove(heading)
     text = markdown(body)
+    for token, label in fig_placeholders:
+        text = text.replace(token, label)
+    extra_att_notes = [
+        f"[添付ファイル: {src}]" for src in att_srcs if src not in set(fig_srcs)
+    ]
+    if extra_att_notes:
+        text = text.rstrip() + "\n\n" + "\n\n".join(extra_att_notes)
     if not text.strip():
         raise WlhError("egov_law_text_missing")
     status = str(revision.get("current_revision_status") or "").strip()
@@ -223,7 +282,7 @@ def records(
     full_text = normalized("\n\n".join([
         "# " + title, *([number] if number else []), *date_notes, text,
     ]))
-    return [{
+    record_out: dict[str, Any] = {
         "external_key": law_id,
         "title": title,
         "doc_number": number,
@@ -239,7 +298,15 @@ def records(
         "doc_type": "法律法规",
         "text": full_text,
         "detail_url": url,
-    }]
+    }
+    if required_srcs:
+        record_out["required_attachment_srcs"] = required_srcs
+        if inline_zip_b64:
+            record_out["attachment_zip_b64"] = inline_zip_b64
+        else:
+            zip_url = public_url(urljoin(url, f"/api/2/attachment/{revision_id}"))
+            record_out["downloads"] = [{"url": zip_url, "role": "inline_attachment_zip"}]
+    return [record_out]
 
 
 def next_requests(

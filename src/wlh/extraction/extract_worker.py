@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from wlh.core import WlhError
-from wlh.extraction.markdown import html_to_markdown, text_to_markdown
+from wlh.extraction.markdown import html_to_markdown, json_to_markdown, text_to_markdown
 from wlh.extraction.office import OFFICE_KINDS, extract_office, unpack_zip
 from wlh.extraction.pdf_scan import extract_pdf
 from wlh.extraction.quality import text_check
@@ -39,12 +39,18 @@ def worst(routes: Sequence[str]) -> str:
 def extract(
     path: Path, kind: str, job: dict[str, Any], depth: int = 0
 ) -> tuple[str, dict[str, Any], dict[str, Any], list[str], list[dict[str, Any]]]:
-    if kind in {"txt", "html"}:
+    if kind in {"txt", "html", "json"}:
         try:
             text = path.read_text(encoding="utf-8-sig")
         except UnicodeError:
             raise WlhError("zip_text_encoding_invalid") from None
-        markdown = html_to_markdown(text, "") if kind == "html" else text_to_markdown(text)
+        markdown = (
+            html_to_markdown(text, "")
+            if kind == "html"
+            else json_to_markdown(text)
+            if kind == "json"
+            else text_to_markdown(text)
+        )
         return (
             markdown,
             {"kind": kind},

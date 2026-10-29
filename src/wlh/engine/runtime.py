@@ -176,6 +176,7 @@ class Runtime:
         targets: list[dict[str, Any]] = []
         plan: Mapping[str, Any] = self.run.get("reparse_plan") or {}
         resources: list[dict[str, Any]] = plan.get("resources", [])
+        seen_identities: set[tuple[str, str]] = set()
         for resource in resources:
             manifest = objects.json(resource["inputs_ref"])
             for entry in manifest.get("inputs", []):
@@ -191,6 +192,7 @@ class Runtime:
                 or not frozen
             ):
                 raise WlhError("reparse_inputs_unavailable")
+            seen_identities.add((str(resource["namespace"]), str(resource["external_key"])))
             targets.append(
                 {
                     "identity": {
@@ -207,6 +209,109 @@ class Runtime:
                     },
                 }
             )
+        for rt in cast(list[dict[str, Any]], plan.get("recovery_targets") or []):
+            ident = cast(Mapping[str, Any], rt.get("identity") or {})
+            pub_url = str(ident.get("public_url") or "")
+            if (
+                pub_url
+                and hasattr(self.adapter, "is_detail")
+                and not cast(Any, self.adapter).is_detail(pub_url)
+            ):
+                continue
+            pair = (str(ident.get("namespace") or ""), str(ident.get("external_key") or ""))
+            if pair in seen_identities:
+                continue
+            seen_identities.add(pair)
+            targets.append(
+                {
+                    "identity": rt.get("identity"),
+                    "context": rt.get("context") or {},
+                    "inputs": [],
+                    "frozen": {
+                        "inputs": rt["inputs"],
+                        "recovery": True,
+                    },
+                }
+            )
+        recovery_requests = cast(list[dict[str, Any]], plan.get("recovery_requests") or [])
+        if recovery_requests:
+            req_aids = [
+                str(r["acquisition_id"])
+                for r in recovery_requests
+                if r.get("acquisition_id") and str(r["acquisition_id"]) not in self.acquisition_cache
+            ]
+            if req_aids:
+                for acq in self.rows(
+                    "SELECT * FROM wlh.acquisition WHERE id = ANY(%s)",
+                    (list(set(req_aids)),),
+                ):
+                    if acq.get("state") == "archived":
+                        self.acquisition_cache[str(acq["id"])] = acq
+            att_acq_rows = self.rows(
+                """SELECT DISTINCT ON (request_key) id, request_key, request_url
+                FROM wlh.acquisition
+                WHERE source_id = %s AND state = 'archived' AND outcome = 'ok'
+                ORDER BY request_key, acquired_at DESC""",
+                (self.run["source_id"],),
+            )
+            acq_by_rkey: dict[str, str] = {
+                str(r["request_key"]): str(r["id"])
+                for r in att_acq_rows
+                if r.get("request_key")
+            }
+            acq_by_url: dict[str, str] = {
+                str(r["request_url"]): str(r["id"])
+                for r in att_acq_rows
+                if r.get("request_url")
+            }
+            for req_row in recovery_requests:
+                self.budget.active()
+                acq_obj = self.acquisition(req_row.get("acquisition_id"))
+                if not acq_obj or acq_obj.get("state") != "archived" or acq_obj.get("outcome") != "ok":
+                    continue
+                try:
+                    parsed = self.adapter.parse(self.ctx, req_row, acq_obj)
+                except (WlhError, Exception):
+                    continue
+                for t in parsed.get("targets", []):
+                    ident = cast(Mapping[str, Any], t.get("identity") or {})
+                    pair = (str(ident.get("namespace") or ""), str(ident.get("external_key") or ""))
+                    if pair in seen_identities:
+                        continue
+                    frozen_inputs: list[dict[str, Any]] = []
+                    missing_dep = False
+                    for idx, item in enumerate(t.get("inputs", [])):
+                        rkey = request_key(item["request"])
+                        if idx == 0:
+                            dep_aid: str | None = str(req_row["acquisition_id"])
+                        else:
+                            dep_aid = acq_by_rkey.get(rkey) or acq_by_url.get(
+                                str(item["request"].get("url") or "")
+                            )
+                        if not dep_aid:
+                            missing_dep = True
+                            break
+                        frozen_inputs.append(
+                            {
+                                **{k: v for k, v in item.items() if k != "request"},
+                                "request_key": rkey,
+                                "acquisition_id": dep_aid,
+                            }
+                        )
+                    if missing_dep or not frozen_inputs:
+                        continue
+                    seen_identities.add(pair)
+                    targets.append(
+                        {
+                            "identity": t.get("identity"),
+                            "context": t.get("context") or {},
+                            "inputs": [],
+                            "frozen": {
+                                "inputs": frozen_inputs,
+                                "recovery": True,
+                            },
+                        }
+                    )
         return targets
 
     async def fetch(self, task: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -480,7 +585,7 @@ class Runtime:
                 }
                 for item in inputs
             ]
-            if frozen:
+            if frozen and frozen.get("inputs_ref") and frozen.get("version_id"):
                 candidates[0]["input_reuse"] = {
                     "mode": "reparse",
                     "frozen_inputs_ref": frozen["inputs_ref"],
@@ -505,6 +610,23 @@ class Runtime:
                 "run_not_started",
             }:
                 raise
+            plan_obj: Mapping[str, Any] = self.run.get("reparse_plan") or {}
+            if (
+                frozen
+                and frozen.get("recovery")
+                and (
+                    int(plan_obj.get("resource_count") or 0) > 0
+                    or getattr(self, "_recovered_any", False)
+                )
+            ):
+                self.write(
+                    lambda c: c.execute(
+                        """UPDATE wlh.task SET state='skipped',attempt_epoch=%s,
+                        updated_at=clock_timestamp() WHERE id=%s AND kind='target'""",
+                        (self.epoch, target["id"]),
+                    )
+                )
+                return None
             return fail(
                 self.run_id,
                 self.epoch,
@@ -517,6 +639,7 @@ class Runtime:
         result: dict[str, Any] = commit(
             self.run_id, self.epoch, built, target_id=target["id"], check_active=self.budget.active
         )
+        self._recovered_any = True
         return result
 
     def _target_binary_jobs(
@@ -531,12 +654,22 @@ class Runtime:
                 str(item["acquisition_id"])
                 for item in frozen.get("inputs", [])
                 if item.get("acquisition_id")
+                and item.get("role") != "inline_image"
+                and cast(Mapping[str, Any], item.get("unit") or {}).get("role")
+                != "inline_attachment_zip"
             ]
         else:
+            inline_rkeys = {
+                str(meta.get("request_key"))
+                for meta in cast(list[dict[str, Any]], target["payload"].get("inputs") or [])
+                if meta.get("role") == "inline_image"
+                or cast(Mapping[str, Any], meta.get("unit") or {}).get("role")
+                == "inline_attachment_zip"
+            }
             acq_ids = [
                 str(row["acquisition_id"])
                 for row in self.target_inputs(target)
-                if row.get("acquisition_id")
+                if row.get("acquisition_id") and str(row.get("key")) not in inline_rkeys
             ]
         for aid in acq_ids:
             acq = self.acquisition(aid)

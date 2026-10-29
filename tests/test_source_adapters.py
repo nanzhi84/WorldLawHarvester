@@ -110,6 +110,8 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-577", "政策文件", "學生輔導法"),
             ("dd-578", "法律法规", "中華民國憲法"),
             ("dd-579", "法律法规", "動員戡亂完成憲政實施綱要"),
+            ("dd-510", "案例", "113 年度台上字第 2290 號"),
+            ("dd-580", "案例", "58175"),
         ],
     )
     def test_adapted_production_source_configs_collect_and_reparse_against_local_samples(
@@ -233,6 +235,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                 "dd-506",
                 "dd-507",
                 "dd-509",
+                "dd-510",
                 "dd-511",
                 "dd-512",
                 "dd-514",
@@ -258,6 +261,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                 "dd-577",
                 "dd-578",
                 "dd-579",
+                "dd-580",
             }
 
             with psycopg.connect(initialized_db["WLH_DATABASE_URL"]) as conn:

@@ -22,13 +22,36 @@ def _tag(node: Any) -> str:
     return etree.QName(node).localname if isinstance(node.tag, str) else ""
 
 
+def _is_borderless_table(tbl: Any) -> bool:
+    cells = [
+        cell
+        for row in tbl
+        if _tag(row) in ROW_TAGS
+        for cell in row
+        if _tag(cell) in CELL_TAGS
+    ]
+    return bool(cells) and all(
+        cell.get("Border" + side) == "none"
+        for cell in cells
+        for side in ("Top", "Bottom", "Left", "Right")
+    )
+
+
 def table_markdown(node: Any) -> str | None:
-    if any(_tag(child) in TABLE_TAGS for child in node.iterdescendants()):
+    if _is_borderless_table(node):
+        return None
+    if any(
+        _tag(child) in TABLE_TAGS and not _is_borderless_table(child)
+        for child in node.iterdescendants()
+    ):
         raise WlhError("legal_xml_nested_table_unverified")
     raw_rows: list[list[tuple[str, int, int]]] = []
     source_rows: list[Any] = []
     for row in node.iterdescendants():
         if _tag(row) not in ROW_TAGS:
+            continue
+        owner_tbl = next((anc for anc in row.iterancestors() if _tag(anc) in TABLE_TAGS), None)
+        if owner_tbl is not node:
             continue
         cells = [cell for cell in row if _tag(cell) in CELL_TAGS]
         if not cells:
@@ -40,6 +63,13 @@ def table_markdown(node: Any) -> str | None:
              span(cell.get("rowspan") or cell.get("ROWSPAN")))
             for cell in cells
         ])
+    raw_rows = [
+        [
+            (text, colspan, min(rowspan, len(raw_rows) - r_idx))
+            for text, colspan, rowspan in row
+        ]
+        for r_idx, row in enumerate(raw_rows)
+    ]
     rows = expand_rows(raw_rows)
     if not rows:
         return None

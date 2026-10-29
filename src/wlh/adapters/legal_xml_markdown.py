@@ -53,8 +53,11 @@ def _text(node: Any) -> str:
 
 
 def markdown(root: Any) -> str:
-    if root.xpath('.//*[local-name()="img" or local-name()="image" or local-name()="Image" '
-                  'or local-name()="graphic" or local-name()="Graphic" or local-name()="Fig"]'):
+    if root.xpath(
+        './/*[local-name()="img" or local-name()="image" or local-name()="Image" '
+        'or local-name()="graphic" or local-name()="Graphic" '
+        'or (local-name()="Fig" and normalize-space(@src)!="")]'
+    ):
         raise WlhError("legal_xml_images_unverified")
 
     def render(node: Any) -> str:

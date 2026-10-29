@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urljoin, urlsplit
 
 import lxml.etree as _etree  # type: ignore[import-untyped]
@@ -16,7 +17,7 @@ from wlh.extraction.table_grid import expand_rows, span
 
 etree: Any = _etree
 
-MARKDOWN_CONTRACT = "wlh.markdown.v5"
+MARKDOWN_CONTRACT = "wlh.markdown.v6"
 
 UI_ACTION_LABELS: set[str] = {
     "【打印】",
@@ -123,6 +124,42 @@ def text_to_markdown(value: str) -> str:
     return normalized(value)
 
 
+def json_to_markdown(value: str) -> str:
+    try:
+        parsed = json.loads(value)
+    except ValueError:
+        return text_to_markdown(value)
+    if not isinstance(parsed, dict):
+        return text_to_markdown(value)
+    top = cast(dict[str, Any], parsed)
+    data_raw = top.get("data")
+    dataset_raw = top.get("dataset")
+    inner: dict[str, Any] = (
+        cast(dict[str, Any], data_raw)
+        if isinstance(data_raw, dict)
+        else cast(dict[str, Any], dataset_raw)
+        if isinstance(dataset_raw, dict)
+        else top
+    )
+    sections: list[str] = []
+    seen_values: set[str] = set()
+    for key, val in inner.items():
+        if val is None or isinstance(val, bool):
+            continue
+        if isinstance(val, (str, int, float)):
+            sval = str(val).strip()
+            if not sval or sval in seen_values:
+                continue
+            seen_values.add(sval)
+            if len(sval) >= 40 or "\n" in sval:
+                sections.append(f"### {key}\n\n{sval}")
+            else:
+                sections.append(f"- **{key}**: {sval}")
+    if not sections:
+        return text_to_markdown(value)
+    return normalized("\n\n".join(sections))
+
+
 def html_to_markdown(
     html: str | bytes, base_url: str | None = None, content_xpath: str | None = None
 ) -> str:
@@ -170,6 +207,13 @@ def html_to_markdown(
             ]
             if cells:
                 raw_rows.append(cells)
+        raw_rows = [
+            [
+                (text, colspan, min(rowspan, len(raw_rows) - r_idx))
+                for text, colspan, rowspan in row
+            ]
+            for r_idx, row in enumerate(raw_rows)
+        ]
         rows = expand_rows(raw_rows)
         if not rows:
             return ""
