@@ -47,6 +47,8 @@ def _dom(markdown: str) -> Any:
 
 
 def _routes(case: str, name: str, *, body_control: bool = False) -> dict[str, Route]:
+    if not (FIXTURES / "manifest.json").is_file():
+        pytest.skip("Private fixture directory tests/fixtures/dd-582/content not present")
     manifest: dict[str, Any] = json.loads((FIXTURES / "manifest.json").read_text())
     base = f"/service/JP/{case}/"
     catalog = {"/service/index.html", "/service/JP/index.html",

@@ -2,6 +2,7 @@
 work/
 artifacts/
 tests/fixtures/
+experiments/**/.kanpo_ocr_cache.json
 
 .venv/
 __pycache__/

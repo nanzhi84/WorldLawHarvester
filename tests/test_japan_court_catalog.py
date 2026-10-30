@@ -46,6 +46,8 @@ CASES = {
 
 @contextmanager
 def _court_server(fault: str = "") -> Generator[tuple[str, list[str]]]:
+    if not (FIXTURES / "scope-manifest.json").is_file():
+        pytest.skip("Private fixture directory tests/fixtures/dd-519 not present")
     manifest = json.loads((FIXTURES / "scope-manifest.json").read_text())
     routes = {r["path"]: ((FIXTURES / r["fixture"]).read_bytes(), r["content_type"]) for r in manifest["routes"]}
     requests: list[str] = []
@@ -367,6 +369,10 @@ class TestJapanCourtCatalog:
     ) -> None:
         """Regional attachment prefixes, IP High Court detail8 fields, and PDF layouts deliver cleanly."""
         name = "japan-court-regional-and-layouts"
+        if not (ROOT / "sources/dd-519.yaml").is_file():
+            import pytest
+
+            pytest.skip("Private source config dd-519.yaml not present")
         with _regional_layout_server() as (origin, requests):
             prod_cfg: dict[str, Any] = yaml.safe_load((ROOT / "sources/dd-519.yaml").read_text())
             prod_cfg["entry_urls"] = [origin + LEGACY]
@@ -417,6 +423,10 @@ class TestJapanCourtCatalog:
     ) -> None:
         """If a new judgment is published during pagination (total 2 -> 3, shifting 97204 onto offset=1), collection continues and completes cleanly."""
         name = "japan-court-live-total-increment"
+        if not (ROOT / "sources/dd-519.yaml").is_file():
+            import pytest
+
+            pytest.skip("Private source config dd-519.yaml not present")
         with _regional_layout_server(live_total_increment=True) as (origin, requests):
             prod_cfg: dict[str, Any] = yaml.safe_load((ROOT / "sources/dd-519.yaml").read_text())
             prod_cfg["entry_urls"] = [origin + LEGACY]
@@ -439,6 +449,10 @@ class TestJapanCourtCatalog:
     ) -> None:
         """A 30-row catalog page prefetches a multi-page offset window and fetches all page/detail HTML ahead of attachment PDFs."""
         name = "japan-court-thirty-row-prefetch"
+        if not (ROOT / "sources/dd-519.yaml").is_file():
+            import pytest
+
+            pytest.skip("Private source config dd-519.yaml not present")
         with _regional_layout_server(thirty_row_pages=True) as (origin, requests):
             prod_cfg: dict[str, Any] = yaml.safe_load((ROOT / "sources/dd-519.yaml").read_text())
             prod_cfg["entry_urls"] = [origin + LEGACY]

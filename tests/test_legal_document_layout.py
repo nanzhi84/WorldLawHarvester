@@ -44,7 +44,12 @@ class TestLegalDocumentLayout:
         """
         name = "japan-pdf-merged-tax-table"
         url_path = "/law/joho-zeikaishaku/sozoku/r08/pdf/01.pdf"
-        payload = (ROOT / "tests/fixtures/dd-520/nta-trust-tax-merged-cell-annex.pdf").read_bytes()
+        fixture_pdf = ROOT / "tests/fixtures/dd-520/nta-trust-tax-merged-cell-annex.pdf"
+        if not fixture_pdf.is_file():
+            import pytest
+
+            pytest.skip("Private fixture dd-520/nta-trust-tax-merged-cell-annex.pdf not present")
+        payload = fixture_pdf.read_bytes()
         with source_server({url_path: (payload, "application/pdf")}, ["www.nta.go.jp"]) as (origin, requests):
             config = _source(tmp_path, origin, "dd-937", url_path, "ja")
             report, rows = collect_artifact("dd-937", config, initialized_db, name, requests)
@@ -76,7 +81,12 @@ class TestLegalDocumentLayout:
         """
         name = "japan-pdf-substantive-form-images"
         url_path = "/law/joho-zeikaishaku/sozoku/pdf/0024006-159.pdf"
-        payload = (ROOT / "tests/fixtures/dd-520/tax-forest-explanation-with-form-images.pdf").read_bytes()
+        fixture_pdf = ROOT / "tests/fixtures/dd-520/tax-forest-explanation-with-form-images.pdf"
+        if not fixture_pdf.is_file():
+            import pytest
+
+            pytest.skip("Private fixture dd-520/tax-forest-explanation-with-form-images.pdf not present")
+        payload = fixture_pdf.read_bytes()
         with source_server({url_path: (payload, "application/pdf")}, ["www.nta.go.jp"]) as (origin, requests):
             config = _source(tmp_path, origin, "dd-941", url_path, "ja")
             report, rows = collect_artifact("dd-941", config, initialized_db, name, requests)
@@ -95,7 +105,12 @@ class TestLegalDocumentLayout:
         """
         name = "japan-glossary-definition-layout"
         url_path = "/law/joho-zeikaishaku/shotoku/shinkoku/251219/pdf/01.pdf"
-        payload = (ROOT / "tests/fixtures/dd-520/nta-joho-detail-attachment.pdf").read_bytes()
+        fixture_pdf = ROOT / "tests/fixtures/dd-520/nta-joho-detail-attachment.pdf"
+        if not fixture_pdf.is_file():
+            import pytest
+
+            pytest.skip("Private fixture dd-520/nta-joho-detail-attachment.pdf not present")
+        payload = fixture_pdf.read_bytes()
         with source_server({url_path: (payload, "application/pdf")}, ["www.nta.go.jp"]) as (origin, requests):
             config = _source(tmp_path, origin, "dd-942", url_path, "ja")
             report, rows = collect_artifact("dd-942", config, initialized_db, name, requests)

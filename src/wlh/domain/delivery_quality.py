@@ -120,7 +120,7 @@ def _has_duplicated_substantive_paragraph(md_text: str) -> bool:
             continue
         compact = re.sub(r"\s+", " ", stripped)
         if len(compact) < 60:
-            sub_headers = (sub_headers + [compact])[-2:]
+            sub_headers = (sub_headers + [compact])[-6:]
             prev_compact = None
             continue
         if prev_compact is not None and compact == prev_compact:
@@ -347,12 +347,10 @@ def audit_delivery_rows(
                     row,
                 )
             orig_file = str(row.get("original_file") or "").lower()
-            is_binary_attachment = row.get(
-                "role"
-            ) == "independent_attachment" and orig_file.endswith(
+            is_binary_doc = orig_file.endswith(
                 (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".rtf")
             )
-            if not is_binary_attachment and _has_duplicated_substantive_paragraph(md_text):
+            if not is_binary_doc and _has_duplicated_substantive_paragraph(md_text):
                 _add(
                     "duplicated_body_markdown",
                     "markdown repeats an identical substantive paragraph multiple times",

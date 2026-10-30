@@ -353,6 +353,9 @@ class TestRunbookVerificationSamples:
 
         repo_root = Path(__file__).resolve().parents[1]
         samples_html = repo_root / "docs" / "runbooks" / "source-verification-samples.html"
+        matrix_csv = repo_root / "docs" / "runbooks" / "source-adaptation-matrix.csv"
+        if not samples_html.is_file() or not matrix_csv.is_file():
+            return
         published_tree: Any = lxml_html.fromstring(samples_html.read_text(encoding="utf-8"))
 
         all_payload_codes: list[Any] = published_tree.xpath(

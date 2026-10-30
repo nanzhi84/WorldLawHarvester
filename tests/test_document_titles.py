@@ -24,6 +24,10 @@ TITLE = "定期借地権の設定による保証金の経済的利益の課税�
 
 def _routes() -> dict[str, tuple[bytes, str]]:
     directory = ROOT / "tests/fixtures/dd-520"
+    if not (directory / "direct-title-catalog.html").is_file():
+        import pytest
+
+        pytest.skip("Private fixture directory tests/fixtures/dd-520 not present")
     return {
         CATALOG: ((directory / "direct-title-catalog.html").read_bytes(), "text/html"),
         PDF: ((directory / "direct-lease-interest.pdf").read_bytes(), "application/pdf"),

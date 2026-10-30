@@ -132,8 +132,16 @@ allowed_path_prefixes:
         monkeypatch.setenv("WLH_ALLOW_LOOPBACK", "0")
         repo_root = Path(__file__).resolve().parents[1]
         sources_dir = repo_root / "sources"
+        if not any(sources_dir.glob("dd-*.yaml")):
+            pytest.skip("Private source configs not present")
         matrix_csv = repo_root / "docs" / "runbooks" / "source-adaptation-matrix.csv"
         matrix_md = repo_root / "docs" / "runbooks" / "source-adaptation-matrix.md"
+        if (
+            not matrix_csv.is_file()
+            or not matrix_md.is_file()
+            or not any(sources_dir.glob("dd-*.yaml"))
+        ):
+            pytest.skip("Private source configs or adaptation matrix ledger not present")
 
         assert render_markdown_from_csv(matrix_csv, matrix_md) == matrix_md.read_text(
             encoding="utf-8"
@@ -238,6 +246,8 @@ allowed_path_prefixes:
         monkeypatch.setenv("WLH_ALLOW_LOOPBACK", "0")
         repo_root = Path(__file__).resolve().parents[1]
         sources_dir = repo_root / "sources"
+        if not any(sources_dir.glob("dd-*.yaml")):
+            pytest.skip("Private source configs not present")
         forbidden_prefix_exts = (
             ".html",
             ".htm",

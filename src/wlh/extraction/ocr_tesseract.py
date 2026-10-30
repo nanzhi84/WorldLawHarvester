@@ -71,8 +71,9 @@ def _ocr_single_page(
     limit: int,
     timeout: float,
 ) -> str:
+    psm = "5" if languages.startswith("jpn_vert") else "3"
     try:
-        return command(
+        raw = command(
             [
                 executable,
                 str(img),
@@ -82,11 +83,18 @@ def _ocr_single_page(
                 "--dpi",
                 str(dpi),
                 "--psm",
-                "3",
+                psm,
             ],
             limit,
             timeout,
         )
+        if psm == "5":
+            raw = re.sub(
+                r"(?<=[\u3000-\u9fff\uff00-\uffef])[ \t]+(?=[\u3000-\u9fff\uff00-\uffef])",
+                "",
+                raw,
+            )
+        return raw
     finally:
         img.unlink(missing_ok=True)
 
@@ -121,8 +129,13 @@ def tesseract_pages(
             if pixels <= 0 or pixels > cfg["max_page_pixels"]:
                 raise WlhError("pdf_ocr_pixel_limit_exceeded")
         pos = 0
+        is_vert_first = str(cfg["languages"]).startswith("jpn_vert")
         while pos < len(numbers):
-            batch_len = 1 if pos == 0 else min(4, len(numbers) - pos)
+            batch_len = (
+                min(12, len(numbers) - pos)
+                if (pos > 0 or is_vert_first)
+                else 1
+            )
             batch = numbers[pos : pos + batch_len]
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -137,7 +150,9 @@ def tesseract_pages(
                 images[number] = image
             max_each = max(1, int(cfg["max_result_bytes"]) - size)
             lang_parts = str(cfg["languages"]).split("+")
-            if "jpn" in lang_parts and len(lang_parts) > 1:
+            if lang_parts and lang_parts[0] == "jpn_vert":
+                langs = "jpn_vert"
+            elif "jpn" in lang_parts and len(lang_parts) > 1:
                 langs = "+".join(part for part in lang_parts if part != "eng")
             else:
                 langs = str(cfg["languages"])
@@ -202,9 +217,13 @@ def tesseract_image_bytes(
         return ""
     available, _ = _tesseract_meta(executable)
     lang_parts = [p for p in languages.split("+") if p in available]
-    if "jpn" in lang_parts and len(lang_parts) > 1:
+    if lang_parts and lang_parts[0] == "jpn_vert":
+        langs = "jpn_vert"
+    elif "jpn" in lang_parts and len(lang_parts) > 1:
         lang_parts = [p for p in lang_parts if p != "eng"]
-    langs = "+".join(lang_parts) if lang_parts else "eng"
+        langs = "+".join(lang_parts) if lang_parts else "eng"
+    else:
+        langs = "+".join(lang_parts) if lang_parts else "eng"
     work_root = Path("work")
     work_root.mkdir(parents=True, exist_ok=True)
     try:

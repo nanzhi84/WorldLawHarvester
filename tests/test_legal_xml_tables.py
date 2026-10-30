@@ -347,6 +347,10 @@ class TestLegalXmlTables:
         self, initialized_db: dict[str, str], tmp_path: Path
     ) -> None:
         """Full originals and externally visible relationships decide success, not word presence."""
+        if not (FIXTURES / "provenance.json").is_file():
+            import pytest
+
+            pytest.skip("Private fixture directory tests/fixtures/dd-517/xml-tables not present")
         manifest: dict[str, Any] = json.loads((FIXTURES / "provenance.json").read_text())
         samples: list[dict[str, Any]] = manifest["samples"]
         ARTIFACTS.mkdir(parents=True, exist_ok=True)

@@ -112,6 +112,8 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-579", "法律法规", "動員戡亂完成憲政實施綱要"),
             ("dd-510", "案例", "113 年度台上字第 2290 號"),
             ("dd-580", "案例", "58175"),
+            ("dd-143", "其他", "文献蓄積情報(特許・実用新案)"),
+            ("dd-518", "政策文件", "政府調達"),
         ],
     )
     def test_adapted_production_source_configs_collect_and_reparse_against_local_samples(
@@ -132,8 +134,12 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
 
         try:
             repo_root = Path(__file__).resolve().parents[1]
+            src_yaml_path = repo_root / "sources" / f"{source_id}.yaml"
+            fixture_manifest_path = repo_root / "tests" / "fixtures" / source_id / "manifest.json"
+            if not src_yaml_path.is_file() or not fixture_manifest_path.is_file():
+                pytest.skip(f"Private source config or fixture for {source_id} not present")
             raw_cfg: dict[str, Any] = yaml.safe_load(
-                (repo_root / "sources" / f"{source_id}.yaml").read_text(encoding="utf-8")
+                src_yaml_path.read_text(encoding="utf-8")
             )
             orig_hosts = list(raw_cfg.get("allowed_hosts", []))
             primary_host = orig_hosts[0]
@@ -216,6 +222,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                 "dd-108",
                 "dd-132",
                 "dd-142",
+                "dd-143",
                 "dd-153",
                 "dd-162",
                 "dd-198",
@@ -241,7 +248,9 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                 "dd-514",
                 "dd-516",
                 "dd-517",
+                "dd-518",
                 "dd-519",
+                "dd-520",
                 "dd-525",
                 "dd-527",
                 "dd-548",

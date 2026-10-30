@@ -47,6 +47,8 @@ HREF = re.compile(r"(<a\b[^>]*?\bhref\s*=\s*)([\"'])(.*?)(\2)", re.I | re.S)
 
 
 def _literal_routes(case: str, directory: Path) -> dict[str, Route]:
+    if not (LITERAL_FIXTURES / "manifest.json").is_file():
+        pytest.skip("Private fixture directory tests/fixtures/dd-582/literal-fidelity not present")
     manifest: dict[str, Any] = json.loads((LITERAL_FIXTURES / "manifest.json").read_text())
     for spec in manifest["routes"]:
         raw = (LITERAL_FIXTURES / spec["fixture"]).read_bytes()
@@ -202,6 +204,8 @@ class TestLegalHtmlPresentation:
         affected = base + affected_file
         directory = OUTPUT / name
         directory.mkdir(parents=True, exist_ok=True)
+        if not (FIXTURES / "manifest.json").is_file():
+            pytest.skip("Private fixture directory tests/fixtures/dd-582/content not present")
         manifest: dict[str, Any] = json.loads((FIXTURES / "manifest.json").read_text())
         specs = [s for s in manifest["routes"] if s["path"].startswith(base)
                  and s["role"] == "original_full_document"]
@@ -296,6 +300,8 @@ class TestLegalHtmlPresentation:
         affected = base + affected_file
         directory = LITERAL_OUTPUT / name
         directory.mkdir(parents=True, exist_ok=True)
+        if not (LITERAL_FIXTURES / "manifest.json").is_file():
+            pytest.skip("Private fixture directory tests/fixtures/dd-582/literal-fidelity not present")
         manifest: dict[str, Any] = json.loads((LITERAL_FIXTURES / "manifest.json").read_text())
         specs = [
             s

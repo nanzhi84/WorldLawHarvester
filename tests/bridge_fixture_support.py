@@ -44,8 +44,11 @@ def _make_rii_zip_bytes(
 
 
 def _make_fixture_zip_bytes(arcname: str, fixture_rel: str) -> bytes:
+    fixture_path = FIXTURES_DIR / fixture_rel
+    if not fixture_path.exists():
+        return b""
     buf = io.BytesIO()
-    xml_bytes = (FIXTURES_DIR / fixture_rel).read_bytes()
+    xml_bytes = fixture_path.read_bytes()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(arcname, xml_bytes)
     return buf.getvalue()

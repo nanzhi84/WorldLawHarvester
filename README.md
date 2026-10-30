@@ -12,7 +12,7 @@
 
 - **受控获取与五大开源生态桥接（Adapter Bridges）**：彻底弃用臃肿的 `crawl4ai`，以轻量受控 HTTP / CDP 浏览器底座先将所有外部原始字节归档至私有 S3 CAS 并校验 SHA-256；原生提供五大桥接器无缝复用 `Juriscraper`、`oldp-ingestor`、`Open States`、`OpenCaseLaw` 与 `World Wide Law` 的站点解析逻辑，与原生 Adapter 统一汇聚为唯一的 16 列对标候选结构 `RawRecord`，支持零外部网络离线重解析（`wlh reparse`）。
 - **聚焦 16 列核心采集模型 + 可插拔投影器**：采集层只负责把数据干净抓下来，核心表（`wlh.document_row`）与只读接口（`GET /results?projection=canonical`）统一使用英文规范键值对，拒绝过度设计；同时在 [examples/field_mapping.yaml](examples/field_mapping.yaml) 中维护与下游 16 列中文模板的中英字段映射表。
-- **内网 `br-ocr-v1` 与 Office 深度提取管道**：复用并内化 [office_text_extract.py](docs/reference/office_text_extract.py) 与 [production_document_parse.py](docs/reference/production_document_parse.py)，内置容器魔数探测、Office 结构化直提、越南语 TCVN3 历史字体逐行恢复、基于 `PyMuPDF` (`fitz`) 的 PDF 逐页墨迹扫描件判定、内网 `br-ocr-v1` 版面 OCR（带 S3 CAS 结果缓存，兼顾 `tesseract` 备选）与多语种参数化的客观质量门禁（`quality_check`）。
+- **内网 `br-ocr-v1` 与 Office 深度提取管道**：内置容器魔数探测、Office（DOC/DOCX/RTF/XLS/XLSX）结构化直提、越南语 TCVN3 历史字体逐行恢复、基于 `PyMuPDF` (`fitz`) 的 PDF 逐页墨迹扫描件判定、内网 `br-ocr-v1` 版面 OCR（带 S3 CAS 结果缓存，兼顾 `tesseract` 备选）与多语种参数化的客观质量门禁（`quality_check`）。
 
 ## Get started
 
@@ -46,20 +46,20 @@ uv run wlh init
 
 ### 3. 运行受控采集、增量复查与零网络离线重解析
 
-以 `sources/` 下已登记的来源配置（如 [sources/dd-499.yaml](sources/dd-499.yaml) 美国联邦公报 API 或 [sources/dd-017.yaml](sources/dd-017.yaml) 最高人民法院指导性案例）为例：
+传入符合 `SourceConfig` 规范的 YAML 采集配置文件即可执行在线采集、增量复查或离线重解析：
 
 ```bash
 # 在线受控采集：先将原始响应与附件归档至 S3 CAS，再提取 Markdown 并入库
-uv run wlh collect sources/dd-499.yaml
+uv run wlh collect <path/to/source.yaml>
 
 # 在线复查：检验已发现资源是否发生变更
-uv run wlh recheck sources/dd-499.yaml
+uv run wlh recheck <path/to/source.yaml>
 
 # 离线重解析：冻结已归档 CAS 原件，在零外部网络请求（external_requests = 0）下重算版本
-uv run wlh reparse sources/dd-499.yaml
+uv run wlh reparse <path/to/source.yaml>
 
 # 也可将任务入队由后台 Worker 异步消费
-uv run wlh collect sources/dd-499.yaml --enqueue
+uv run wlh collect <path/to/source.yaml> --enqueue
 uv run wlh worker --once
 ```
 
@@ -90,10 +90,3 @@ uv run pytest -v
 # 运行仓库结构、架构图约定与文档死链巡检
 harness doctor
 ```
-
-## Learn more
-
-- **协作规范与领域红线**：[AGENTS.md](AGENTS.md) · [PROJECTS.md](PROJECTS.md)
-- **文档导航与全局架构**：[文档维护规范](docs/README.md) · [全局架构现状](docs/architecture/overview.md) · [通用法律模型与投影架构](docs/architecture/canonical-legal-model.md)
-- **首批实施计划与架构决策**：[Issue #1 首批架构与分阶段实施计划](docs/spec/issue#1/spec.md) · [ADR-0001](docs/adr/0001-canonical-legal-domain-and-pluggable-projectors.md) · [ADR-0002](docs/adr/0002-controlled-cas-acquisition-and-offline-reparse.md) · [ADR-0003](docs/adr/0003-multi-adapter-bridges-and-intranet-ocr-stack.md)
-- **源站适配台账与外部参考**：[多法域资源适配与推进台账](docs/runbooks/source-adaptation-matrix.md) · [参考资料索引](docs/reference/INDEX.md) · [CHANGELOG.md](CHANGELOG.md)

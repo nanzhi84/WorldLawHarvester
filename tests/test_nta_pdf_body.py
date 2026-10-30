@@ -38,6 +38,10 @@ ENTRY = "/law/index.htm"
 def _collect(
     case: str, directory: Path, env: dict[str, str]
 ) -> tuple[dict[str, Any], list[dict[str, Any]], Path, str]:
+    if not (FIXTURES / "pdf-body-provenance.json").is_file():
+        import pytest
+
+        pytest.skip("Private fixture directory tests/fixtures/dd-520 not present")
     manifest: dict[str, Any] = json.loads((FIXTURES / "pdf-body-provenance.json").read_text())
     evidence: dict[str, Any] = manifest["cases"][case]
     payload = (FIXTURES / evidence["pdf"]).read_bytes()

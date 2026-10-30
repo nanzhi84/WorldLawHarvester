@@ -23,6 +23,46 @@ _PAGE_FOLIO = re.compile(r"[\s\d\-–—―Page頁ページ()/]+\Z", re.I)
 _CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]+")
 _VERT_CJK_CHAR = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
 
+_PUA_CHAR_MAP: dict[str, str] = {
+    "\ue88a": "0",
+    "\ue88b": "1",
+    "\ue88c": "2",
+    "\ue88d": "3",
+    "\ue88e": "4",
+    "\ue88f": "5",
+    "\ue890": "6",
+    "\ue891": "7",
+    "\ue892": "8",
+    "\ue893": "9",
+    "\ue0a8": "・",
+    "\ue61c": "－",
+    "\uea75": ",",
+    "\ue05a": "⑴",
+    "\ue000": "𠮟",
+    "\ue003": "𠮷",
+    "\ue005": "",
+    "\ue00b": "麴",
+    "\ue090": "𦥑",
+    "\ue7b2": "〔",
+    "\ue7b3": "〕",
+}
+_PUA_RESIDUAL_RE = re.compile(r"[\ue000-\uf8ff]+")
+
+
+def decode_pua_text(text: str) -> str:
+    """Decode National Printing Bureau (Kanpo) & NTA Private Use Area and vertical font glyphs."""
+    orig = text
+    for src, dst in _PUA_CHAR_MAP.items():
+        if src in text:
+            text = text.replace(src, dst)
+    if "\u617a" in text:
+        text = text.replace("\u617a", "－")
+    if "\u5a23" in text:
+        text = text.replace("\u5a23", "")
+    if text != orig and _PUA_RESIDUAL_RE.search(text):
+        text = _PUA_RESIDUAL_RE.sub("", text)
+    return text
+
 
 def clean_soft_hyphens(text: str) -> str:
     """A discretionary hyphen is layout; ordinary hyphens remain authoritative."""
@@ -80,7 +120,24 @@ def native_lines(page: Any, tables: list[Any] | None = None) -> list[Line]:
                     rules.append((float(cell_box[0]), float(cell_box[1]), float(cell_box[3])))
                     rules.append((float(cell_box[2]), float(cell_box[1]), float(cell_box[3])))
     raw: list[Line] = []
-    for block in page.get_text("rawdict", flags=0)["blocks"]:
+    raw_dict: dict[str, Any] = cast(dict[str, Any], page.get_text("rawdict", flags=0))
+    has_replacement_char = False
+    for b_item in cast(list[Any], raw_dict.get("blocks") or []):
+        if not isinstance(b_item, dict):
+            continue
+        for ln_item in cast(list[Any], cast(dict[str, Any], b_item).get("lines") or []):
+            if not isinstance(ln_item, dict):
+                continue
+            for s_item in cast(list[Any], cast(dict[str, Any], ln_item).get("spans") or []):
+                if not isinstance(s_item, dict):
+                    continue
+                for ch_item in cast(list[Any], cast(dict[str, Any], s_item).get("chars") or []):
+                    if isinstance(ch_item, dict) and cast(dict[str, Any], ch_item).get("c") == "\ufffd":
+                        has_replacement_char = True
+                        break
+    if has_replacement_char:
+        raw_dict = cast(dict[str, Any], page.get_text("rawdict"))
+    for block in raw_dict["blocks"]:
         for line in block.get("lines", []):
             raw_spans_val = line.get("spans")
             raw_spans: list[dict[str, Any]] = (
@@ -105,10 +162,20 @@ def native_lines(page: Any, tables: list[Any] | None = None) -> list[Line]:
                     else []
                 )
                 if not chars:
-                    t = _CTRL_RE.sub(" ", str(s.get("text") or ""))
+                    t = decode_pua_text(_CTRL_RE.sub(" ", str(s.get("text") or "")))
                     if t:
                         spans.append({"text": t, "bbox": s["bbox"]})
                     continue
+                line_dir: Any = line.get("dir", (1.0, 0.0))
+                if (
+                    isinstance(line_dir, (list, tuple))
+                    and len(cast(list[Any], line_dir)) >= 2
+                    and abs(float(cast(list[Any], line_dir)[0]))
+                    >= abs(float(cast(list[Any], line_dir)[1]))
+                    and len(chars) >= 2
+                    and float(chars[0]["bbox"][0]) > float(chars[-1]["bbox"][0]) + 1.0
+                ):
+                    chars = sorted(chars, key=lambda ch: round(float(ch["bbox"][0]), 1))
                 sb = tuple(float(v) for v in s["bbox"])
                 if _has_vertical_rule_between(rules, sb[0] + 1.0, sb[2] - 1.0, sb[1], sb[3]):
                     cur_chars: list[dict[str, Any]] = [chars[0]]
@@ -121,8 +188,10 @@ def native_lines(page: Any, tables: list[Any] | None = None) -> list[Line]:
                             sb[1],
                             sb[3],
                         ):
-                            ctext = _CTRL_RE.sub(
-                                " ", "".join(str(ch["c"]) for ch in cur_chars if "c" in ch)
+                            ctext = decode_pua_text(
+                                _CTRL_RE.sub(
+                                    " ", "".join(str(ch["c"]) for ch in cur_chars if "c" in ch)
+                                )
                             )
                             if ctext:
                                 spans.append(
@@ -139,8 +208,8 @@ def native_lines(page: Any, tables: list[Any] | None = None) -> list[Line]:
                             cur_chars = [c]
                         else:
                             cur_chars.append(c)
-                    ctext = _CTRL_RE.sub(
-                        " ", "".join(str(ch["c"]) for ch in cur_chars if "c" in ch)
+                    ctext = decode_pua_text(
+                        _CTRL_RE.sub(" ", "".join(str(ch["c"]) for ch in cur_chars if "c" in ch))
                     )
                     if ctext:
                         spans.append(
@@ -155,7 +224,9 @@ def native_lines(page: Any, tables: list[Any] | None = None) -> list[Line]:
                             }
                         )
                 else:
-                    ctext = _CTRL_RE.sub(" ", "".join(str(ch["c"]) for ch in chars if "c" in ch))
+                    ctext = decode_pua_text(
+                        _CTRL_RE.sub(" ", "".join(str(ch["c"]) for ch in chars if "c" in ch))
+                    )
                     if ctext:
                         spans.append({"text": ctext, "bbox": s["bbox"]})
             if not spans:
@@ -321,7 +392,25 @@ def _ruled(table: Any, lines: list[Line]) -> tuple[set[int], str] | None:
         [list(cell_lines[owner[(r_idx, c_idx)]]) for c_idx in range(table.col_count)]
         for r_idx in range(table.row_count)
     ]
-    return _table(rows)
+    expanded_rows: list[list[list[Line]]] = []
+    for r_idx, row in enumerate(rows):
+        if r_idx >= 1 and len(row) >= 2:
+            k = len(row[0])
+            if k >= 2 and all(len(cell) == k for cell in row):
+                sorted_cols = [
+                    sorted(cell, key=lambda ln: (ln.middle, ln.box[0])) for cell in row
+                ]
+                if all(
+                    max(col[i].middle for col in sorted_cols)
+                    - min(col[i].middle for col in sorted_cols)
+                    <= 3.0
+                    for i in range(k)
+                ):
+                    for i in range(k):
+                        expanded_rows.append([[col[i]] for col in sorted_cols])
+                    continue
+        expanded_rows.append(row)
+    return _table(expanded_rows)
 
 
 def _same_row(key: Line, lines: list[Line]) -> list[Line]:
@@ -470,6 +559,51 @@ def _leader_table(lines: list[Line]) -> tuple[set[int], str] | None:
     return _table(rows)
 
 
+def _detect_composite_boxes(page: Any) -> list[tuple[float, float, float, float]]:
+    """Detect rectangular frames drawn with 4 thin filled border rectangles ('f')."""
+    horiz_edges: list[tuple[float, float, float, float]] = []
+    vert_edges: list[tuple[float, float, float, float]] = []
+    for d in page.get_drawings():
+        rect = d.get("rect")
+        if not rect:
+            continue
+        x0, y0, x1, y1 = float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])
+        w, h = x1 - x0, y1 - y0
+        if w > 180.0 and h <= 3.5:
+            horiz_edges.append((x0, y0, x1, y1))
+        elif h > 45.0 and w <= 3.5:
+            vert_edges.append((x0, y0, x1, y1))
+    horiz_edges.sort(key=lambda r: r[1])
+    used_h: set[int] = set()
+    frames: list[tuple[float, float, float, float]] = []
+    for i, top in enumerate(horiz_edges):
+        if i in used_h:
+            continue
+        for j in range(i + 1, len(horiz_edges)):
+            if j in used_h:
+                continue
+            bot = horiz_edges[j]
+            if (
+                abs(top[0] - bot[0]) < 4.0
+                and abs(top[2] - bot[2]) < 4.0
+                and (bot[1] - top[3]) > 45.0
+            ):
+                has_left = any(
+                    abs(v[0] - top[0]) < 4.0 and v[1] <= top[3] + 4.0 and v[3] >= bot[1] - 4.0
+                    for v in vert_edges
+                )
+                has_right = any(
+                    abs(v[2] - top[2]) < 4.0 and v[1] <= top[3] + 4.0 and v[3] >= bot[1] - 4.0
+                    for v in vert_edges
+                )
+                if has_left and has_right:
+                    frames.append((top[0], top[1], top[2], bot[3]))
+                    used_h.add(i)
+                    used_h.add(j)
+                    break
+    return frames
+
+
 def _check_box_order(page: Any, lines: list[Line]) -> list[Line]:
     """A full-width framed clause cannot be moved across the prose below it.
 
@@ -486,63 +620,80 @@ def _check_box_order(page: Any, lines: list[Line]) -> list[Line]:
         return lines
     height = median(line.height for line in prose)
     current = list(lines)
+    candidate_boxes: list[tuple[float, float, float, float]] = []
     for drawing in page.get_drawings():
         if "s" not in drawing["type"]:
             continue
         for item in drawing["items"]:
-            if item[0] != "re":
+            if item[0] == "re":
+                r = tuple(item[1])
+                candidate_boxes.append((float(r[0]), float(r[1]), float(r[2]), float(r[3])))
+    composite_boxes = _detect_composite_boxes(page)
+    candidate_boxes.extend(composite_boxes)
+    for box in candidate_boxes:
+        if box[2] - box[0] < page.rect.width * 0.6 or box[3] - box[1] < height * 3:
+            continue
+        framed_prose = [line for line in prose if _inside(line, box, 3.0)]
+        if len(framed_prose) < 2:
+            continue
+        framed_all = [line for line in current if _inside(line, box, 3.0)]
+        framed_ids = {line.index for line in framed_all}
+        first, last = (
+            min(line.index for line in framed_prose),
+            max(line.index for line in framed_prose),
+        )
+        out_of_order = False
+        for line in prose:
+            if line.index in framed_ids or line.box[2] <= box[0] or line.box[0] >= box[2]:
                 continue
-            box = tuple(item[1])
-            if box[2] - box[0] < page.rect.width * 0.6 or box[3] - box[1] < height * 3:
-                continue
-            framed_prose = [line for line in prose if _inside(line, box)]
-            if len(framed_prose) < 2:
-                continue
-            framed_all = [line for line in current if _inside(line, box)]
-            framed_ids = {line.index for line in framed_all}
-            first, last = (
-                min(line.index for line in framed_prose),
-                max(line.index for line in framed_prose),
-            )
-            out_of_order = False
-            for line in prose:
-                if line.index in framed_ids or line.box[2] <= box[0] or line.box[0] >= box[2]:
-                    continue
-                if (line.box[1] > box[3] and line.index < first) or (
-                    line.box[3] < box[1] and line.index > last
-                ):
-                    out_of_order = True
-                    break
-            if not out_of_order:
-                continue
-            # If any unframed prose shares the vertical band of the box (multi-column), reject.
-            if any(
-                line.index not in framed_ids and box[1] + 2 < line.middle < box[3] - 2
-                for line in prose
+            if (line.box[1] > box[3] and line.index < last) or (
+                line.box[3] < box[1] and line.index > first
             ):
-                raise WlhError("pdf_layout_unverified")
-            unframed = [line for line in current if line.index not in framed_ids]
-            ordered_framed = sorted(framed_all, key=lambda line: (line.middle, line.box[0]))
-            insert_at = len(unframed)
-            for idx, line in enumerate(unframed):
-                if _PAGE_FOLIO.fullmatch(line.text.strip()):
-                    continue
-                if line.box[1] >= box[3] - 2:
-                    insert_at = idx
-                    break
-            reordered = unframed[:insert_at] + ordered_framed + unframed[insert_at:]
-            current = [Line(i, line.box, line.text) for i, line in enumerate(reordered)]
-            prose = [
-                line
-                for line in current
-                if len(line.text.strip()) >= 5 and not _PAGE_FOLIO.fullmatch(line.text.strip())
-            ]
+                out_of_order = True
+                break
+        if not out_of_order:
+            continue
+        # If any unframed prose shares the vertical band of the box (multi-column), reject.
+        if any(
+            line.index not in framed_ids and box[1] + 2 < line.middle < box[3] - 2
+            for line in prose
+        ):
+            raise WlhError("pdf_layout_unverified")
+        unframed = [line for line in current if line.index not in framed_ids]
+        ordered_framed = sorted(framed_all, key=lambda line: (line.middle, line.box[0]))
+        insert_at = len(unframed)
+        for idx, line in enumerate(unframed):
+            if _PAGE_FOLIO.fullmatch(line.text.strip()):
+                continue
+            if line.box[1] >= box[3] - 2:
+                insert_at = idx
+                break
+        reordered = unframed[:insert_at] + ordered_framed + unframed[insert_at:]
+        current = [Line(i, line.box, line.text) for i, line in enumerate(reordered)]
+        prose = [
+            line
+            for line in current
+            if len(line.text.strip()) >= 5 and not _PAGE_FOLIO.fullmatch(line.text.strip())
+        ]
+    # If a bottom-margin standalone numeric folio was emitted as the first stream line on a
+    # continuation page (where the first prose line starts near the top and is indented),
+    # move the bottom folio to the bottom of the page so cross-page sentences remain continuous.
+    if (
+        not composite_boxes
+        and len(current) >= 2
+        and re.fullmatch(r"\d+", current[0].text.strip())
+        and current[0].box[1] >= page.rect.height * 0.90
+        and current[1].box[1] <= page.rect.height * 0.12
+        and current[1].box[0] >= 58.0
+    ):
+        reordered_folio = current[1:] + [current[0]]
+        current = [Line(i, line.box, line.text) for i, line in enumerate(reordered_folio)]
     return current
 
 
-def _join_vertical_columns(lines: list[Line]) -> list[Line]:
+def _join_vertical_columns(lines: list[Line], *, min_ratio: float = 0.25) -> list[Line]:
     vert_count = sum(bool(_VERT_CJK_CHAR.fullmatch(ln.text.strip())) for ln in lines)
-    if vert_count < 12 or vert_count / max(len(lines), 1) < 0.25:
+    if vert_count < 12 or vert_count / max(len(lines), 1) < min_ratio:
         return lines
     vert: list[Line] = []
     horiz: list[Line] = []
@@ -633,13 +784,33 @@ def _join_vertical_columns(lines: list[Line]) -> list[Line]:
 
 
 def page_markdown(page: Any, text: str) -> str:
-    clean_text = _CTRL_RE.sub(" ", text)
-    strict_tables = (
-        list(find_tables(page, "lines_strict")) if len(page.get_drawings()) >= 4 else []
+    raw_page_text = _CTRL_RE.sub(" ", str(page.get_text("text")))
+    clean_text = decode_pua_text(_CTRL_RE.sub(" ", text))
+    is_kanpo_page = "\ue05a" not in raw_page_text and (
+        decode_pua_text(raw_page_text) != raw_page_text
+        or (
+            "官" in raw_page_text
+            and "報" in raw_page_text
+            and ("号)" in raw_page_text or "号）" in raw_page_text)
+        )
     )
-    lines = _check_box_order(page, native_lines(page, strict_tables))
+    strict_tables = (
+        list(find_tables(page, "lines_strict"))
+        if (not is_kanpo_page and len(page.get_drawings()) >= 4)
+        else []
+    )
+    lines = _check_box_order(page, native_lines(page, strict_tables)) if not is_kanpo_page else native_lines(page, [])
+    if sum(bool(_VERT_CJK_CHAR.fullmatch(ln.text.strip())) for ln in lines) >= 80:
+        strict_tables = []
     if not strict_tables:
-        lines = _join_vertical_columns(lines)
+        lines = _join_vertical_columns(lines, min_ratio=(0.05 if is_kanpo_page else 0.25))
+    if is_kanpo_page:
+        cleaned_lines = [
+            Line(ln.index, ln.box, _PUA_RESIDUAL_RE.sub("", ln.text))
+            for ln in lines
+            if _PUA_RESIDUAL_RE.sub("", ln.text).strip()
+        ]
+        return normalized(clean_soft_hyphens("\n".join(ln.text for ln in cleaned_lines)))
 
     # Text dictionaries and plain extraction can differ for unusual fonts. In
     # that case, keep the authoritative native string rather than lose glyphs.

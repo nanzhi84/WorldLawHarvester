@@ -225,7 +225,12 @@ class TestJapaneseInlineGlyphAndEmptyAttachmentHandling:
             "</p>"
             "</div></div></body></html>"
         ).encode("utf-8")
-        cfg = load_file(ROOT / "sources" / "dd-582.yaml").model_dump()
+        src_path = ROOT / "sources" / "dd-582.yaml"
+        if not src_path.is_file():
+            import pytest
+
+            pytest.skip("Private source config dd-582.yaml not present")
+        cfg = load_file(src_path).model_dump()
         adapter = WebAdapter(cfg)
         tree, _, _ = parse_html(html_bytes, "utf-8")
         acquisition = {
@@ -436,6 +441,10 @@ class TestJapanesePdfRecoveryAndLayoutReconstruction:
     ) -> None:
         """Ruled PDF tables with merged cells render without raising pdf_layout_unverified and preserve cell values."""
         pdf_path = ROOT / "tests" / "fixtures" / "dd-520" / "nta-trust-tax-merged-cell-annex.pdf"
+        if not pdf_path.is_file():
+            import pytest
+
+            pytest.skip("Private fixture dd-520/nta-trust-tax-merged-cell-annex.pdf not present")
         markdown_text, _, _, _ = extract_pdf(pdf_path, _OCR_CFG, "generic")
         norm_md = normalized(markdown_text)
         for expected in (

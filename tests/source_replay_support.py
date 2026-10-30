@@ -152,7 +152,11 @@ def source_server(routes: dict[str, Route], hosts: list[str]) -> Generator[tuple
 def replay_config(
     source_id: str, origin: str, directory: Path, *, template: Path | None = None
 ) -> Path:
+    import pytest
+
     source_file = template or ROOT / "sources" / f"{source_id}.yaml"
+    if not source_file.is_file():
+        pytest.skip(f"Private source config {source_file.name} not present")
     cfg: dict[str, Any] = yaml.safe_load(source_file.read_text())
     hosts: list[str] = cfg["allowed_hosts"]
     destination = urlsplit(origin)

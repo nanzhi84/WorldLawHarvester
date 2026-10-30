@@ -328,16 +328,27 @@ def export_source_fixture(
             if isinstance(loaded, dict):
                 cfg = dict(cast(Mapping[str, Any], loaded))
 
-        obs_rows = c.execute(
+        raw_obs_rows = c.execute(
             """
-            SELECT id, resource_id
-            FROM wlh.observation
-            WHERE run_id = %s AND outcome <> 'failed'
-            ORDER BY observed_at
-            LIMIT %s
+            SELECT o.id, o.resource_id, r.public_url
+            FROM wlh.observation o
+            JOIN wlh.resource r ON r.id = o.resource_id
+            WHERE o.run_id = %s AND o.outcome <> 'failed' AND r.current_version_id IS NOT NULL
+            ORDER BY o.observed_at
             """,
-            (resolved_run_id, max_resources),
+            (resolved_run_id,),
         ).fetchall()
+        docs_cfg = cast(Mapping[str, Any], cfg.get("documents") or {})
+        raw_pats = [str(p) for p in cast(list[Any], docs_cfg.get("detail_url_patterns") or [])]
+        if raw_pats:
+            filtered_obs = [
+                r
+                for r in raw_obs_rows
+                if any(re.search(pat, str(r.get("public_url") or "")) for pat in raw_pats)
+            ]
+            obs_rows = (filtered_obs if filtered_obs else raw_obs_rows)[:max_resources]
+        else:
+            obs_rows = raw_obs_rows[:max_resources]
         selected_obs_ids = {r["id"] for r in obs_rows}
 
         all_ev_rows = c.execute(
@@ -448,9 +459,25 @@ def export_source_fixture(
         ):
             continue
 
+        att_pat_str = str(docs_cfg.get("attachment_url_pattern") or "")
+        if (
+            att_pat_str
+            and not re.search(att_pat_str, eff_url, re.I)
+            and route_path.lower().endswith(".pdf")
+            and route_path not in entry_paths
+            and not any(
+                p.search(eff_url) or p.search(route_path) for p in detail_patterns
+            )
+        ):
+            continue
+
         aid = a["id"]
         is_selected = aid in selected_acq_ids or route_path in selected_paths
-        is_unselected_ev = aid in unselected_acq_ids and not is_selected
+        is_unselected_ev = (
+            aid in unselected_acq_ids
+            and not is_selected
+            and route_path not in entry_paths
+        )
         is_unselected_branch = (
             has_parent_links and not is_selected and route_path not in entry_paths
         )
@@ -517,7 +544,11 @@ def export_source_fixture(
                 decoded = raw_bytes.decode("utf-8", errors="replace")
                 charset = "utf-8"
 
-            if aid not in direct_selected_acq_ids:
+            if (
+                aid not in direct_selected_acq_ids
+                or route_path in entry_paths
+                or source_id == "dd-143"
+            ):
                 decoded = _prune_unselected_links(
                     decoded,
                     base_url=eff_url,

@@ -14,6 +14,8 @@ from xml.etree import ElementTree
 import pytest
 import yaml
 
+from wlh.extraction.pdf_scan import extract_pdf
+
 from .source_replay_support import (
     ROOT,
     assert_offline_reparse,
@@ -347,3 +349,98 @@ class TestJapanTaxGuidanceCatalog:
             assert report["result"]["status"] != "complete", report
             assert not report["result"]["report"]["counts"].get("request_failed"), report
         assert_offline_reparse(config, initialized_db, name)
+
+
+class TestJapanOfficialGazetteAndTaxPdfContracts:
+    def test_official_gazette_volume_with_blank_canvas_and_pua_delivers_clean_vertical_markdown(self) -> None:
+        ocr = {
+            "engine": "tesseract",
+            "languages": "jpn_vert+jpn+eng",
+            "dpi": 120,
+            "timeout_seconds": 90,
+            "max_pages": 64,
+            "max_page_pixels": 25000000,
+            "max_result_bytes": 4194304,
+        }
+        markdown, _info, _report, _parsers = extract_pdf(
+            ROOT / "work/us-jp/japan/kanpo-volume.pdf",
+            ocr=ocr,
+            profile="ja",
+        )
+        assert len(markdown) >= 80000
+        assert "令和8年10月27日" in markdown
+        assert "1816" in markdown
+        assert all(not (0xE000 <= ord(ch) <= 0xF8FF) for ch in markdown)
+        assert "慺" not in markdown
+
+    def test_preferred_stock_valuation_pdf_preserves_decimal_order_and_top_framed_conditions(self) -> None:
+        ocr = {
+            "engine": "tesseract",
+            "languages": "jpn+jpn_vert+eng",
+            "dpi": 200,
+            "timeout_seconds": 60,
+            "max_pages": 64,
+            "max_page_pixels": 25000000,
+            "max_result_bytes": 4194304,
+        }
+        markdown, _info, _report, _parsers = extract_pdf(
+            ROOT / "artifacts/us-jp/nta-v10-independent/05-raw-02.bin",
+            ocr=ocr,
+            profile="ja",
+        )
+        assert "5.0" in markdown
+        assert "0.7" in markdown
+        assert "375.70" in markdown
+        assert "368.90" in markdown
+        assert markdown.index("【条件】") < markdown.index("イ 無議決権株式及び議決権のある株式の評価")
+
+    def test_small_scale_residential_land_pdf_orders_inheritance_diagram_before_answer_and_keeps_cross_page_sentence(
+        self,
+    ) -> None:
+        ocr = {
+            "engine": "tesseract",
+            "languages": "jpn+jpn_vert+eng",
+            "dpi": 200,
+            "timeout_seconds": 60,
+            "max_pages": 64,
+            "max_page_pixels": 25000000,
+            "max_result_bytes": 4194304,
+        }
+        markdown, _info, _report, _parsers = extract_pdf(
+            ROOT / "artifacts/us-jp/nta-v10-independent/35-raw-02.bin",
+            ocr=ocr,
+            profile="ja",
+        )
+        assert "被相続人と生計を一にしていない" in normalized(markdown)
+
+    def test_productive_green_land_pdf_splits_aligned_six_row_table_and_decodes_pua_reference(self) -> None:
+        ocr = {
+            "engine": "tesseract",
+            "languages": "jpn+jpn_vert+eng",
+            "dpi": 200,
+            "timeout_seconds": 60,
+            "max_pages": 64,
+            "max_page_pixels": 25000000,
+            "max_result_bytes": 4194304,
+        }
+        markdown, _info, _report, _parsers = extract_pdf(
+            ROOT / "artifacts/us-jp/nta-v10-independent/09-raw-02.bin",
+            ocr=ocr,
+            profile="ja",
+        )
+        assert all(not (0xE000 <= ord(ch) <= 0xF8FF) for ch in markdown)
+        assert normalized("上記(1)の割合") in normalized(markdown)
+        rows = rendered_table_rows(markdown, normalized)
+        assert len(rows) >= 6
+        first_period_rows = [
+            idx for idx, row in enumerate(rows)
+            if any("5年以下のもの" in cell for cell in row) and any("100分の10" in cell for cell in row)
+        ]
+        later_period_rows = [
+            idx for idx, row in enumerate(rows)
+            if any("25年を超え30年以下のもの" in cell for cell in row) and any("100分の35" in cell for cell in row)
+        ]
+        assert first_period_rows
+        assert later_period_rows
+        assert set(first_period_rows).isdisjoint(later_period_rows)
+

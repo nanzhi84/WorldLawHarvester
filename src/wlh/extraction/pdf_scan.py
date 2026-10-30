@@ -19,14 +19,19 @@ import pymupdf as _fitz  # type: ignore[import-untyped]
 from wlh.core import WlhError
 from wlh.extraction.markdown import normalized, text_to_markdown
 from wlh.extraction.ocr_br import br_ocr
-from wlh.extraction.ocr_tesseract import tesseract_pages
-from wlh.extraction.pdf_markdown import clean_soft_hyphens, find_tables, page_markdown
+from wlh.extraction.ocr_tesseract import tesseract_image_bytes, tesseract_pages
+from wlh.extraction.pdf_markdown import (
+    clean_soft_hyphens,
+    decode_pua_text,
+    find_tables,
+    page_markdown,
+)
 from wlh.extraction.quality import block_text, json_value, quality_check
 from wlh.extraction.vi_tcvn3 import normalize_detected_tcvn3
 
 fitz: Any = _fitz
 
-PDF_CONTRACT = "wlh.pdf-scan.v12"
+PDF_CONTRACT = "wlh.pdf-scan.v14"
 SCAN_TEXT_CHARS = 30
 SCAN_INK_RATIO = 0.003
 INK_THRESHOLD = 210
@@ -42,6 +47,9 @@ SIGNATURE_PAGE_MIN_INK = 0.01
 def _has_unverified_vertical_fragments(page_text: str) -> bool:
     lines = [line.strip() for line in page_text.splitlines() if line.strip()]
     fragments = sum(bool(re.fullmatch(r"[\u3040-\u30ff\u3400-\u9fff]", line)) for line in lines)
+    long_lines = sum(len(line) >= 5 for line in lines)
+    if long_lines >= 8 and long_lines * 2 >= fragments:
+        return False
     return fragments >= 12 and fragments / max(len(lines), 1) >= 0.25
 
 
@@ -101,6 +109,25 @@ def _inspect_native_encoding(page: Any, text: str, pix: Any) -> tuple[str, bool]
     return _CTRL_RE.sub(" ", text), True
 
 
+def _xref_has_ink(document: Any, xref: int) -> bool:
+    """Check whether an embedded image XObject itself contains non-blank ink (>= 0.2%)."""
+    if xref <= 0:
+        return False
+    try:
+        pix = fitz.Pixmap(document, xref)
+        if pix.colorspace and pix.colorspace.n > 1:
+            pix = fitz.Pixmap(fitz.csGRAY, pix)
+        samples = pix.samples
+        if not samples:
+            return False
+        step = max(1, len(samples) // 10000)
+        sampled = samples[::step]
+        dark = sum(1 for b in sampled if b < 245)
+        return (dark / len(sampled)) >= 0.002
+    except Exception:
+        return True
+
+
 def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
     raw_pages: list[dict[str, Any]] = []
     texts: list[str] = []
@@ -111,19 +138,42 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
             for number in range(1, len(document) + 1):
                 page = document[number - 1]
                 raw_text = str(page.get_text("text"))
+                decoded_raw = decode_pua_text(raw_text)
+                is_kanpo_pua_page = "\ue05a" not in raw_text and (
+                    decoded_raw != raw_text
+                    or (
+                        "官" in raw_text
+                        and "報" in raw_text
+                        and ("号)" in raw_text or "号）" in raw_text)
+                    )
+                )
                 pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5), colorspace=fitz.csGRAY)
-                text, unreadable_body = _inspect_native_encoding(page, raw_text, pix)
+                text, unreadable_body = _inspect_native_encoding(page, decoded_raw, pix)
                 native = len(text.strip())
                 samples = bytes(pix.samples)
                 ink = samples.translate(_INK_LUT).count(1) / len(samples)
                 rect = page.rect
                 page_area = max(rect.width * rect.height, 1.0)
-                placed_rects = [
-                    r
-                    for img in page.get_images(full=True)
-                    for r in page.get_image_rects(img[0])
-                    if r.width > 1.5 and r.height > 1.5 and _rect_has_ink(pix, r, rect)
-                ]
+                placed_rects: list[Any] = []
+                overlay_xrefs: list[int] = []
+                for img in page.get_images(full=True):
+                    xref = int(img[0])
+                    if not _xref_has_ink(document, xref):
+                        continue
+                    for r in page.get_image_rects(xref):
+                        if r.width <= 1.5 or r.height <= 1.5 or not _rect_has_ink(pix, r, rect):
+                            continue
+                        cov = (r.width * r.height) / page_area
+                        if is_kanpo_pua_page and (
+                            cov < 0.35
+                            or native >= 500
+                        ):
+                            continue
+                        if is_kanpo_pua_page:
+                            if xref not in overlay_xrefs:
+                                overlay_xrefs.append(xref)
+                            continue
+                        placed_rects.append(r)
                 img_area_total = sum(r.width * r.height for r in placed_rects)
                 image_coverage = min(img_area_total / page_area, 1.0)
                 raw_pages.append(
@@ -134,6 +184,7 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
                         "image_coverage": round(image_coverage, 4),
                         "ink_ratio": round(ink, 5),
                         "_unreadable_body": unreadable_body,
+                        "_overlay_xrefs": overlay_xrefs,
                     }
                 )
                 texts.append(text)
@@ -152,8 +203,15 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
     pages: list[dict[str, Any]] = []
     for p in raw_pages:
         unreadable_body = bool(p.pop("_unreadable_body", False))
+        overlay_xrefs = list(p.pop("_overlay_xrefs", []))
         is_pure_scan = (
             p["native_text_chars"] < SCAN_TEXT_CHARS
+            and not (
+                p["native_text_chars"] >= 15
+                and p["embedded_images"] == 0
+                and float(p["image_coverage"]) == 0.0
+                and float(p["ink_ratio"]) < 0.02
+            )
             and (p["ink_ratio"] > SCAN_INK_RATIO or p["embedded_images"] > 0)
             and (not has_normal_text_page or p["embedded_images"] > 0 or p["image_coverage"] > 0)
         )
@@ -165,7 +223,10 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
             and float(p["ink_ratio"]) >= SIGNATURE_PAGE_MIN_INK
         )
         suspected = is_pure_scan or is_signature_scan or unreadable_body
-        pages.append(dict(p, suspected_scan=suspected))
+        page_entry: dict[str, Any] = dict(p, suspected_scan=suspected)
+        if overlay_xrefs:
+            page_entry["overlay_xrefs"] = overlay_xrefs
+        pages.append(page_entry)
 
     return {
         "contract": PDF_CONTRACT,
@@ -220,8 +281,16 @@ def extract_pdf(
         parsers.append("tcvn3")
     scan_set = set(scans)
     native_rendered: dict[int, str] = {}
+    overlay_by_page = {
+        int(p["page"]): list(p.get("overlay_xrefs") or [])
+        for p in analysis["pages"]
+        if p.get("overlay_xrefs")
+    }
     if len(scan_set) < len(native):
         with fitz.open(path) as document:
+            ocr_langs = str(ocr.get("languages") or "jpn_vert+jpn")
+            active_overlays = set(sorted(overlay_by_page)[:20])
+            ov_pngs_by_page: dict[int, list[bytes]] = {}
             for n in range(1, len(native) + 1):
                 if n not in scan_set:
                     page_text = page_markdown(document[n - 1], native[n - 1])
@@ -230,6 +299,48 @@ def extract_pdf(
                     if _has_unverified_vertical_fragments(page_text):
                         raise WlhError("pdf_layout_unverified")
                     native_rendered[n] = page_text
+                    if n in active_overlays:
+                        max_dim = 1000 if len(overlay_by_page) > 20 else 1600
+                        png_list: list[bytes] = []
+                        for xr in overlay_by_page[n]:
+                            pix = fitz.Pixmap(document, int(xr))
+                            if pix.colorspace and pix.colorspace.n > 1:
+                                pix = fitz.Pixmap(fitz.csGRAY, pix)
+                            while pix.width > max_dim and pix.height > max_dim:
+                                pix.shrink(1)
+                            png_list.append(bytes(pix.tobytes("png")))
+                        if png_list:
+                            ov_pngs_by_page[n] = png_list
+            if ov_pngs_by_page:
+                import concurrent.futures
+
+                all_tasks: list[tuple[int, bytes]] = [
+                    (page_no, png_bytes)
+                    for page_no, p_list in ov_pngs_by_page.items()
+                    for png_bytes in p_list
+                ]
+                def _ocr_overlay(item: tuple[int, bytes]) -> tuple[int, str]:
+                    return (
+                        item[0],
+                        tesseract_image_bytes(
+                            item[1], languages=ocr_langs, timeout=120.0
+                        ),
+                    )
+
+                with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=min(4, len(all_tasks))
+                ) as pool:
+                    ov_results: list[tuple[int, str]] = list(
+                        pool.map(_ocr_overlay, all_tasks)
+                    )
+                by_p: dict[int, list[str]] = {}
+                for page_no, ov_txt in ov_results:
+                    if ov_txt:
+                        by_p.setdefault(page_no, []).append(ov_txt)
+                for page_no, parts in by_p.items():
+                    extra_ov = "\n".join(parts)
+                    native_rendered[page_no] = f"{native_rendered[page_no]}\n\n{extra_ov}".strip()
+                    texts[page_no] = f"{texts[page_no]}\n{extra_ov}".strip()
     if scans:
         deadline = time.monotonic() + ocr["timeout_seconds"]
         recognized: dict[int, str] | None = None

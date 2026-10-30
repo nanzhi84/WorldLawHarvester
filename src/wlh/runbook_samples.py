@@ -22,6 +22,8 @@ DEFAULT_CSV_PATH = Path("docs/runbooks/source-adaptation-matrix.csv")
 DEFAULT_OUTPUT_PATH = Path("docs/runbooks/source-verification-samples.html")
 DEFAULT_SAMPLES_DATABASE_URL = "postgresql://wlh:wlh@127.0.0.1:15432/wlh_test"
 DEFAULT_SAMPLES_S3_BUCKET = "wlh-archive-test"
+FALLBACK_SAMPLES_DATABASE_URL = "postgresql://wlh:wlh@127.0.0.1:15432/wlh"
+FALLBACK_SAMPLES_S3_BUCKET = "wlh-archive"
 
 FORBIDDEN_PLACEHOLDERS = (
     "Bạn chưa Đăng nhập thành viên",
@@ -1033,6 +1035,284 @@ def _extract_payload_snippet(
     return out_txt.strip()
 
 
+def _make_objects_for_bucket(bucket: str) -> Any:
+    from wlh.engine.objects import Objects
+
+    prev_bucket = os.environ.get("WLH_S3_BUCKET")
+    os.environ["WLH_S3_BUCKET"] = bucket
+    try:
+        return Objects()
+    finally:
+        if prev_bucket is None:
+            os.environ.pop("WLH_S3_BUCKET", None)
+        else:
+            os.environ["WLH_S3_BUCKET"] = prev_bucket
+
+
+def _extract_source_items_from_store(
+    conn: Any,
+    objs: Any,
+    source_id: str,
+    content_xpath: str | None,
+    max_items_per_source: int,
+    items: list[dict[str, Any]],
+    seen_resource_keys: set[tuple[str, str, str]],
+    schema_name: str = "wlh",
+) -> None:
+    if len(items) >= max_items_per_source:
+        return
+    if schema_name not in {"wlh", "wlh_samples_backup"}:
+        return
+
+    candidate_limit = max(max_items_per_source * 5, 50)
+    db_rows: list[dict[str, Any]] = conn.execute(
+        f"""
+        WITH top_res AS (
+            SELECT r.id, v.id AS version_id, v.inputs_ref
+            FROM {schema_name}.resource r
+            JOIN {schema_name}.frontier f ON f.id = r.frontier_id
+            JOIN {schema_name}.version v ON v.id = r.current_version_id
+            WHERE f.source_id = %s
+            ORDER BY r.id
+            LIMIT %s
+        )
+        SELECT tr.id AS resource_id, tr.inputs_ref, d.*
+        FROM top_res tr
+        JOIN {schema_name}.document_row d ON d.version_id = tr.version_id
+        ORDER BY tr.id, d.row_index
+        """,
+        (source_id, candidate_limit),
+    ).fetchall()
+
+    by_res: dict[str, list[dict[str, Any]]] = {}
+    for r in db_rows:
+        by_res.setdefault(str(r["resource_id"]), []).append(r)
+
+    selected_res = {
+        rid: rlist
+        for rid, rlist in by_res.items()
+        if not any(
+            "127.0.0.1" in str(r.get("detail_url") or "")
+            or "[::1]" in str(r.get("detail_url") or "")
+            or "localhost" in str(r.get("detail_url") or "")
+            for r in rlist
+        )
+    }
+
+    for res_rows in selected_res.values():
+        if len(items) >= max_items_per_source:
+            break
+        non_att = [
+            r for r in res_rows if r.get("role") != "independent_attachment"
+        ]
+        primary = non_att[0] if non_att else res_rows[0]
+        detail_url_val = str(primary.get("detail_url") or "").strip()
+        resource_dedup_key = (
+            detail_url_val,
+            str(primary.get("title") or "").strip(),
+            str(primary.get("markdown_hash") or "").strip(),
+        )
+        if resource_dedup_key in seen_resource_keys:
+            continue
+
+        try:
+            md_text = objs.get(str(primary["markdown_hash"])).decode(
+                "utf-8", errors="replace"
+            )
+            for zip_row in res_rows:
+                if (
+                    zip_row is not primary
+                    and zip_row.get("role") == "independent_attachment"
+                    and str(zip_row.get("original_media_type") or "").lower()
+                    == "application/zip"
+                    and zip_row.get("markdown_hash")
+                ):
+                    zip_md = objs.get(str(zip_row["markdown_hash"])).decode(
+                        "utf-8", errors="replace"
+                    )
+                    if zip_md.strip():
+                        md_text = f"{md_text.rstrip()}\n\n{zip_md.lstrip()}"
+        except Exception:
+            continue
+
+        if any(bad in md_text for bad in FORBIDDEN_PLACEHOLDERS):
+            continue
+
+        att_rows = [
+            r for r in res_rows if r.get("original_hash") is not None
+        ]
+        attachments_list: list[dict[str, str | None]] = []
+        seen_att_urls: set[str] = set()
+        for ar in att_rows:
+            ar_url: str | None = None
+            loc = ar.get("locator")
+            if isinstance(loc, Mapping):
+                loc_map = cast(Mapping[str, Any], loc)
+                loc_url = loc_map.get("url")
+                if isinstance(loc_url, str) and loc_url.strip():
+                    ar_url = loc_url.strip()
+            if not ar_url:
+                detail_candidate = str(ar.get("detail_url") or "").strip()
+                if re.search(
+                    r"(?:\.(?:pdf|docx?|xlsx?|zip)(?:\?|$)|/UCMServer/TAND\d+)",
+                    detail_candidate,
+                    flags=re.I,
+                ):
+                    ar_url = detail_candidate
+            ar_file = str(ar.get("original_file") or "").strip() or None
+            ar_mime = str(ar.get("original_media_type") or "").strip() or None
+            if ar_url and ar_url not in seen_att_urls:
+                seen_att_urls.add(ar_url)
+                attachments_list.append(
+                    {
+                        "url": ar_url,
+                        "name": ar_file,
+                        "media_type": ar_mime,
+                    }
+                )
+
+        attachment_url: str | None = (
+            attachments_list[0]["url"] if attachments_list else None
+        )
+        original_file: str | None = (
+            attachments_list[0]["name"] if attachments_list else None
+        )
+        original_media_type: str | None = (
+            attachments_list[0]["media_type"] if attachments_list else None
+        )
+
+        raw_payload = ""
+        inputs_ref = primary.get("inputs_ref")
+        if isinstance(inputs_ref, str) and inputs_ref:
+            try:
+                inputs_raw: Any = json.loads(
+                    objs.get(inputs_ref).decode("utf-8", errors="replace")
+                )
+                inputs_list: list[Any] = []
+                if isinstance(inputs_raw, dict):
+                    raw_in = cast(dict[str, Any], inputs_raw).get("inputs")
+                    if isinstance(raw_in, list):
+                        inputs_list = cast(list[Any], raw_in)
+                elif isinstance(inputs_raw, list):
+                    inputs_list = cast(list[Any], inputs_raw)
+
+                for inp_obj in inputs_list:
+                    if not isinstance(inp_obj, dict):
+                        continue
+                    inp_map = cast(dict[str, Any], inp_obj)
+                    acq_id = inp_map.get("acquisition_id")
+                    arch_ref = inp_map.get("archive_ref")
+                    inp_charset = (
+                        str(inp_map.get("charset") or "").strip() or None
+                    )
+                    acq_row = (
+                        conn.execute(
+                            f"""
+                            SELECT COALESCE(actual_url, request_url) AS url, mime_type, archive_ref
+                            FROM {schema_name}.acquisition
+                            WHERE id = %s
+                            """,
+                            (acq_id,),
+                        ).fetchone()
+                        if acq_id
+                        else None
+                    )
+                    mime = (
+                        str(acq_row["mime_type"])
+                        if acq_row and acq_row.get("mime_type")
+                        else None
+                    )
+                    acq_url = (
+                        str(acq_row["url"])
+                        if acq_row and acq_row.get("url")
+                        else ""
+                    )
+                    target_ref = (
+                        arch_ref
+                        if isinstance(arch_ref, str) and arch_ref
+                        else (
+                            str(acq_row["archive_ref"])
+                            if acq_row and acq_row.get("archive_ref")
+                            else None
+                        )
+                    )
+                    if not original_media_type and mime:
+                        original_media_type = mime
+                    if (
+                        acq_url
+                        and acq_url not in seen_att_urls
+                        and re.search(
+                            r"(?:\.(?:pdf|docx?|xlsx?|zip)(?:\?|$)|/UCMServer/TAND\d+)",
+                            acq_url,
+                            flags=re.I,
+                        )
+                    ):
+                        seen_att_urls.add(acq_url)
+                        attachments_list.append(
+                            {
+                                "url": acq_url,
+                                "name": Path(acq_url.split("?")[0]).name or None,
+                                "media_type": mime,
+                            }
+                        )
+                        if not attachment_url:
+                            attachment_url = acq_url
+
+                    if target_ref and (
+                        len(raw_payload) < 20
+                        or (
+                            raw_payload.lstrip().startswith("{")
+                            and not (mime or "").lower().endswith("json")
+                        )
+                    ):
+                        raw_bytes = objs.get(target_ref)
+                        candidate = _extract_payload_snippet(
+                            raw_bytes, mime, content_xpath, inp_charset
+                        )
+                        if len(candidate) >= 20:
+                            raw_payload = candidate
+            except Exception:
+                raw_payload = ""
+
+        att_url_val = attachment_url.strip() if attachment_url else None
+
+        combined_check = " ".join(
+            [
+                detail_url_val,
+                att_url_val or "",
+                str(primary.get("title") or ""),
+                md_text,
+            ]
+        )
+        if (
+            any(bad in combined_check for bad in FORBIDDEN_PLACEHOLDERS)
+            or "127.0.0.1" in combined_check
+            or "[::1]" in combined_check
+            or "localhost" in combined_check
+        ):
+            continue
+
+        seen_resource_keys.add(resource_dedup_key)
+
+        items.append(
+            {
+                "detail_url": detail_url_val,
+                "attachment_url": att_url_val,
+                "original_file": original_file,
+                "original_media_type": original_media_type,
+                "attachments": attachments_list,
+                "raw_payload": _truncate_payload_aligned(
+                    raw_payload, md_text, 1500
+                ),
+                "markdown": md_text[:4000],
+                "title": primary.get("title"),
+                "doc_number": primary.get("doc_number"),
+                "issuer": primary.get("issuer"),
+                "published_at": primary.get("published_at"),
+            }
+        )
+
+
 def generate_verification_samples_from_db(
     csv_path: Path = DEFAULT_CSV_PATH,
     output_path: Path = DEFAULT_OUTPUT_PATH,
@@ -1040,13 +1320,15 @@ def generate_verification_samples_from_db(
     max_items_per_source: int = 10,
     database_url: str | None = None,
     s3_bucket: str | None = None,
+    fallback_database_url: str | None = None,
+    fallback_s3_bucket: str | None = None,
 ) -> Path:
-    """Query PostgreSQL (`wlh_test`) + S3 CAS (`wlh-archive-test`) for all `[x]`/`[~]` sources and write `source-verification-samples.html`."""
+    """Query PostgreSQL (`wlh_test`, with automatic fallback to production `wlh`) + S3 CAS (`wlh-archive-test` -> `wlh-archive`) for all `[x]`/`[~]` sources and write `source-verification-samples.html`."""
+    from contextlib import ExitStack
+
     import psycopg
     import yaml
     from psycopg.rows import dict_row
-
-    from wlh.engine.objects import Objects
 
     target_db_url = (
         database_url
@@ -1060,6 +1342,16 @@ def generate_verification_samples_from_db(
         or os.environ.get("WLH_S3_BUCKET")
         or DEFAULT_SAMPLES_S3_BUCKET
     )
+    prod_db_url = (
+        fallback_database_url
+        or os.environ.get("WLH_FALLBACK_SAMPLES_DATABASE_URL")
+        or FALLBACK_SAMPLES_DATABASE_URL
+    )
+    prod_bucket = (
+        fallback_s3_bucket
+        or os.environ.get("WLH_FALLBACK_SAMPLES_S3_BUCKET")
+        or FALLBACK_SAMPLES_S3_BUCKET
+    )
 
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         active_rows = [
@@ -1069,20 +1361,17 @@ def generate_verification_samples_from_db(
         ]
 
     existing_items_map = _parse_existing_html_samples(output_path)
-    prev_bucket = os.environ.get("WLH_S3_BUCKET")
-    os.environ["WLH_S3_BUCKET"] = target_bucket
-    try:
-        objs = Objects()
-    finally:
-        if prev_bucket is None:
-            os.environ.pop("WLH_S3_BUCKET", None)
-        else:
-            os.environ["WLH_S3_BUCKET"] = prev_bucket
+    primary_objs = _make_objects_for_bucket(target_bucket)
+    fallback_objs: Any = None
+    fallback_conn: Any = None
     sources_payload: list[dict[str, Any]] = []
 
-    with psycopg.Connection[dict[str, Any]].connect(
-        target_db_url, row_factory=dict_row
-    ) as conn:
+    with ExitStack() as stack:
+        conn = stack.enter_context(
+            psycopg.Connection[dict[str, Any]].connect(
+                target_db_url, row_factory=dict_row
+            )
+        )
         for csv_row in active_rows:
             source_id = csv_row["Source ID"].strip()
             source_name = csv_row["来源名称"].strip()
@@ -1103,220 +1392,66 @@ def generate_verification_samples_from_db(
                         if isinstance(cx, str) and cx.strip():
                             content_xpath = cx.strip()
 
-            db_rows: list[dict[str, Any]] = conn.execute(
-                """
-                SELECT r.id AS resource_id, v.inputs_ref, d.*
-                FROM wlh.document_row d
-                JOIN wlh.version v ON v.id = d.version_id
-                JOIN wlh.resource r ON r.id = v.resource_id AND r.current_version_id = v.id
-                JOIN wlh.frontier f ON f.id = r.frontier_id
-                WHERE f.source_id = %s
-                ORDER BY r.id, d.row_index
-                """,
-                (source_id,),
-            ).fetchall()
-
-            by_res: dict[str, list[dict[str, Any]]] = {}
-            for r in db_rows:
-                by_res.setdefault(str(r["resource_id"]), []).append(r)
-
-            selected_res = {
-                rid: rlist
-                for rid, rlist in by_res.items()
-                if not any(
-                    "127.0.0.1" in str(r.get("detail_url") or "")
-                    or "[::1]" in str(r.get("detail_url") or "")
-                    or "localhost" in str(r.get("detail_url") or "")
-                    for r in rlist
-                )
-            }
-
             items: list[dict[str, Any]] = []
-            for res_rows in selected_res.values():
-                if len(items) >= max_items_per_source:
-                    break
-                non_att = [
-                    r for r in res_rows if r.get("role") != "independent_attachment"
-                ]
-                primary = non_att[0] if non_att else res_rows[0]
-                md_text = objs.get(str(primary["markdown_hash"])).decode(
-                    "utf-8", errors="replace"
-                )
-                if any(bad in md_text for bad in FORBIDDEN_PLACEHOLDERS):
-                    continue
+            seen_resource_keys: set[tuple[str, str, str]] = set()
 
-                att_rows = [
-                    r for r in res_rows if r.get("original_hash") is not None
-                ]
-                attachments_list: list[dict[str, str | None]] = []
-                seen_att_urls: set[str] = set()
-                for ar in att_rows:
-                    ar_url: str | None = None
-                    loc = ar.get("locator")
-                    if isinstance(loc, Mapping):
-                        loc_map = cast(Mapping[str, Any], loc)
-                        loc_url = loc_map.get("url")
-                        if isinstance(loc_url, str) and loc_url.strip():
-                            ar_url = loc_url.strip()
-                    if not ar_url:
-                        detail_candidate = str(ar.get("detail_url") or "").strip()
-                        if re.search(
-                            r"(?:\.(?:pdf|docx?|xlsx?|zip)(?:\?|$)|/UCMServer/TAND\d+)",
-                            detail_candidate,
-                            flags=re.I,
-                        ):
-                            ar_url = detail_candidate
-                    ar_file = str(ar.get("original_file") or "").strip() or None
-                    ar_mime = str(ar.get("original_media_type") or "").strip() or None
-                    if ar_url and ar_url not in seen_att_urls:
-                        seen_att_urls.add(ar_url)
-                        attachments_list.append(
-                            {
-                                "url": ar_url,
-                                "name": ar_file,
-                                "media_type": ar_mime,
-                            }
-                        )
+            _extract_source_items_from_store(
+                conn,
+                primary_objs,
+                source_id,
+                content_xpath,
+                max_items_per_source,
+                items,
+                seen_resource_keys,
+                "wlh",
+            )
+            if len(items) < max_items_per_source:
+                has_backup = (
+                    conn.execute(
+                        "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'wlh_samples_backup'"
+                    ).fetchone()
+                    is not None
+                )
+                if has_backup:
+                    _extract_source_items_from_store(
+                        conn,
+                        primary_objs,
+                        source_id,
+                        content_xpath,
+                        max_items_per_source,
+                        items,
+                        seen_resource_keys,
+                        "wlh_samples_backup",
+                    )
 
-                attachment_url: str | None = (
-                    attachments_list[0]["url"] if attachments_list else None
-                )
-                original_file: str | None = (
-                    attachments_list[0]["name"] if attachments_list else None
-                )
-                original_media_type: str | None = (
-                    attachments_list[0]["media_type"] if attachments_list else None
-                )
-
-                raw_payload = ""
-                inputs_ref = primary.get("inputs_ref")
-                if isinstance(inputs_ref, str) and inputs_ref:
+            if (
+                len(items) < max_items_per_source
+                and prod_db_url
+                and (prod_db_url != target_db_url or prod_bucket != target_bucket)
+            ):
+                if fallback_conn is None:
                     try:
-                        inputs_raw: Any = json.loads(
-                            objs.get(inputs_ref).decode("utf-8", errors="replace")
+                        fallback_conn = stack.enter_context(
+                            psycopg.Connection[dict[str, Any]].connect(
+                                prod_db_url, row_factory=dict_row
+                            )
                         )
-                        inputs_list: list[Any] = []
-                        if isinstance(inputs_raw, dict):
-                            raw_in = cast(dict[str, Any], inputs_raw).get("inputs")
-                            if isinstance(raw_in, list):
-                                inputs_list = cast(list[Any], raw_in)
-                        elif isinstance(inputs_raw, list):
-                            inputs_list = cast(list[Any], inputs_raw)
-
-                        for inp_obj in inputs_list:
-                            if not isinstance(inp_obj, dict):
-                                continue
-                            inp_map = cast(dict[str, Any], inp_obj)
-                            acq_id = inp_map.get("acquisition_id")
-                            arch_ref = inp_map.get("archive_ref")
-                            inp_charset = (
-                                str(inp_map.get("charset") or "").strip() or None
-                            )
-                            acq_row = (
-                                conn.execute(
-                                    """
-                                    SELECT COALESCE(actual_url, request_url) AS url, mime_type, archive_ref
-                                    FROM wlh.acquisition
-                                    WHERE id = %s
-                                    """,
-                                    (acq_id,),
-                                ).fetchone()
-                                if acq_id
-                                else None
-                            )
-                            mime = (
-                                str(acq_row["mime_type"])
-                                if acq_row and acq_row.get("mime_type")
-                                else None
-                            )
-                            acq_url = (
-                                str(acq_row["url"])
-                                if acq_row and acq_row.get("url")
-                                else ""
-                            )
-                            target_ref = (
-                                arch_ref
-                                if isinstance(arch_ref, str) and arch_ref
-                                else (
-                                    str(acq_row["archive_ref"])
-                                    if acq_row and acq_row.get("archive_ref")
-                                    else None
-                                )
-                            )
-                            if not original_media_type and mime:
-                                original_media_type = mime
-                            if (
-                                acq_url
-                                and acq_url not in seen_att_urls
-                                and re.search(
-                                    r"(?:\.(?:pdf|docx?|xlsx?|zip)(?:\?|$)|/UCMServer/TAND\d+)",
-                                    acq_url,
-                                    flags=re.I,
-                                )
-                            ):
-                                seen_att_urls.add(acq_url)
-                                attachments_list.append(
-                                    {
-                                        "url": acq_url,
-                                        "name": Path(acq_url.split("?")[0]).name or None,
-                                        "media_type": mime,
-                                    }
-                                )
-                                if not attachment_url:
-                                    attachment_url = acq_url
-
-                            if target_ref and (
-                                len(raw_payload) < 20
-                                or (
-                                    raw_payload.lstrip().startswith("{")
-                                    and not (mime or "").lower().endswith("json")
-                                )
-                            ):
-                                raw_bytes = objs.get(target_ref)
-                                candidate = _extract_payload_snippet(
-                                    raw_bytes, mime, content_xpath, inp_charset
-                                )
-                                if len(candidate) >= 20:
-                                    raw_payload = candidate
+                        try:
+                            fallback_objs = _make_objects_for_bucket(prod_bucket)
+                        except Exception:
+                            fallback_objs = primary_objs
                     except Exception:
-                        raw_payload = ""
-
-                detail_url_val = str(primary.get("detail_url") or "").strip()
-                att_url_val = attachment_url.strip() if attachment_url else None
-
-                combined_check = " ".join(
-                    [
-                        detail_url_val,
-                        att_url_val or "",
-                        str(primary.get("title") or ""),
-                        md_text,
-                    ]
-                )
-                if (
-                    any(bad in combined_check for bad in FORBIDDEN_PLACEHOLDERS)
-                    or "127.0.0.1" in combined_check
-                    or "[::1]" in combined_check
-                    or "localhost" in combined_check
-                ):
-                    continue
-
-                items.append(
-                    {
-                        "detail_url": detail_url_val,
-                        "attachment_url": att_url_val,
-                        "original_file": original_file,
-                        "original_media_type": original_media_type,
-                        "attachments": attachments_list,
-                        "raw_payload": _truncate_payload_aligned(
-                            raw_payload, md_text, 1500
-                        ),
-                        "markdown": md_text[:4000],
-                        "title": primary.get("title"),
-                        "doc_number": primary.get("doc_number"),
-                        "issuer": primary.get("issuer"),
-                        "published_at": primary.get("published_at"),
-                    }
-                )
+                        fallback_conn = False
+                if fallback_conn and fallback_objs is not None:
+                    _extract_source_items_from_store(
+                        fallback_conn,
+                        fallback_objs,
+                        source_id,
+                        content_xpath,
+                        max_items_per_source,
+                        items,
+                        seen_resource_keys,
+                    )
 
             existing_items = existing_items_map.get(source_id, [])
             if len(items) < len(existing_items):
