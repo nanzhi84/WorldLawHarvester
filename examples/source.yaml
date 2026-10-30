@@ -1,44 +1,52 @@
-# 来源地图：docs/reference/尽职调查核验入口地图.md#dd-499
+# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-499
 id: dd-499
-adapter: federal_register
-adapter_options:
-  per_page: 10
-  max_pages: 1
-  conditions:
-    type:
-    - RULE
-entry_urls:
-- https://www.federalregister.gov/api/v1
-allowed_hosts:
-- www.federalregister.gov
-- www.govinfo.gov
-host_path_scopes:
-  www.federalregister.gov:
-  - /api/v1
-  - /documents/full_text/xml
-  www.govinfo.gov:
-  - /content/pkg
-archive_approved: true
-scope: 美国联邦公报（Federal Register）公开 API 的最终规则文档：列表元数据、full_text XML 正文与 GPO PDF 原件；保留官方来源署名，有界样本不代表全量。
-robots: true
-recheck_seconds: 604800
-concurrency: 2
-delay: 0.5
-budget:
-  requests: 100
-  seconds: 600
-  response_bytes: 134217728
-  documents: 10
-fetch:
-  mode: http
+scheduler:
+  scope: 美国联邦公报（Federal Register）公开 API 的最终规则文档：列表元数据、full_text XML 正文与 GPO PDF 原件；保留官方来源署名，有界样本不代表全量。
+  entry_urls:
+  - https://www.federalregister.gov/api/v1
+  allowed_hosts:
+  - www.federalregister.gov
+  - www.govinfo.gov
+  host_path_scopes:
+    www.federalregister.gov:
+    - /api/v1
+    - /documents/full_text/xml
+    www.govinfo.gov:
+    - /content/pkg
   max_depth: 1
+  concurrency: 2
+  recheck_seconds: 604800
+  budget:
+    requests: 100
+    documents: 10
+    seconds: 600
+    response_bytes: 134217728
+fetcher:
+  mode: http
+  delay: 0.5
   page_timeout_ms: 120000
-metadata:
-  source_name: Federal Register (federalregister.gov)
-  document_type: 法律法规
-  language: en
-  jurisdiction: US
-ocr:
-  languages: eng
-  dpi: 96
-  engine: br-ocr-v1
+  robots: true
+processor:
+  parser:
+    type: json
+    options:
+      per_page: 10
+      max_pages: 1
+      conditions:
+        type:
+        - RULE
+    transforms:
+    - gpo_xml_to_markdown
+  extractor:
+    ocr:
+      engine: br-ocr-v1
+      languages: eng
+      dpi: 96
+cleaners: {}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: Federal Register (federalregister.gov)
+    document_type: 法律法规
+    language: en
+    jurisdiction: US

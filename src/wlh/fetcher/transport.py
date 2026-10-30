@@ -343,10 +343,18 @@ class Transport:
     async def close(self) -> None:
         if self.session is not None:
             await self.session.close()
+            self.session = None
         if self.ephemeral_proxy is not None:
             await self.ephemeral_proxy.close()
             self.ephemeral_proxy = None
             self.proxy_url = None
+
+    async def __aenter__(self) -> Transport:
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        await self.close()
 
     async def paced(self) -> None:
         f_cfg = _fetcher_cfg(self.config)
@@ -457,7 +465,21 @@ class Transport:
                                     actual_url=str(response.url),
                                 )
                     except aiohttp.ClientPayloadError:
-                        if 200 <= response.status < 300 and bytes(body[:4]) == b"PK\x03\x04":
+                        ext_quirks = (
+                            cast(
+                                dict[str, Any],
+                                cast(dict[str, Any], self.config.get("processor") or {}).get(
+                                    "extractor"
+                                )
+                                or {},
+                            ).get("quirks")
+                            or ("zip_salvage",)
+                        )
+                        if (
+                            200 <= response.status < 300
+                            and bytes(body[:4]) == b"PK\x03\x04"
+                            and "zip_salvage" in ext_quirks
+                        ):
                             from wlh.processor.extractors.quirks.zip_salvage import (
                                 salvage_zip_prefix,
                             )

@@ -28,7 +28,11 @@ from wlh.processor.extractors.quirks.vi_tcvn3 import (
     rtf_bytes_to_tcvn3_raw,
     rtf_uses_tcvn3,
 )
-from wlh.processor.extractors.quirks.zip_salvage import safe_member, salvage_zip_prefix
+from wlh.processor.extractors.quirks.zip_salvage import (
+    filter_redundant_zip_members,
+    safe_member,
+    salvage_zip_prefix,
+)
 
 OFFICE_CONTRACT = "wlh.office.v2"
 OFFICE_KINDS = {"doc", "docx", "rtf", "xls", "xlsx"}
@@ -335,25 +339,23 @@ def extract_docx(path: str | Path) -> str:
     return value + "\n"
 
 
-def unpack_zip(path: str | Path, folder: str | Path, max_bytes: int) -> list[dict[str, Any]]:
+def unpack_zip(
+    path: str | Path,
+    folder: str | Path,
+    max_bytes: int,
+    *,
+    quirks: Sequence[str] = ("zip_salvage",),
+) -> list[dict[str, Any]]:
     """Inner real documents with lineage paths; never hand the outer container to LibreOffice."""
     members: list[dict[str, Any]] = []
     try:
         with zipfile.ZipFile(path) as archive:
             raw_infos = [i for i in archive.infolist() if not i.is_dir()]
-            has_json_member = any(
-                (sm := safe_member(i.filename)) is not None and sm.lower().endswith(".json")
-                for i in raw_infos
+            infos = (
+                filter_redundant_zip_members(raw_infos)
+                if "zip_salvage" in quirks
+                else raw_infos
             )
-            infos = [
-                i
-                for i in raw_infos
-                if not (
-                    has_json_member
-                    and (sm := safe_member(i.filename)) is not None
-                    and sm.upper().endswith(".PDF")
-                )
-            ]
             if len(infos) > MAX_ZIP_MEMBERS:
                 raise WlhError("zip_member_limit_exceeded")
             if sum(i.file_size for i in infos) > max_bytes:
@@ -364,8 +366,6 @@ def unpack_zip(path: str | Path, folder: str | Path, max_bytes: int) -> list[dic
                 if name is None:
                     raise WlhError("zip_member_path_invalid")
                 if name.startswith("__MACOSX/") or Path(name).name.startswith("._"):
-                    continue
-                if has_json_member and name.upper().endswith(".PDF"):
                     continue
                 with archive.open(info) as stream:
                     data = stream.read(max_bytes - total + 1)

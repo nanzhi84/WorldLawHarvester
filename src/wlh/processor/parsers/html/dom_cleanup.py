@@ -33,17 +33,86 @@ DETAIL_FIELDS = {
 }
 
 
+DEFAULT_EXCLUDE_CONTENT_XPATHS: tuple[str, ...] = (
+    './/div[contains(@class, "col-md-4") and following-sibling::div[contains(@class, "col-md-8")]//div[contains(@class, "book")]]',
+    './/*[@type="RelatedNewsBox" or @data-controller="legislationContents" '
+    'or @id="xgxw" or @id="history-tab" or @id="related-tab" or @id="language-switcher" '
+    'or contains(@class, "extend_font") or contains(@class, "m3page_funs") '
+    'or contains(@class, "share_icon") or contains(@class, "zrbj") '
+    'or contains(@class, "xgxw") or contains(@class, "xg-list") '
+    'or contains(@class, "hmc4ChgBtn") or contains(@class, "eyd-page-header__share") '
+    'or contains(@class, "eyd-page-anchors") or contains(@class, "eyd-related-pages") '
+    'or contains(@class, "eyd-breadcrumb") or contains(@class, "eyd-side-navigation") '
+    'or contains(@class, "target-hidden") or contains(@class, "document-tip") '
+    'or contains(@class, "tooltip-button") or contains(@class, "box-commen") '
+    'or contains(@class, "text-gopy") or contains(@class, "gopy") '
+    'or contains(@class, "gem-c-print-link") or contains(@class, "skip-links") '
+    'or contains(@class, "to-the-top") or contains(@class, "breadcrumb")]',
+    './/*[contains(@class, "hmc4Table")]//table[count(.//tr) <= 1]',
+)
+
+DEFAULT_ATTACHMENT_EXCLUDE_XPATHS: tuple[str, ...] = (
+    'ancestor::*[@id="vblienquan" or contains(@class, "vblienquan") or contains(@class, "Side_Links")]',
+)
+
+DEFAULT_ATTACHMENT_TITLE_XPATH = (
+    "preceding-sibling::*[contains(@class, 'file_name')][1] "
+    "| ../preceding-sibling::*[contains(@class, 'file_name')][1]"
+)
+
+_ATTACHMENT_TITLE_SUFFIX_RE = re.compile(
+    r"\s*[(（][^()（）]*(?:檔案下載|另開新視窗|file download|opens in new window)[^()（）]*[)）]\s*$",
+    re.I,
+)
+
+
+def clean_attachment_title_attr(
+    raw_title: str, extra_strip_regexes: Sequence[str] = ()
+) -> str:
+    """Strip common download/new-window suffixes and configured title_strip_regexes."""
+    cleaned = _ATTACHMENT_TITLE_SUFFIX_RE.sub("", raw_title.strip()).strip()
+    for pat in extra_strip_regexes:
+        if pat:
+            cleaned = re.sub(pat, "", cleaned).strip()
+    return cleaned
+
+
+def _remove_preserving_tail(el: Any) -> None:
+    parent = el.getparent()
+    if parent is None:
+        return
+    if el.tail:
+        prev = el.getprevious()
+        if prev is not None:
+            prev.tail = (prev.tail or "") + el.tail
+        else:
+            parent.text = (parent.text or "") + el.tail
+    parent.remove(el)
+
+
 def clean_site_dom(
     node: Any,
     exclude_xpaths: Sequence[str] = (),
     dom_transforms: Sequence[str] = (),
+    *,
+    include_defaults: bool = False,
 ) -> Any:
     """Apply declarative DOM transforms and remove nodes matching ``exclude_xpaths``."""
     if node is None:
         return node
     if "inline_script_cell_restore" in dom_transforms:
         restore_inline_script_cells(node)
-    for xp in exclude_xpaths:
+    if include_defaults:
+        for el in list(node.xpath(".//*[@style]")):
+            st = (el.get("style") or "").lower()
+            if re.search(r"display\s*:\s*none|visibility\s*:\s*hidden", st):
+                _remove_preserving_tail(el)
+    all_xpaths = (
+        (*DEFAULT_EXCLUDE_CONTENT_XPATHS, *exclude_xpaths)
+        if include_defaults
+        else tuple(exclude_xpaths)
+    )
+    for xp in all_xpaths:
         try:
             matched = node.xpath(xp)
         except Exception:
@@ -53,9 +122,7 @@ def clean_site_dom(
         for item in list(cast(list[Any], matched)):
             if item is node or not hasattr(item, "getparent"):
                 continue
-            parent = item.getparent()
-            if parent is not None:
-                parent.remove(item)
+            _remove_preserving_tail(item)
     return node
 
 
@@ -171,7 +238,11 @@ def verify_detail_fields(
 
 
 __all__ = [
+    "DEFAULT_ATTACHMENT_EXCLUDE_XPATHS",
+    "DEFAULT_ATTACHMENT_TITLE_XPATH",
+    "DEFAULT_EXCLUDE_CONTENT_XPATHS",
     "DETAIL_FIELDS",
+    "clean_attachment_title_attr",
     "clean_site_dom",
     "court_id",
     "next_page_url",

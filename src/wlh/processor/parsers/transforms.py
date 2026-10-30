@@ -17,10 +17,9 @@ import lxml.etree as _etree  # type: ignore[import-untyped]
 
 from wlh.cleaners.dates import (
     extract_taiwan_law_dates_and_meta,
-    infer_missing_dates,
     parse_japanese_date,
 )
-from wlh.cleaners.text_cleaner import compact, enrich_bare_title
+from wlh.cleaners.text_cleaner import compact
 from wlh.config import PARSER_TRANSFORMS
 from wlh.core import WlhError
 
@@ -270,50 +269,10 @@ def reconcile_result_range(
     return total, start, end
 
 
-def apply_moj_law_dates_and_meta(
-    tree: Any,
-    markdown: str,
-    extracted_fields: dict[str, str | None],
-    dates: dict[str, str | None],
-    title: str,
-    defaults: Mapping[str, Any],
-) -> tuple[str, dict[str, str | None], dict[str, str | None]]:
-    """Enrich legislative history dates, status, issuer, and bare titles."""
-    body_text = compact("".join(cast(list[str], tree.itertext()))) if tree is not None else ""
-    tw_meta = extract_taiwan_law_dates_and_meta(f"{body_text}\n{markdown}")
-    for d_key in ("published_at", "effective_at", "expired_at"):
-        if not dates.get(d_key) and tw_meta.get(d_key):
-            dates[d_key] = tw_meta[d_key]
-    if tw_meta.get("status") == "废止":
-        extracted_fields["status"] = "废止"
-    elif not extracted_fields.get("status") and tw_meta.get("status"):
-        extracted_fields["status"] = tw_meta["status"]
-    if not extracted_fields.get("issuer") and tw_meta.get("issuer"):
-        extracted_fields["issuer"] = tw_meta["issuer"]
-
-    pub_date, eff_date, exp_date = infer_missing_dates(
-        tree,
-        markdown,
-        dates.get("published_at"),
-        dates.get("effective_at"),
-        dates.get("expired_at"),
-        extracted_fields.get("document_number"),
-    )
-    dates["published_at"] = pub_date
-    dates["effective_at"] = eff_date
-    dates["expired_at"] = exp_date
-
-    title = (
-        enrich_bare_title(
-            title,
-            markdown,
-            extracted_fields.get("document_number"),
-            extracted_fields.get("issuer") or defaults.get("issuer"),
-            dates.get("published_at"),
-        )
-        or title
-    )
-    return title, extracted_fields, dates
+def apply_moj_law_dates_and_meta(text: str) -> str | None:
+    """Extract normalized effective or published date string from MOJ legislative history text."""
+    meta = extract_taiwan_law_dates_and_meta(text)
+    return meta.get("effective_at") or meta.get("published_at")
 
 
 TRANSFORMS: dict[str, Callable[..., Any]] = {

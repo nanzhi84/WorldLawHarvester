@@ -97,7 +97,13 @@ def extract(
             raise WlhError("zip_nesting_limit_exceeded")
         folder = Path(path).with_name(Path(path).name + "-members")
         folder.mkdir()
-        members = unpack_zip(path, folder, job["max_bytes"])
+        raw_quirks = parser_cfg.get("quirks")
+        quirks: Sequence[str] = (
+            [str(x) for x in cast(Sequence[Any], raw_quirks) if x]
+            if isinstance(raw_quirks, Sequence) and not isinstance(raw_quirks, str) and raw_quirks
+            else ("zip_salvage",)
+        )
+        members = unpack_zip(path, folder, job["max_bytes"], quirks=quirks)
         parts: list[str] = []
         infos: list[dict[str, Any]] = []
         reports: list[dict[str, Any]] = []
