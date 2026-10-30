@@ -66,7 +66,7 @@ def _collect(
     with source_server(routes, ["www.nta.go.jp"]) as (origin, requests):
         config = replay_config("dd-520", origin, directory)
         cfg: dict[str, Any] = yaml.safe_load(config.read_text())
-        cfg["budget"].update(requests=12, documents=4, seconds=90)
+        cfg["scheduler"]["budget"].update(requests=12, documents=4, seconds=90)
         config.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
         report, rows = collect_artifact("dd-520", config, env, name, requests)
         artifact = ARTIFACTS / name

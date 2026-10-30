@@ -62,30 +62,37 @@ class TestHttpAcquisitionAndOfflineReplay:
             source_yaml.write_text(
                 f"""
 id: dd-901
-adapter: web
-archive_approved: true
-scope: "Redirect and offline reparse test"
-robots: true
-entry_urls:
-  - "http://127.0.0.1:{port}/laws/old-entry"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/laws/"
-metadata:
-  source_name: "Test Legal Portal"
-  document_type: "法律法规"
-  language: "en"
-  jurisdiction: "US"
-documents:
-  detail_url_patterns:
-    - "^http://127\\\\.0\\\\.0\\\\.1:{port}/laws/final-act$"
-  detail_body: "always"
+scheduler:
+  scope: "Redirect and offline reparse test"
+  entry_urls:
+    - "http://127.0.0.1:{port}/laws/old-entry"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/laws/"
+fetcher:
+  mode: http
+  robots: true
+processor:
+  parser:
+    type: html
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{port}/laws/final-act$"
+      detail_body: "always"
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "Test Legal Portal"
+    document_type: "法律法规"
+    language: "en"
+    jurisdiction: "US"
 """.strip(),
                 encoding="utf-8",
             )
 
-            from wlh.engine.runs import execute_run, prepare_run
+            from wlh.scheduler.runs import execute_run, prepare_run
 
             collect_run_id = prepare_run(source_yaml, "collect")
             collect_res = execute_run(collect_run_id)

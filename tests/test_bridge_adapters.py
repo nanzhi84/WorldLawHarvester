@@ -19,14 +19,14 @@ from .bridge_fixture_support import (
 
 class TestStructuredXmlAndBridgeAdapters:
     @pytest.mark.parametrize(
-        ("source_id", "adapter_name", "entry_path", "expected_doc_type", "expected_substr"),
+        ("source_id", "parser_type", "entry_path", "expected_doc_type", "expected_substr"),
         [
-            ("dd-910", "structured_xml", "/xml/akn-act-2026.xml", "法律法规", "2026 c. 15"),
-            ("dd-911", "worldwidelaw_bridge", "/wwl/congbao-list.html", "法律法规", "55/2026/NĐ-CP"),
-            ("dd-912", "juriscraper_bridge", "/juriscraper/ca1-opinions.json", "案例", "25-1001"),
-            ("dd-913", "oldp_bridge", "/oldp/bgh-cases.html", "案例", "VIII ZR 12/25"),
-            ("dd-914", "opencaselaw_bridge", "/opencaselaw/ch-bger.html", "案例", "4A_101/2026"),
-            ("dd-915", "openstates_bridge", "/openstates/bills.json", "法律法规", "HR 4200"),
+            ("dd-910", "xml", "/xml/akn-act-2026.xml", "法律法规", "2026 c. 15"),
+            ("dd-911", "html", "/wwl/congbao-list.html", "法律法规", "55/2026/NĐ-CP"),
+            ("dd-912", "json", "/juriscraper/ca1-opinions.json", "案例", "25-1001"),
+            ("dd-913", "json", "/oldp/bgh-cases.html", "案例", "VIII ZR 12/25"),
+            ("dd-914", "json", "/opencaselaw/ch-bger.html", "案例", "4A_101/2026"),
+            ("dd-915", "json", "/openstates/bills.json", "法律法规", "HR 4200"),
         ],
     )
     def test_collect_and_offline_reparse_projects_expected_document_rows(
@@ -35,45 +35,69 @@ class TestStructuredXmlAndBridgeAdapters:
         bridge_fixture_servers: tuple[int, int],
         tmp_path: Path,
         source_id: str,
-        adapter_name: str,
+        parser_type: str,
         entry_path: str,
         expected_doc_type: str,
         expected_substr: str,
     ) -> None:
-        """Each structured XML and bridge adapter collects into `wlh.document_row` and replays offline without network."""
+        """Each structured XML and bridge parser collects into `wlh.document_row` and replays offline without network."""
         port, _ = bridge_fixture_servers
         _BridgeFixtureHandler.active_source_id = source_id
 
         try:
             prefix = "/" + entry_path.strip("/").split("/")[0] + "/"
+            docs_block = (
+                """
+    documents:
+      detail_url_patterns:
+        - "/wwl/detail/"
+      fields:
+        document_number:
+          xpath: '//span[@class="doc-number"]'
+        issuer:
+          xpath: '//span[@class="issuer"]'
+        published_at:
+          xpath: '//span[@class="published-at"]'
+""".rstrip()
+                if source_id == "dd-911"
+                else ""
+            )
             source_yaml = tmp_path / f"{source_id}.yaml"
             source_yaml.write_text(
                 f"""
 id: {source_id}
-adapter: {adapter_name}
-archive_approved: true
-scope: "Adapter contract test for {adapter_name}"
-entry_urls:
-  - "http://127.0.0.1:{port}{entry_path}"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "{prefix}"
-metadata:
-  source_name: "Test {adapter_name}"
-  document_type: "{expected_doc_type}"
-  language: "en"
-  jurisdiction: "INTL"
+scheduler:
+  scope: "Parser contract test for {parser_type} ({source_id})"
+  entry_urls:
+    - "http://127.0.0.1:{port}{entry_path}"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "{prefix}"
+fetcher:
+  mode: http
+  delay: 0.0
+processor:
+  parser:
+    type: {parser_type}{docs_block}
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "Test {parser_type}"
+    document_type: "{expected_doc_type}"
+    language: "en"
+    jurisdiction: "INTL"
 """.strip(),
                 encoding="utf-8",
             )
 
-            from wlh.engine.runs import execute_run, prepare_run
-            from wlh.projections.canonical import project_canonical
+            from wlh.scheduler.runs import execute_run, prepare_run
+            from wlh.storage.snapshots import project_canonical
 
             c_run = prepare_run(source_yaml, "collect")
             c_res = execute_run(c_run)
-            assert c_res["status"] == "complete", f"{adapter_name} collect failed: {c_res}"
+            assert c_res["status"] == "complete", f"{parser_type} collect failed: {c_res}"
 
             with psycopg.connect(initialized_db["WLH_DATABASE_URL"]) as conn:
                 from psycopg.rows import dict_row
@@ -91,7 +115,7 @@ metadata:
                         """,
                         (source_id,),
                     ).fetchall()
-                    assert len(rows) >= 1, f"Expected document_row for {adapter_name}"
+                    assert len(rows) >= 1, f"Expected document_row for {parser_type}"
                     projected = project_canonical(rows[0])
                     assert projected["doc_type"] == expected_doc_type
                     assert (
@@ -101,7 +125,7 @@ metadata:
 
             rp_run = prepare_run(source_yaml, "reparse")
             rp_res = execute_run(rp_run)
-            assert rp_res["status"] == "complete", f"{adapter_name} reparse failed: {rp_res}"
+            assert rp_res["status"] == "complete", f"{parser_type} reparse failed: {rp_res}"
             assert rp_res["report"]["external_requests"] == 0
         finally:
             _BridgeFixtureHandler.active_source_id = ""
@@ -181,35 +205,40 @@ metadata:
             source_yaml.write_text(
                 f"""
 id: dd-557
-adapter: structured_xml
-archive_approved: true
-scope: "USLM Public Law RSS discovery and XML parsing contract test"
-entry_urls:
-  - "http://127.0.0.1:{port}/rss/plaw.xml"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/rss/"
-  - "/content/pkg/"
-delay: 0.0
-fetch:
-  mode: http
+scheduler:
+  scope: "USLM Public Law RSS discovery and XML parsing contract test"
+  entry_urls:
+    - "http://127.0.0.1:{port}/rss/plaw.xml"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/rss/"
+    - "/content/pkg/"
   max_depth: 1
-documents:
-  detail_url_patterns:
-    - "^http://127\\\\.0\\\\.0\\\\.1:{port}/content/pkg/PLAW-[^/]+/uslm/PLAW-[^/]+\\\\.xml$"
-metadata:
-  source_name: "GovInfo Public Laws"
-  document_type: "法律法规"
-  language: "en"
-  jurisdiction: "US"
+fetcher:
+  mode: http
+  delay: 0.0
+processor:
+  parser:
+    type: xml
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{port}/content/pkg/PLAW-[^/]+/uslm/PLAW-[^/]+\\\\.xml$"
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "GovInfo Public Laws"
+    document_type: "法律法规"
+    language: "en"
+    jurisdiction: "US"
 """.strip(),
                 encoding="utf-8",
             )
 
-            from wlh.engine.objects import Objects
-            from wlh.engine.runs import execute_run, prepare_run
-            from wlh.projections.canonical import project_canonical
+            from wlh.scheduler.runs import execute_run, prepare_run
+            from wlh.storage.cas import Objects
+            from wlh.storage.snapshots import project_canonical
 
             c_run = prepare_run(source_yaml, "collect")
             c_res = execute_run(c_run)

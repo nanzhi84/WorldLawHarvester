@@ -18,14 +18,31 @@ from .source_replay_support import (
 
 def _source(path: Path, origin: str, source_id: str, url_path: str, language: str) -> Path:
     config: dict[str, Any] = {
-        "id": source_id, "adapter": "web", "archive_approved": True,
-        "scope": "Isolated official PDF layout acceptance; excerpt boundaries explicitly documented in fixture provenance",
-        "entry_urls": [origin + url_path], "allowed_hosts": ["127.0.0.1"],
-        "allowed_path_prefixes": ["/"], "robots": False, "delay": 0,
-        "fetch": {"mode": "http", "max_depth": 1, "retries": 0},
-        "budget": {"requests": 4, "documents": 2, "seconds": 90, "response_bytes": 10485760},
-        "metadata": {"source_name": "Official legal document layout fixture", "document_type": "税务资料", "language": language},
-        "documents": {"detail_url_patterns": [r"\.pdf$"], "require_complete_text": True},
+        "id": source_id,
+        "scheduler": {
+            "scope": "Isolated official PDF layout acceptance; excerpt boundaries explicitly documented in fixture provenance",
+            "entry_urls": [origin + url_path],
+            "allowed_hosts": ["127.0.0.1"],
+            "allowed_path_prefixes": ["/"],
+            "max_depth": 1,
+            "budget": {"requests": 4, "documents": 2, "seconds": 90, "response_bytes": 10485760},
+        },
+        "fetcher": {"mode": "http", "delay": 0, "retries": 0, "robots": False},
+        "processor": {
+            "parser": {
+                "type": "html",
+                "documents": {"detail_url_patterns": [r"\.pdf$"], "require_complete_text": True},
+            }
+        },
+        "cleaners": {"require_complete_text": True},
+        "storage": {
+            "archive_approved": True,
+            "metadata": {
+                "source_name": "Official legal document layout fixture",
+                "document_type": "税务资料",
+                "language": language,
+            },
+        },
     }
     file = path / f"{source_id}.yaml"
     file.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False))

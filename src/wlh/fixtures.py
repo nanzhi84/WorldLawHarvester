@@ -19,8 +19,9 @@ from urllib.parse import unquote, urljoin, urlsplit
 import lxml.etree as etree
 
 from wlh.core import WlhError, atomic_write
-from wlh.db import connect
-from wlh.engine.objects import Objects
+from wlh.processor.parsers import normalize_parser_config
+from wlh.storage.cas import Objects
+from wlh.storage.db import connect
 
 etree: Any
 
@@ -322,13 +323,15 @@ def export_source_fixture(
             raise WlhError("fixture_export_run_not_found")
 
         resolved_run_id: str = run_row["id"]
-        cfg: dict[str, Any] = dict(cast(Mapping[str, Any], run_row["config"] or {}))
+        cfg: dict[str, Any] = normalize_parser_config(
+            dict(cast(Mapping[str, Any], run_row["config"] or {}))
+        )
         if source_yaml is not None and Path(source_yaml).is_file():
             import yaml
 
             loaded = yaml.safe_load(Path(source_yaml).read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
-                cfg = dict(cast(Mapping[str, Any], loaded))
+                cfg = normalize_parser_config(dict(cast(Mapping[str, Any], loaded)))
 
         raw_obs_rows = c.execute(
             """

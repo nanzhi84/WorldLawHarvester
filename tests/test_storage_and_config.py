@@ -10,44 +10,42 @@ import pytest
 class TestSourceConfigValidation:
     def test_approved_in_scope_config_loads_successfully(self, tmp_path: Path) -> None:
         """A source configuration with archive approval and in-scope entry URLs loads cleanly."""
-        from wlh.config import ADAPTERS, load_file
+        from wlh.config import PARSER_TYPES, load_file
 
-        required_adapters = {
-            "web",
-            "federal_register",
-            "structured_xml",
-            "worldwidelaw_bridge",
-            "juriscraper_bridge",
-            "oldp_bridge",
-            "openstates_bridge",
-            "opencaselaw_bridge",
-        }
-        assert required_adapters.issubset(set(ADAPTERS))
+        required_parsers = {"html", "json", "xml"}
+        assert set(PARSER_TYPES) == required_parsers
 
         valid_yaml = tmp_path / "valid.yaml"
         valid_yaml.write_text(
             """
 id: dd-499
-adapter: federal_register
-archive_approved: true
-scope: "Federal Register API test scope"
-entry_urls:
-  - "https://www.federalregister.gov/api/v1/documents.json?per_page=2"
-allowed_hosts:
-  - "www.federalregister.gov"
-allowed_path_prefixes:
-  - "/api/v1/"
-metadata:
-  source_name: "Federal Register"
-  document_type: "法律法规"
-  language: "en"
-  jurisdiction: "US"
+scheduler:
+  scope: "Federal Register API test scope"
+  entry_urls:
+    - "https://www.federalregister.gov/api/v1/documents.json?per_page=2"
+  allowed_hosts:
+    - "www.federalregister.gov"
+  allowed_path_prefixes:
+    - "/api/v1/"
+fetcher:
+  mode: http
+processor:
+  parser:
+    type: json
+cleaners: {}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "Federal Register"
+    document_type: "法律法规"
+    language: "en"
+    jurisdiction: "US"
 """.strip(),
             encoding="utf-8",
         )
         cfg = load_file(valid_yaml)
         assert cfg.id == "dd-499"
-        assert cfg.adapter == "federal_register"
+        assert cfg.processor.parser.type == "json"
 
     def test_unapproved_or_out_of_scope_or_loopback_config_raises_validation_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -58,20 +56,27 @@ metadata:
 
         base_yaml = """
 id: dd-499
-adapter: federal_register
-archive_approved: true
-scope: "Federal Register API test scope"
-entry_urls:
-  - "https://www.federalregister.gov/api/v1/documents.json?per_page=2"
-allowed_hosts:
-  - "www.federalregister.gov"
-allowed_path_prefixes:
-  - "/api/v1/"
-metadata:
-  source_name: "Federal Register"
-  document_type: "法律法规"
-  language: "en"
-  jurisdiction: "US"
+scheduler:
+  scope: "Federal Register API test scope"
+  entry_urls:
+    - "https://www.federalregister.gov/api/v1/documents.json?per_page=2"
+  allowed_hosts:
+    - "www.federalregister.gov"
+  allowed_path_prefixes:
+    - "/api/v1/"
+fetcher:
+  mode: http
+processor:
+  parser:
+    type: json
+cleaners: {}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "Federal Register"
+    document_type: "法律法规"
+    language: "en"
+    jurisdiction: "US"
 """.strip()
 
         unapproved_yaml = tmp_path / "unapproved.yaml"
@@ -103,15 +108,22 @@ metadata:
         loopback_yaml.write_text(
             """
 id: dd-999
-adapter: web
-archive_approved: true
-scope: "Loopback test"
-entry_urls:
-  - "http://127.0.0.1:8000/laws/"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/laws/"
+scheduler:
+  scope: "Loopback test"
+  entry_urls:
+    - "http://127.0.0.1:8000/laws/"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/laws/"
+fetcher:
+  mode: http
+processor:
+  parser:
+    type: html
+cleaners: {}
+storage:
+  archive_approved: true
 """.strip(),
             encoding="utf-8",
         )
@@ -166,7 +178,7 @@ allowed_path_prefixes:
 
             cfg = load_file(yaml_path)
             assert cfg.id == yaml_path.stem
-            assert cfg.archive_approved is True
+            assert cfg.storage.archive_approved is True
             assert cfg.id in matrix_rows, f"{cfg.id} missing from source-adaptation-matrix.csv"
 
             row = matrix_rows[cfg.id]
@@ -174,11 +186,11 @@ allowed_path_prefixes:
                 part.strip()
                 for part in row["推荐适配器"].split("（")[0].split("(")[0].split("/")
             }
-            assert cfg.adapter in csv_adapters, (
-                f"{cfg.id} adapter mismatch between YAML ({cfg.adapter}) and CSV ({row['推荐适配器']})"
+            assert cfg.processor.parser.type in csv_adapters, (
+                f"{cfg.id} parser mismatch between YAML ({cfg.processor.parser.type}) and CSV ({row['推荐适配器']})"
             )
-            assert row["资料类型"] == cfg.metadata.document_type, (
-                f"{cfg.id} document_type mismatch between YAML ({cfg.metadata.document_type}) and CSV ({row['资料类型']})"
+            assert row["资料类型"] == cfg.storage.metadata.document_type, (
+                f"{cfg.id} document_type mismatch between YAML ({cfg.storage.metadata.document_type}) and CSV ({row['资料类型']})"
             )
             configured_ids.add(cfg.id)
 
@@ -284,21 +296,25 @@ allowed_path_prefixes:
                 continue
 
             # a) max_depth >= 1
-            assert cfg.fetch.max_depth >= 1, (
-                f"{cfg.id} must have fetch.max_depth >= 1 (single-page max_depth=0 forbidden)"
+            assert cfg.scheduler.max_depth >= 1, (
+                f"{cfg.id} must have scheduler.max_depth >= 1 (single-page max_depth=0 forbidden)"
             )
 
             # b) budget.documents >= 10
-            assert cfg.budget.documents >= 10, (
-                f"{cfg.id} must have budget.documents >= 10 (lowering default budget to 1 is forbidden)"
+            assert cfg.scheduler.budget.documents >= 10, (
+                f"{cfg.id} must have scheduler.budget.documents >= 10 (lowering default budget to 1 is forbidden)"
             )
 
             # c) attachment_url_pattern must match multiple distinct attachment filenames under allowed scope
-            att_pat = cfg.documents.attachment_url_pattern or ""
+            docs = cfg.processor.parser.documents
+            att_pat = docs.attachment_url_pattern or ""
             att_re = re.compile(att_pat, re.I)
             candidate_triplets: list[tuple[str, str, str]] = []
-            for host in cfg.allowed_hosts:
-                prefixes = cfg.host_path_scopes.get(host) or cfg.allowed_path_prefixes
+            for host in cfg.scheduler.allowed_hosts:
+                prefixes = (
+                    cfg.scheduler.host_path_scopes.get(host)
+                    or cfg.scheduler.allowed_path_prefixes
+                )
                 for prefix in prefixes:
                     base = f"https://{host}{prefix.rstrip('/')}"
                     candidate_triplets.append(
@@ -338,7 +354,8 @@ allowed_path_prefixes:
             )
 
             # d) entry_urls and detail_url_patterns invariants
-            for entry_url in cfg.entry_urls:
+            parser_type = cfg.processor.parser.type
+            for entry_url in cfg.scheduler.entry_urls:
                 entry_path = urlsplit(entry_url).path.lower()
                 assert not entry_path.endswith(forbidden_entry_exts), (
                     f"{cfg.id} entry_url {entry_url!r} must not point directly to a binary/document file"
@@ -346,33 +363,33 @@ allowed_path_prefixes:
                 assert not any(marker in entry_url for marker in single_item_markers), (
                     f"{cfg.id} entry_url {entry_url!r} contains a single-item marker"
                 )
-                if cfg.adapter in {"web", "worldwidelaw_bridge"}:
+                if parser_type == "html":
                     assert not att_re.search(entry_url), (
                         f"{cfg.id} entry_url {entry_url!r} must not match attachment_url_pattern"
                     )
 
-            if cfg.adapter in {"web", "worldwidelaw_bridge"}:
+            if parser_type == "html":
                 assert (
-                    bool(cfg.documents.detail_url_patterns)
-                    or cfg.documents.detail_body == "never"
+                    bool(docs.detail_url_patterns)
+                    or docs.detail_body == "never"
                 ), (
-                    f"{cfg.id} ({cfg.adapter}) must declare detail_url_patterns unless detail_body == 'never'"
+                    f"{cfg.id} ({parser_type}) must declare detail_url_patterns unless detail_body == 'never'"
                 )
 
-            if cfg.documents.detail_url_patterns:
-                for entry_url in cfg.entry_urls:
-                    for pat in cfg.documents.detail_url_patterns:
+            if docs.detail_url_patterns:
+                for entry_url in cfg.scheduler.entry_urls:
+                    for pat in docs.detail_url_patterns:
                         assert not re.search(pat, entry_url), (
                             f"{cfg.id} entry_url {entry_url!r} matches detail_url_pattern {pat!r} "
                             "(Entry-is-Detail shortcut is forbidden)"
                         )
 
             # e) No prefix in allowed_path_prefixes or host_path_scopes may lock onto a single file extension
-            all_prefixes = list(cfg.allowed_path_prefixes)
-            for host, scoped_prefixes in cfg.host_path_scopes.items():
-                if cfg.allowed_path_prefixes != ["/"]:
+            all_prefixes = list(cfg.scheduler.allowed_path_prefixes)
+            for host, scoped_prefixes in cfg.scheduler.host_path_scopes.items():
+                if cfg.scheduler.allowed_path_prefixes != ["/"]:
                     for prefix in scoped_prefixes:
-                        assert prefix in cfg.allowed_path_prefixes, (
+                        assert prefix in cfg.scheduler.allowed_path_prefixes, (
                             f"{cfg.id} host_path_scopes[{host!r}] prefix {prefix!r} must be present in allowed_path_prefixes"
                         )
                 all_prefixes.extend(scoped_prefixes)
@@ -381,23 +398,23 @@ allowed_path_prefixes:
                     f"{cfg.id} path prefix {prefix!r} locks onto a single file path"
                 )
 
-            # f) For any adapter where "max_pages" in adapter_options, assert max_pages >= 2
-            if "max_pages" in cfg.adapter_options:
-                assert int(cfg.adapter_options["max_pages"]) >= 2, (
-                    f"{cfg.id} adapter_options.max_pages must be >= 2"
+            # f) For any parser where "max_pages" in parser.options, assert max_pages >= 2
+            if "max_pages" in cfg.processor.parser.options:
+                assert int(cfg.processor.parser.options["max_pages"]) >= 2, (
+                    f"{cfg.id} processor.parser.options.max_pages must be >= 2"
                 )
 
             # g) content_xpath must not truncate multi-block content containers
-            if cfg.documents.content_xpath:
+            if docs.content_xpath:
                 assert not re.search(
                     r"/(?:div|p|section|article)\[\s*(?:[12]|position\(\)\s*(?:<=?\s*[12]|<\s*[123]|!=\s*3|=\s*[12])|last\(\))\s*\]\s*$",
-                    cfg.documents.content_xpath,
+                    docs.content_xpath,
                 ), (
-                    f"{cfg.id} content_xpath {cfg.documents.content_xpath!r} must not truncate multi-block content containers"
+                    f"{cfg.id} content_xpath {docs.content_xpath!r} must not truncate multi-block content containers"
                 )
 
             # h) content_xpath must never reference metadata attribute tables or outer layout/tab chrome
-            if cfg.documents.content_xpath:
+            if docs.content_xpath:
                 forbidden_xpath_tokens = (
                     '@id="thuoctinh"',
                     "@id='thuoctinh'",
@@ -408,13 +425,13 @@ allowed_path_prefixes:
                     "info-dt-l",
                 )
                 for bad_tok in forbidden_xpath_tokens:
-                    assert bad_tok not in cfg.documents.content_xpath, (
-                        f"{cfg.id} content_xpath {cfg.documents.content_xpath!r} must not reference "
+                    assert bad_tok not in docs.content_xpath, (
+                        f"{cfg.id} content_xpath {docs.content_xpath!r} must not reference "
                         f"metadata/layout chrome token {bad_tok!r}"
                     )
 
             # i) document_number regex must never match draft version labels like "Lần dự thảo 4"
-            doc_num_rule = cfg.documents.fields.get("document_number")
+            doc_num_rule = docs.fields.get("document_number")
             if doc_num_rule and doc_num_rule.regex:
                 assert not bool(re.search(doc_num_rule.regex, "Lần dự thảo 4", re.I)), (
                     f"{cfg.id} document_number regex {doc_num_rule.regex!r} must not match draft version labels"
@@ -437,21 +454,28 @@ allowed_path_prefixes:
 
         base_template = """
 id: dd-499
-adapter: federal_register
-archive_approved: true
-scope: "Federal Register API concurrency test"
-concurrency: {concurrency}
-entry_urls:
-  - "https://www.federalregister.gov/api/v1/documents.json?per_page=2"
-allowed_hosts:
-  - "www.federalregister.gov"
-allowed_path_prefixes:
-  - "/api/v1/"
-metadata:
-  source_name: "Federal Register"
-  document_type: "法律法规"
-  language: "en"
-  jurisdiction: "US"
+scheduler:
+  scope: "Federal Register API concurrency test"
+  concurrency: {concurrency}
+  entry_urls:
+    - "https://www.federalregister.gov/api/v1/documents.json?per_page=2"
+  allowed_hosts:
+    - "www.federalregister.gov"
+  allowed_path_prefixes:
+    - "/api/v1/"
+fetcher:
+  mode: http
+processor:
+  parser:
+    type: json
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "Federal Register"
+    document_type: "法律法规"
+    language: "en"
+    jurisdiction: "US"
 """.strip()
 
         for allowed_c in (12, 32):
@@ -461,7 +485,7 @@ metadata:
                 encoding="utf-8",
             )
             cfg = load_file(yaml_path)
-            assert cfg.concurrency == allowed_c
+            assert cfg.scheduler.concurrency == allowed_c
 
         for invalid_c in (0, 33):
             yaml_path = tmp_path / f"concurrency_{invalid_c}.yaml"

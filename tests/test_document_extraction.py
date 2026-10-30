@@ -15,7 +15,7 @@ class TestPdfExtractionAndOcrFallback:
         self, tmp_path: Path
     ) -> None:
         """A digital-born PDF with selectable text is extracted directly without triggering OCR."""
-        from wlh.extraction.pdf_scan import analyze, extract_pdf
+        from wlh.processor.extractors.pdf.scan_detector import analyze, extract_pdf
 
         native_pdf = make_native_pdf(
             tmp_path / "native.pdf",
@@ -49,7 +49,7 @@ class TestPdfExtractionAndOcrFallback:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A scanned PDF automatically falls back to local OCR when the remote OCR endpoint is unreachable."""
-        from wlh.extraction.pdf_scan import analyze, extract_pdf
+        from wlh.processor.extractors.pdf.scan_detector import analyze, extract_pdf
 
         monkeypatch.setenv("WLH_BR_OCR_URL", "http://127.0.0.1:59999/api/v1")
         scanned_pdf = make_scanned_pdf(
@@ -92,7 +92,7 @@ class TestPdfExtractionAndOcrFallback:
 
         import fitz  # type: ignore[import-untyped]
 
-        from wlh.extraction.pdf_scan import analyze, extract_pdf
+        from wlh.processor.extractors.pdf.scan_detector import analyze, extract_pdf
 
         fitz_mod: Any = fitz
         temp_doc = fitz_mod.open()
@@ -152,7 +152,7 @@ class TestPdfExtractionAndOcrFallback:
 
         import fitz  # type: ignore[import-untyped]
 
-        from wlh.extraction.pdf_scan import analyze
+        from wlh.processor.extractors.pdf.scan_detector import analyze
 
         fitz_mod: Any = fitz
         doc = fitz_mod.open()
@@ -205,7 +205,7 @@ class TestPdfExtractionAndOcrFallback:
 
         import fitz  # type: ignore[import-untyped]
 
-        from wlh.extraction.pdf_scan import analyze, extract_pdf
+        from wlh.processor.extractors.pdf.scan_detector import analyze, extract_pdf
 
         fitz_mod: Any = fitz
         temp_doc = fitz_mod.open()

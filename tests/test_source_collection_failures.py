@@ -30,31 +30,38 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             empty_yaml.write_text(
                 f"""
 id: dd-998
-adapter: web
-archive_approved: true
-scope: "Zero target foolproof guard contract test"
-entry_urls:
-  - "http://127.0.0.1:{port}/shenpan/gengduo/empty.html"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/shenpan/"
-delay: 0.0
-metadata:
-  source_name: "Empty List Test Source"
-  document_type: "案例"
-  language: "zh"
-  jurisdiction: "CN"
-documents:
-  detail_url_patterns:
-    - "^http://127\\\\.0\\\\.0\\\\.1:{port}/shenpan/xiangqing/\\\\d+\\\\.html$"
-  detail_body: always
-  content_xpath: '//div[@class="txt_txt"]'
+scheduler:
+  scope: "Zero target foolproof guard contract test"
+  entry_urls:
+    - "http://127.0.0.1:{port}/shenpan/gengduo/empty.html"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/shenpan/"
+fetcher:
+  mode: http
+  delay: 0.0
+processor:
+  parser:
+    type: html
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{port}/shenpan/xiangqing/\\\\d+\\\\.html$"
+      detail_body: always
+      content_xpath: '//div[@class="txt_txt"]'
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "Empty List Test Source"
+    document_type: "案例"
+    language: "zh"
+    jurisdiction: "CN"
 """.strip(),
                 encoding="utf-8",
             )
 
-            from wlh.engine.runs import execute_run, prepare_run
+            from wlh.scheduler.runs import execute_run, prepare_run
 
             c_run = prepare_run(empty_yaml, "collect")
             c_res = execute_run(c_run)
@@ -94,37 +101,42 @@ documents:
             sub503_yaml.write_text(
                 f"""
 id: dd-997
-adapter: web
-archive_approved: true
-robots: false
-scope: "Detail page subrequest 503 propagation E2E test"
-entry_urls:
-  - "http://127.0.0.1:{srv_port}/dt"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/dt"
-delay: 0.0
-fetch:
-  mode: rendered_dom
-  wait_until: load
+scheduler:
+  scope: "Detail page subrequest 503 propagation E2E test"
+  entry_urls:
+    - "http://127.0.0.1:{srv_port}/dt"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/dt"
   max_depth: 1
+fetcher:
+  mode: rendered_dom
+  robots: false
+  wait_until: load
+  delay: 0.0
   retries: 0
   page_timeout_ms: 15000
-metadata:
-  source_name: "Subrequest 503 Test"
-  document_type: "法律法规"
-  language: "vi"
-  jurisdiction: "VN"
-documents:
-  detail_url_patterns:
-    - "^http://127\\\\.0\\\\.0\\\\.1:{srv_port}/dt/[^/?#]+/\\\\d{{15,}}$"
-  detail_body: always
-  content_xpath: '//div[contains(@class, "info-dt-l")] | //div[@id="nav-home"]'
+processor:
+  parser:
+    type: html
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{srv_port}/dt/[^/?#]+/\\\\d{{15,}}$"
+      detail_body: always
+      content_xpath: '//div[contains(@class, "info-dt-l")] | //div[@id="nav-home"]'
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "Subrequest 503 Test"
+    document_type: "法律法规"
+    language: "vi"
+    jurisdiction: "VN"
 """.strip(),
                 encoding="utf-8",
             )
-            from wlh.engine.runs import execute_run, prepare_run
+            from wlh.scheduler.runs import execute_run, prepare_run
 
             run_id = prepare_run(sub503_yaml, "collect")
             res = execute_run(run_id)

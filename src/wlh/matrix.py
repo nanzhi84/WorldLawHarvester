@@ -26,6 +26,9 @@ TABLE_HEADER = (
 TABLE_DIVIDER = "| :--- | :---: | :--- | :---: | :--- | :---: | :--- |"
 
 KNOWN_ADAPTERS = (
+    "html",
+    "json",
+    "xml",
     "juriscraper_bridge",
     "opencaselaw_bridge",
     "worldwidelaw_bridge",

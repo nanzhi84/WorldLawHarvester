@@ -9,7 +9,7 @@ from typing import Any
 
 import psycopg
 
-from wlh.domain.delivery_quality import (
+from wlh.cleaners.delivery_quality import (
     verify_source_delivery,
 )
 from wlh.fixtures import FixtureRouter, export_source_fixture, load_fixture_manifest
@@ -122,41 +122,48 @@ class TestCasFixtureBundleExportAndReplay:
             source_yaml.write_text(
                 f"""
 id: dd-905
-adapter: web
-archive_approved: true
-scope: "CAS fixture bundle export and replay E2E test"
-entry_urls:
-  - "http://127.0.0.1:{origin_port}/laws/index.html"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/laws/"
-delay: 0.0
-metadata:
-  source_name: "Test Legislative Portal"
-  document_type: "法律法规"
-  language: "en"
-  jurisdiction: "INTL"
-documents:
-  detail_url_patterns:
-    - "^http://127\\\\.0\\\\.0\\\\.1:{origin_port}/laws/act-\\\\d+\\\\.html$"
-  detail_body: always
-  content_xpath: '//div[@class="law-body"]'
-  fields:
-    title:
-      xpath: '//h1[@class="doc-title"]'
-    document_number:
-      xpath: '//span[@class="doc-no"]'
-    issuer:
-      value: "Parliament"
-    published_at:
-      xpath: '//span[@class="pub-date"]'
-      regex: '\\d{{4}}-\\d{{2}}-\\d{{2}}'
+scheduler:
+  scope: "CAS fixture bundle export and replay E2E test"
+  entry_urls:
+    - "http://127.0.0.1:{origin_port}/laws/index.html"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/laws/"
+fetcher:
+  mode: http
+  delay: 0.0
+processor:
+  parser:
+    type: html
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{origin_port}/laws/act-\\\\d+\\\\.html$"
+      detail_body: always
+      content_xpath: '//div[@class="law-body"]'
+      fields:
+        title:
+          xpath: '//h1[@class="doc-title"]'
+        document_number:
+          xpath: '//span[@class="doc-no"]'
+        issuer:
+          value: "Parliament"
+        published_at:
+          xpath: '//span[@class="pub-date"]'
+          regex: '\\d{{4}}-\\d{{2}}-\\d{{2}}'
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "Test Legislative Portal"
+    document_type: "法律法规"
+    language: "en"
+    jurisdiction: "INTL"
 """.strip(),
                 encoding="utf-8",
             )
 
-            from wlh.engine.runs import execute_run, prepare_run
+            from wlh.scheduler.runs import execute_run, prepare_run
 
             c_run = prepare_run(source_yaml, "collect")
             c_res = execute_run(c_run)
@@ -228,7 +235,7 @@ documents:
         try:
             with psycopg.connect(initialized_db["WLH_DATABASE_URL"], autocommit=True) as conn:
                 conn.execute("DROP SCHEMA IF EXISTS wlh CASCADE")
-            from wlh.db import initialize
+            from wlh.storage.db import initialize
 
             initialize()
 
@@ -240,7 +247,7 @@ documents:
                 encoding="utf-8",
             )
 
-            from wlh.engine.runs import execute_run, prepare_run
+            from wlh.scheduler.runs import execute_run, prepare_run
 
             rc_run = prepare_run(replay_yaml, "collect")
             rc_res = execute_run(rc_run)

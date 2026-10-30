@@ -30,12 +30,12 @@ class TestStructuredXmlAndBridgeAdapters:
         import importlib
         import ssl
 
-        from wlh.adapters.web_fields import parse_date
         from wlh.config import load_file
-        from wlh.engine.objects import Objects
-        from wlh.engine.runs import execute_run, prepare_run
-        from wlh.engine.transport import Budget, Recorder, Transport
-        from wlh.projections.canonical import project_canonical
+        from wlh.fetcher.transport import Budget, Recorder, Transport
+        from wlh.processor.parsers.html.fields import parse_date
+        from wlh.scheduler.runs import execute_run, prepare_run
+        from wlh.storage.cas import Objects
+        from wlh.storage.snapshots import project_canonical
 
         # 1. Minguo (ROC) calendar date normalization
         assert parse_date("民國 115 年 10 月 15 日") == "2026-10-15"
@@ -207,33 +207,40 @@ class TestStructuredXmlAndBridgeAdapters:
             web_yaml.write_text(
                 f"""
 id: dd-958
-adapter: web
-archive_approved: true
-scope: "Taiwan web detail Minguo date and Side_Links contract test"
-entry_urls:
-  - "http://127.0.0.1:{port}/tw/index.html"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/tw/"
-delay: 0.0
-metadata:
-  source_name: "財政部賦稅署"
-  document_type: "税务资料"
-  language: "zh"
-  jurisdiction: "TW"
-documents:
-  detail_url_patterns:
-    - "^http://127\\\\.0\\\\.0\\\\.1:{port}/tw/detail-\\\\d+\\\\.html$"
-  detail_body: always
-  content_xpath: '//div[@class="law-body"]'
-  fields:
-    title:
-      xpath: '//h1[@class="doc-title"]'
-    document_number:
-      xpath: '//span[@class="doc-no"]'
-    published_at:
-      xpath: '//span[@class="pub-date"]'
+scheduler:
+  scope: "Taiwan web detail Minguo date and Side_Links contract test"
+  entry_urls:
+    - "http://127.0.0.1:{port}/tw/index.html"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/tw/"
+fetcher:
+  mode: http
+  delay: 0.0
+processor:
+  parser:
+    type: html
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{port}/tw/detail-\\\\d+\\\\.html$"
+      detail_body: always
+      content_xpath: '//div[@class="law-body"]'
+      fields:
+        title:
+          xpath: '//h1[@class="doc-title"]'
+        document_number:
+          xpath: '//span[@class="doc-no"]'
+        published_at:
+          xpath: '//span[@class="pub-date"]'
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "財政部賦稅署"
+    document_type: "税务资料"
+    language: "zh"
+    jurisdiction: "TW"
 """.strip(),
                 encoding="utf-8",
             )
@@ -275,29 +282,39 @@ documents:
             moj_yaml.write_text(
                 f"""
 id: dd-959
-adapter: structured_xml
-archive_approved: true
-scope: "Taiwan MOJ Laws bulk XML ZIP and budget truncation contract test"
-entry_urls:
-  - "http://127.0.0.1:{port}/moj/index.html"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/moj/"
-delay: 0.0
-budget:
-  requests: 20
-  documents: 2
-  seconds: 60
-  response_bytes: 16777216
-documents:
-  detail_url_patterns:
-    - "^http://127\\\\.0\\\\.0\\\\.1:{port}/moj/ChLaw\\\\.zip$"
-metadata:
-  source_name: "全國法規資料庫"
-  document_type: "法律法规"
-  language: "zh"
-  jurisdiction: "TW"
+scheduler:
+  scope: "Taiwan MOJ Laws bulk XML ZIP and budget truncation contract test"
+  entry_urls:
+    - "http://127.0.0.1:{port}/moj/index.html"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/moj/"
+  budget:
+    requests: 20
+    documents: 2
+    seconds: 60
+    response_bytes: 16777216
+fetcher:
+  mode: http
+  delay: 0.0
+processor:
+  parser:
+    type: xml
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{port}/moj/ChLaw\\\\.zip$"
+    transforms:
+      - moj_law_dates_and_meta
+cleaners:
+  infer_effective_date: true
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "全國法規資料庫"
+    document_type: "法律法规"
+    language: "zh"
+    jurisdiction: "TW"
 """.strip(),
                 encoding="utf-8",
             )

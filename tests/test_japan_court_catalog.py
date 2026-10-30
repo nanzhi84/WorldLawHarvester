@@ -115,19 +115,56 @@ def _court_server(fault: str = "") -> Generator[tuple[str, list[str]]]:
 
 
 def _config(tmp_path: Path, origin: str, *, request_budget: int = 40, adapter: str = "japan_courts") -> Path:
-    config: dict[str, Any] = {
-        "id": "dd-519", "adapter": adapter, "archive_approved": True,
-        "entry_urls": [origin + LEGACY], "allowed_hosts": ["127.0.0.1"],
-        "allowed_path_prefixes": ["/app/hanrei_jp/", "/hanrei/", "/assets/hanrei/"],
-        "scope": "Four-case recorded official search protocol projection; full original judgments; not the entire published case population",
-        "robots": True, "delay": 0,
-        "fetch": {"mode": "http", "max_depth": 2, "retries": 0},
-        "budget": {"requests": request_budget, "documents": 70000, "seconds": 86400},
-        "metadata": {"source_name": "裁判所 裁判例検索", "document_type": "案例", "language": "ja", "jurisdiction": "JP"},
-    }
     if adapter == "web":
-        config["entry_urls"] = [origin + "/assets/hanrei/hanrei-pdf-97209.pdf"]
-        config["documents"] = {"detail_url_patterns": [r"\.pdf$"], "require_complete_text": True}
+        config: dict[str, Any] = {
+            "id": "dd-519",
+            "scheduler": {
+                "scope": "Four-case recorded official search protocol projection; full original judgments; not the entire published case population",
+                "entry_urls": [origin + "/assets/hanrei/hanrei-pdf-97209.pdf"],
+                "allowed_hosts": ["127.0.0.1"],
+                "allowed_path_prefixes": ["/app/hanrei_jp/", "/hanrei/", "/assets/hanrei/"],
+                "max_depth": 2,
+                "budget": {"requests": request_budget, "documents": 70000, "seconds": 86400},
+            },
+            "fetcher": {"mode": "http", "delay": 0.0, "retries": 0, "robots": True},
+            "processor": {
+                "parser": {
+                    "type": "html",
+                    "documents": {"detail_url_patterns": [r"\.pdf$"]},
+                }
+            },
+            "cleaners": {"require_complete_text": True},
+            "storage": {
+                "archive_approved": True,
+                "metadata": {
+                    "source_name": "裁判所 裁判例検索",
+                    "document_type": "案例",
+                    "language": "ja",
+                    "jurisdiction": "JP",
+                },
+            },
+        }
+    else:
+        config = yaml.safe_load((ROOT / "sources/dd-519.yaml").read_text())
+        config["scheduler"]["scope"] = (
+            "Four-case recorded official search protocol projection; full original judgments; not the entire published case population"
+        )
+        config["scheduler"]["entry_urls"] = [origin + LEGACY]
+        config["scheduler"]["allowed_hosts"] = ["127.0.0.1"]
+        config["scheduler"]["allowed_path_prefixes"] = [
+            "/app/hanrei_jp/",
+            "/hanrei/",
+            "/assets/hanrei/",
+        ]
+        config["scheduler"]["max_depth"] = 2
+        config["scheduler"]["budget"] = {
+            "requests": request_budget,
+            "documents": 70000,
+            "seconds": 86400,
+        }
+        config["fetcher"]["delay"] = 0.0
+        config["fetcher"]["retries"] = 0
+        config["fetcher"]["robots"] = True
     path = tmp_path / "dd-519.yaml"
     path.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False))
     return path
@@ -375,10 +412,10 @@ class TestJapanCourtCatalog:
             pytest.skip("Private source config dd-519.yaml not present")
         with _regional_layout_server() as (origin, requests):
             prod_cfg: dict[str, Any] = yaml.safe_load((ROOT / "sources/dd-519.yaml").read_text())
-            prod_cfg["entry_urls"] = [origin + LEGACY]
-            prod_cfg["allowed_hosts"] = ["127.0.0.1"]
-            prod_cfg["delay"] = 0
-            prod_cfg["fetch"]["retries"] = 0
+            prod_cfg["scheduler"]["entry_urls"] = [origin + LEGACY]
+            prod_cfg["scheduler"]["allowed_hosts"] = ["127.0.0.1"]
+            prod_cfg["fetcher"]["delay"] = 0.0
+            prod_cfg["fetcher"]["retries"] = 0
             config = tmp_path / "dd-519-regional.yaml"
             config.write_text(yaml.safe_dump(prod_cfg, allow_unicode=True, sort_keys=False))
 
@@ -429,10 +466,10 @@ class TestJapanCourtCatalog:
             pytest.skip("Private source config dd-519.yaml not present")
         with _regional_layout_server(live_total_increment=True) as (origin, requests):
             prod_cfg: dict[str, Any] = yaml.safe_load((ROOT / "sources/dd-519.yaml").read_text())
-            prod_cfg["entry_urls"] = [origin + LEGACY]
-            prod_cfg["allowed_hosts"] = ["127.0.0.1"]
-            prod_cfg["delay"] = 0
-            prod_cfg["fetch"]["retries"] = 0
+            prod_cfg["scheduler"]["entry_urls"] = [origin + LEGACY]
+            prod_cfg["scheduler"]["allowed_hosts"] = ["127.0.0.1"]
+            prod_cfg["fetcher"]["delay"] = 0.0
+            prod_cfg["fetcher"]["retries"] = 0
             config = tmp_path / "dd-519-live-increment.yaml"
             config.write_text(yaml.safe_dump(prod_cfg, allow_unicode=True, sort_keys=False))
 
@@ -455,11 +492,11 @@ class TestJapanCourtCatalog:
             pytest.skip("Private source config dd-519.yaml not present")
         with _regional_layout_server(thirty_row_pages=True) as (origin, requests):
             prod_cfg: dict[str, Any] = yaml.safe_load((ROOT / "sources/dd-519.yaml").read_text())
-            prod_cfg["entry_urls"] = [origin + LEGACY]
-            prod_cfg["allowed_hosts"] = ["127.0.0.1"]
-            prod_cfg["concurrency"] = 2
-            prod_cfg["delay"] = 0
-            prod_cfg["fetch"]["retries"] = 0
+            prod_cfg["scheduler"]["entry_urls"] = [origin + LEGACY]
+            prod_cfg["scheduler"]["allowed_hosts"] = ["127.0.0.1"]
+            prod_cfg["scheduler"]["concurrency"] = 2
+            prod_cfg["fetcher"]["delay"] = 0.0
+            prod_cfg["fetcher"]["retries"] = 0
             config = tmp_path / "dd-519-prefetch.yaml"
             config.write_text(yaml.safe_dump(prod_cfg, allow_unicode=True, sort_keys=False))
 

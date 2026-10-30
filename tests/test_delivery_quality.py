@@ -6,11 +6,11 @@ from typing import Any
 
 import pytest
 
-from wlh.core import WlhError
-from wlh.domain.delivery_quality import (
+from wlh.cleaners.delivery_quality import (
     assert_delivery_quality,
     audit_delivery_rows,
 )
+from wlh.core import WlhError
 
 from .bridge_fixture_support import (
     bridge_fixture_servers as bridge_fixture_servers,
@@ -22,7 +22,7 @@ class TestDeliverySemanticQualityContract:
         self, wlh_env: dict[str, str]
     ) -> None:
         """Multi-resource delivery rows with distinct substantive titles, valid metadata, and clean CAS Markdown pass semantic quality audit."""
-        from wlh.engine.objects import Objects
+        from wlh.storage.cas import Objects
 
         objs = Objects()
         md1_hash = objs.put(
@@ -95,7 +95,7 @@ class TestDeliverySemanticQualityContract:
         self, wlh_env: dict[str, str]
     ) -> None:
         """Semantic quality audit deterministically flags boilerplate titles, duplicate titles, polluted doc_numbers, signature-only stubs, duplicated body paragraphs, and single-resource collections."""
-        from wlh.engine.objects import Objects
+        from wlh.storage.cas import Objects
 
         objs = Objects()
         sig_stub_hash = objs.put(
@@ -267,7 +267,7 @@ class TestDeliverySemanticQualityContract:
         self, wlh_env: dict[str, str]
     ) -> None:
         """Vietnamese login-wall/un-uploaded placeholders, gazette running-header attachment stubs, and UUID/salutation-polluted titles fail semantic quality audit."""
-        from wlh.engine.objects import Objects
+        from wlh.storage.cas import Objects
 
         objs = Objects()
         clean_md_hash = objs.put(

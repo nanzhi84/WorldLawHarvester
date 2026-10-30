@@ -10,7 +10,7 @@ from pathlib import Path
 
 import psycopg
 
-from wlh.domain.delivery_quality import (
+from wlh.cleaners.delivery_quality import (
     verify_source_delivery,
 )
 
@@ -23,8 +23,8 @@ class TestHighConcurrencyKeepAliveAndBulkXmlDelivery:
     def test_concurrent_web_keepalive_and_bulk_xml_archive_deliver_all_records(
         self, initialized_db: dict[str, str], tmp_path: Path
     ) -> None:
-        """High-concurrency `web` collection reuses HTTP/1.1 Keep-Alive connections across 12 detail pages, and `structured_xml` delivers and offline-reparses all 40 `<法規>` records from a bulk `.xml.zip` archive."""
-        from wlh.engine.runs import execute_run, prepare_run
+        """High-concurrency `html` collection reuses HTTP/1.1 Keep-Alive connections across 12 detail pages, and `xml` delivers and offline-reparses all 40 `<法規>` records from a bulk `.xml.zip` archive."""
+        from wlh.scheduler.runs import execute_run, prepare_run
 
         laws_xml_items: list[str] = []
         for idx in range(1, 41):
@@ -141,39 +141,46 @@ class TestHighConcurrencyKeepAliveAndBulkXmlDelivery:
             web_yaml.write_text(
                 f"""
 id: dd-960
-adapter: web
-archive_approved: true
-scope: "High concurrency HTTP Keep-Alive web collection test"
-concurrency: 12
-delay: 0.01
-budget:
-  requests: 30
-  documents: 12
-  seconds: 60
-  response_bytes: 10485760
-entry_urls:
-  - "http://127.0.0.1:{port}/laws/index.html"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/laws/"
-metadata:
-  source_name: "High Concurrency Legislative Portal"
-  document_type: "法律法规"
-  language: "en"
-  jurisdiction: "INTL"
-documents:
-  detail_url_patterns:
-    - "^http://127\\\\.0\\\\.0\\\\.1:{port}/laws/item-\\\\d+\\\\.html$"
-  detail_body: always
-  content_xpath: '//div[@class="law-body"]'
-  fields:
-    title:
-      xpath: '//h1[@class="doc-title"]'
-    document_number:
-      xpath: '//span[@class="doc-no"]'
-    published_at:
-      xpath: '//span[@class="pub-date"]'
+scheduler:
+  scope: "High concurrency HTTP Keep-Alive web collection test"
+  entry_urls:
+    - "http://127.0.0.1:{port}/laws/index.html"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/laws/"
+  concurrency: 12
+  budget:
+    requests: 30
+    documents: 12
+    seconds: 60
+    response_bytes: 10485760
+fetcher:
+  mode: http
+  delay: 0.01
+processor:
+  parser:
+    type: html
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{port}/laws/item-\\\\d+\\\\.html$"
+      detail_body: always
+      content_xpath: '//div[@class="law-body"]'
+      fields:
+        title:
+          xpath: '//h1[@class="doc-title"]'
+        document_number:
+          xpath: '//span[@class="doc-no"]'
+        published_at:
+          xpath: '//span[@class="pub-date"]'
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "High Concurrency Legislative Portal"
+    document_type: "法律法规"
+    language: "en"
+    jurisdiction: "INTL"
 """.strip(),
                 encoding="utf-8",
             )
@@ -200,30 +207,37 @@ documents:
             xml_yaml.write_text(
                 f"""
 id: dd-961
-adapter: structured_xml
-archive_approved: true
-scope: "Taiwan LawBank 40-record bulk XML ZIP collection and offline reparse test"
-concurrency: 12
-delay: 0.0
-budget:
-  requests: 10
-  documents: 40
-  seconds: 60
-  response_bytes: 10485760
-entry_urls:
-  - "http://127.0.0.1:{port}/moj/index.html"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/moj/"
-documents:
-  detail_url_patterns:
-    - "^http://127\\\\.0\\\\.0\\\\.1:{port}/moj/ChLaw\\\\.xml\\\\.zip$"
-metadata:
-  source_name: "全國法規資料庫"
-  document_type: "法律法规"
-  language: "zh"
-  jurisdiction: "TW"
+scheduler:
+  scope: "Taiwan LawBank 40-record bulk XML ZIP collection and offline reparse test"
+  entry_urls:
+    - "http://127.0.0.1:{port}/moj/index.html"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/moj/"
+  concurrency: 12
+  budget:
+    requests: 10
+    documents: 40
+    seconds: 60
+    response_bytes: 10485760
+fetcher:
+  mode: http
+  delay: 0.0
+processor:
+  parser:
+    type: xml
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{port}/moj/ChLaw\\\\.xml\\\\.zip$"
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "全國法規資料庫"
+    document_type: "法律法规"
+    language: "zh"
+    jurisdiction: "TW"
 """.strip(),
                 encoding="utf-8",
             )
@@ -254,9 +268,9 @@ metadata:
         """A `.zip` archive served from a query-string URL (`fileView.do?...&zipfile=094-01_01.zip`) containing multiple `<Gazette>` XML files in subdirectories extracts all `<Record>` items, normalizes ROC dates, strips legacy layout table wrappers without pipe noise (`\\|`), and passes delivery quality audit."""
         from psycopg.rows import dict_row
 
-        from wlh.engine.objects import Objects
-        from wlh.engine.runs import execute_run, prepare_run
-        from wlh.projections.canonical import project_canonical
+        from wlh.scheduler.runs import execute_run, prepare_run
+        from wlh.storage.cas import Objects
+        from wlh.storage.snapshots import project_canonical
 
         xml_094 = """<?xml version="1.0" encoding="UTF-8"?>
 <Gazette>
@@ -336,29 +350,36 @@ metadata:
             gazette_yaml.write_text(
                 f"""
 id: dd-962
-adapter: structured_xml
-archive_approved: true
-scope: "Executive Yuan Gazette multi-XML ZIP archive extraction test"
-delay: 0.0
-budget:
-  requests: 10
-  documents: 10
-  seconds: 60
-  response_bytes: 10485760
-entry_urls:
-  - "http://127.0.0.1:{port}/egFront/openData04.do?action=historyYearDaily&year=094"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/egFront/"
-documents:
-  detail_url_patterns:
-    - '^https?://[^/]+/egFront/fileView\\.do\\?.*zipfile='
-metadata:
-  source_name: "行政院公報資訊網"
-  document_type: "通知公告"
-  language: "zh"
-  jurisdiction: "TW"
+scheduler:
+  scope: "Executive Yuan Gazette multi-XML ZIP archive extraction test"
+  entry_urls:
+    - "http://127.0.0.1:{port}/egFront/openData04.do?action=historyYearDaily&year=094"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/egFront/"
+  budget:
+    requests: 10
+    documents: 10
+    seconds: 60
+    response_bytes: 10485760
+fetcher:
+  mode: http
+  delay: 0.0
+processor:
+  parser:
+    type: xml
+    documents:
+      detail_url_patterns:
+        - '^https?://[^/]+/egFront/fileView\\.do\\?.*zipfile='
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "行政院公報資訊網"
+    document_type: "通知公告"
+    language: "zh"
+    jurisdiction: "TW"
 """.strip(),
                 encoding="utf-8",
             )
@@ -412,7 +433,7 @@ metadata:
 
         import fitz  # type: ignore[import-untyped]
 
-        from wlh.engine.runs import execute_run, prepare_run
+        from wlh.scheduler.runs import execute_run, prepare_run
 
         fitz_mod: Any = fitz
         pdf_payloads: dict[str, bytes] = {}
@@ -496,31 +517,38 @@ metadata:
             pdf_yaml.write_text(
                 f"""
 id: dd-963
-adapter: web
-archive_approved: true
-scope: "Warm multi-worker PDF pool parallel extraction test (20 6-page ruled-table PDFs)"
-concurrency: 16
-delay: 0.0
-budget:
-  requests: 40
-  documents: 20
-  seconds: 60
-  response_bytes: 20971520
-entry_urls:
-  - "http://127.0.0.1:{port}/pdfs/index.html"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/pdfs/"
-metadata:
-  source_name: "Parallel PDF Gazette Portal"
-  document_type: "法律法规"
-  language: "en"
-  jurisdiction: "INTL"
-documents:
-  detail_url_patterns:
-    - "^http://127\\\\.0\\\\.0\\\\.1:{port}/pdfs/item-\\\\d+\\\\.pdf$"
+scheduler:
+  scope: "Warm multi-worker PDF pool parallel extraction test (20 6-page ruled-table PDFs)"
+  entry_urls:
+    - "http://127.0.0.1:{port}/pdfs/index.html"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/pdfs/"
+  concurrency: 16
+  budget:
+    requests: 40
+    documents: 20
+    seconds: 60
+    response_bytes: 20971520
+fetcher:
+  mode: http
+  delay: 0.0
+processor:
+  parser:
+    type: html
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{port}/pdfs/item-\\\\d+\\\\.pdf$"
+cleaners:
   require_complete_text: true
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "Parallel PDF Gazette Portal"
+    document_type: "法律法规"
+    language: "en"
+    jurisdiction: "INTL"
 """.strip(),
                 encoding="utf-8",
             )
@@ -557,15 +585,19 @@ documents:
         import fitz  # type: ignore[import-untyped]
 
         from wlh.config import load_file
-        from wlh.engine.runs import execute_run, prepare_run
+        from wlh.scheduler.runs import execute_run, prepare_run
 
         repo_root = Path(__file__).resolve().parents[1]
         for source_id in ("dd-517", "dd-519", "dd-582"):
             yaml_path = repo_root / "sources" / f"{source_id}.yaml"
             if yaml_path.is_file():
                 cfg = load_file(yaml_path)
-                assert cfg.concurrency == 24, f"Expected {source_id} concurrency == 24, got {cfg.concurrency}"
-                assert cfg.delay == 0.0, f"Expected {source_id} delay == 0.0, got {cfg.delay}"
+                assert cfg.scheduler.concurrency == 24, (
+                    f"Expected {source_id} concurrency == 24, got {cfg.scheduler.concurrency}"
+                )
+                assert cfg.fetcher.delay == 0.0, (
+                    f"Expected {source_id} delay == 0.0, got {cfg.fetcher.delay}"
+                )
 
         fitz_mod: Any = fitz
         pdf_payloads: dict[str, bytes] = {}
@@ -660,35 +692,42 @@ documents:
             portal_yaml.write_text(
                 f"""
 id: dd-964
-adapter: web
-archive_approved: true
-scope: "Streaming in-flight harvest test avoiding slow attachment straggler stall"
-concurrency: 24
-delay: 0.0
-budget:
-  requests: 50
-  documents: 12
-  seconds: 60
-  response_bytes: 10485760
-entry_urls:
-  - "http://127.0.0.1:{port}/portal/page1.html"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/portal/"
-metadata:
-  source_name: "Streaming Portal"
-  document_type: "法律法规"
-  language: "en"
-  jurisdiction: "INTL"
-documents:
-  detail_url_patterns:
-    - "^http://127\\\\.0\\\\.0\\\\.1:{port}/portal/doc-\\\\d+\\\\.html$"
-  detail_body: always
-  content_xpath: '//div[@class="law-body"]'
-  fields:
-    title:
-      xpath: '//h1'
+scheduler:
+  scope: "Streaming in-flight harvest test avoiding slow attachment straggler stall"
+  entry_urls:
+    - "http://127.0.0.1:{port}/portal/page1.html"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/portal/"
+  concurrency: 24
+  budget:
+    requests: 50
+    documents: 12
+    seconds: 60
+    response_bytes: 10485760
+fetcher:
+  mode: http
+  delay: 0.0
+processor:
+  parser:
+    type: html
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{port}/portal/doc-\\\\d+\\\\.html$"
+      detail_body: always
+      content_xpath: '//div[@class="law-body"]'
+      fields:
+        title:
+          xpath: '//h1'
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "Streaming Portal"
+    document_type: "法律法规"
+    language: "en"
+    jurisdiction: "INTL"
 """.strip(),
                 encoding="utf-8",
             )

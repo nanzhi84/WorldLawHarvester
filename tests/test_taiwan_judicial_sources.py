@@ -9,12 +9,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
-from wlh.adapters import load as load_adapter
+from wlh.cleaners.extraction_quality import text_check
 from wlh.config import SourceConfig
 from wlh.core import digest
-from wlh.extraction.office import unpack_zip
-from wlh.extraction.process import run_extraction
-from wlh.extraction.quality import text_check
+from wlh.processor.extractors.router import run_extraction
+from wlh.processor.extractors.word.office import unpack_zip
+from wlh.processor.parsers import load as load_adapter
 
 from .conftest import make_native_pdf
 
@@ -52,7 +52,7 @@ class _InMemoryAdapterContext:
         return run_extraction(data, kind, self.config)
 
     def text_quality(self, markdown: str) -> dict[str, Any]:
-        language = str(self.config["metadata"].get("language") or "")
+        language = str(self.config.get("storage", {}).get("metadata", {}).get("language") or "")
         return text_check(markdown, "vi" if language.startswith("vi") else "generic")
 
     def store(self, data: bytes) -> str:
@@ -62,7 +62,7 @@ class _InMemoryAdapterContext:
 
     def follow_links(self, task: Mapping[str, Any]) -> bool:
         return self.runtime.mode == "collect" and int(task["depth"]) < int(
-            self.config["fetch"]["max_depth"]
+            self.config["scheduler"]["max_depth"]
         )
 
 
@@ -125,61 +125,72 @@ class TestTaiwanJudicialJudgmentDiscoveryAndExtraction:
         config = SourceConfig.model_validate(
             {
                 "id": "dd-510",
-                "adapter": "web",
-                "scope": "中国台湾司法院法学资料检索系统（裁判书查询 judgment.judicial.gov.tw）各级法院民事、刑事、行政及宪政裁判书列表发现、详情正文与 PDF 原件有界采集",
-                "entry_urls": [
-                    "https://judgment.judicial.gov.tw/FJUD/qryresult.aspx?jud_court=TPS&jud_year=113&jud_case=%E5%8F%B0%E4%B8%8A&jud_no=1&judtype=JUDBOOK&sys=V"
-                ],
-                "allowed_hosts": ["judgment.judicial.gov.tw"],
-                "allowed_path_prefixes": ["/FJUD/", "/FILES/", "/controls/"],
-                "archive_approved": True,
-                "robots": False,
-                "delay": 1.2,
-                "fetch": {
-                    "mode": "rendered_dom",
+                "scheduler": {
+                    "scope": "中国台湾司法院法学资料检索系统（裁判书查询 judgment.judicial.gov.tw）各级法院民事、刑事、行政及宪政裁判书列表发现、详情正文与 PDF 原件有界采集",
+                    "entry_urls": [
+                        "https://judgment.judicial.gov.tw/FJUD/qryresult.aspx?jud_court=TPS&jud_year=113&jud_case=%E5%8F%B0%E4%B8%8A&jud_no=1&judtype=JUDBOOK&sys=V"
+                    ],
+                    "allowed_hosts": ["judgment.judicial.gov.tw"],
+                    "allowed_path_prefixes": ["/FJUD/", "/FILES/", "/controls/"],
                     "max_depth": 2,
+                    "budget": {
+                        "requests": 60,
+                        "documents": 10,
+                        "seconds": 300,
+                        "response_bytes": 67108864,
+                    },
+                },
+                "fetcher": {
+                    "mode": "rendered_dom",
+                    "robots": False,
+                    "delay": 1.2,
                     "retries": 3,
                     "page_timeout_ms": 60000,
                 },
-                "budget": {
-                    "requests": 60,
-                    "documents": 10,
-                    "seconds": 300,
-                    "response_bytes": 67108864,
+                "processor": {
+                    "parser": {
+                        "type": "html",
+                        "documents": {
+                            "detail_url_patterns": [
+                                r"^https://judgment\.judicial\.gov\.tw/FJUD/data\.aspx\?.*id=[^&]+"
+                            ],
+                            "detail_body": "always",
+                            "attachment_url_pattern": r"^https://judgment\.judicial\.gov\.tw/FILES/.*\.pdf$",
+                            "content_xpath": '//div[@id="jud"][normalize-space(.) != ""]',
+                            "link_scope_xpath": "//iframe[@id='iframe-data' and @src] | //table[@id='jud']//a[@href]",
+                            "next_page_xpath": "//a[@id='hlNext' and @href]",
+                            "fields": {
+                                "title": {
+                                    "xpath": '//div[@id="jud"]//div[contains(@class,"row")][div[contains(@class,"col-th") and contains(.,"裁判字號")]]/div[contains(@class,"col-td")]'
+                                },
+                                "document_number": {
+                                    "xpath": '//div[@id="jud"]//div[contains(@class,"row")][div[contains(@class,"col-th") and contains(.,"裁判字號")]]/div[contains(@class,"col-td")]',
+                                    "regex": r"(\d+\s*年(?:度)?\s*[^\s]+?字\s*第\s*[^\s]+?\s*號)",
+                                },
+                                "published_at": {
+                                    "xpath": '//div[@id="jud"]//div[contains(@class,"row")][div[contains(@class,"col-th") and contains(.,"裁判日期")]]/div[contains(@class,"col-td")]'
+                                },
+                                "issuer": {
+                                    "xpath": '//div[@id="jud"]//div[contains(@class,"row")][div[contains(@class,"col-th") and contains(.,"裁判字號")]]/div[contains(@class,"col-td")]',
+                                    "regex": r"^([^\s]+法院(?:[^\s]*分院)?|憲法法庭|懲戒法院)",
+                                },
+                            },
+                        },
+                    }
                 },
-                "metadata": {
-                    "source_name": "司法院法学资料检索系统（裁判书查询）",
-                    "document_type": "案例",
-                    "language": "zh",
-                    "jurisdiction": "TW",
-                },
-                "documents": {
-                    "detail_url_patterns": [
-                        r"^https://judgment\.judicial\.gov\.tw/FJUD/data\.aspx\?.*id=[^&]+"
-                    ],
-                    "detail_body": "always",
-                    "attachment_url_pattern": r"^https://judgment\.judicial\.gov\.tw/FILES/.*\.pdf$",
-                    "content_xpath": '//div[@id="jud"][normalize-space(.) != ""]',
-                    "fields": {
-                        "title": {
-                            "xpath": '//div[@id="jud"]//div[contains(@class,"row")][div[contains(@class,"col-th") and contains(.,"裁判字號")]]/div[contains(@class,"col-td")]'
-                        },
-                        "document_number": {
-                            "xpath": '//div[@id="jud"]//div[contains(@class,"row")][div[contains(@class,"col-th") and contains(.,"裁判字號")]]/div[contains(@class,"col-td")]',
-                            "regex": r"(\d+\s*年(?:度)?\s*[^\s]+?字\s*第\s*[^\s]+?\s*號)",
-                        },
-                        "published_at": {
-                            "xpath": '//div[@id="jud"]//div[contains(@class,"row")][div[contains(@class,"col-th") and contains(.,"裁判日期")]]/div[contains(@class,"col-td")]'
-                        },
-                        "issuer": {
-                            "xpath": '//div[@id="jud"]//div[contains(@class,"row")][div[contains(@class,"col-th") and contains(.,"裁判字號")]]/div[contains(@class,"col-td")]',
-                            "regex": r"^([^\s]+法院(?:[^\s]*分院)?|憲法法庭|懲戒法院)",
-                        },
+                "cleaners": {},
+                "storage": {
+                    "archive_approved": True,
+                    "metadata": {
+                        "source_name": "司法院法学资料检索系统（裁判书查询）",
+                        "document_type": "案例",
+                        "language": "zh",
+                        "jurisdiction": "TW",
                     },
                 },
             }
         ).model_dump()
-        adapter: Any = load_adapter("web")(config)
+        adapter: Any = load_adapter("html")(config)
 
         search_url = "https://judgment.judicial.gov.tw/FJUD/qryresult.aspx?jud_court=TPS&jud_year=113&jud_case=%E5%8F%B0%E4%B8%8A&jud_no=1&judtype=JUDBOOK&sys=V"
         list_url = "https://judgment.judicial.gov.tw/FJUD/qryresultlst.aspx?ty=JUDBOOK&q=abc123"
@@ -311,51 +322,63 @@ class TestTaiwanJudicialOpenDataApiAndZipExtraction:
         return SourceConfig.model_validate(
             {
                 "id": "dd-580",
-                "adapter": "web",
-                "scope": "中国台湾司法院资料开放平台（opendata.judicial.gov.tw/api/）宪法法庭判决（053）、大法官解释（052）及各级法院裁判书（051）开放资料集 API 枚举及 FilesetLists 压缩包归档",
-                "entry_urls": [
-                    "https://opendata.judicial.gov.tw/api/Datasets?categoryTheme4Sys%5B0%5D=053&sort.publishedDate.order=desc&page=1"
-                ],
-                "allowed_hosts": ["opendata.judicial.gov.tw"],
-                "allowed_path_prefixes": [
-                    "/api/Datasets",
-                    "/api/FilesetLists",
-                    "/data/api/rest/categories",
-                ],
-                "archive_approved": True,
-                "robots": False,
-                "delay": 1.0,
-                "fetch": {
-                    "mode": "http",
+                "scheduler": {
+                    "scope": "中国台湾司法院资料开放平台（opendata.judicial.gov.tw/api/）宪法法庭判决（053）、大法官解释（052）及各级法院裁判书（051）开放资料集 API 枚举及 FilesetLists 压缩包归档",
+                    "entry_urls": [
+                        "https://opendata.judicial.gov.tw/api/Datasets?categoryTheme4Sys%5B0%5D=053&sort.publishedDate.order=desc&page=1"
+                    ],
+                    "allowed_hosts": ["opendata.judicial.gov.tw"],
+                    "allowed_path_prefixes": [
+                        "/api/Datasets",
+                        "/api/FilesetLists",
+                        "/data/api/rest/categories",
+                    ],
                     "max_depth": 1,
+                    "budget": {
+                        "requests": 50,
+                        "documents": 10,
+                        "seconds": 300,
+                        "response_bytes": 134217728,
+                    },
+                },
+                "fetcher": {
+                    "mode": "http",
+                    "robots": False,
+                    "delay": 1.0,
                     "retries": 3,
                     "page_timeout_ms": 120000,
                 },
-                "budget": {
-                    "requests": 50,
-                    "documents": 10,
-                    "seconds": 300,
-                    "response_bytes": 134217728,
-                },
-                "metadata": {
-                    "source_name": "司法院资料开放平台（Judicial Yuan Open Data API）",
-                    "document_type": "案例",
-                    "language": "zh",
-                    "jurisdiction": "TW",
-                },
-                "documents": {
-                    "detail_url_patterns": [
-                        r"^https://opendata\.judicial\.gov\.tw/api/Datasets/\d+$"
-                    ],
-                    "attachment_url_pattern": r"^https://opendata\.judicial\.gov\.tw/api/FilesetLists/\d+/file$",
-                    "detail_body": "always",
-                    "fields": {
-                        "title": {"regex": r'"title"\s*:\s*"([^"]+)"'},
-                        "document_number": {"regex": r'"datasetId"\s*:\s*(\d+)'},
-                        "published_at": {
-                            "regex": r'"publishedDate"\s*:\s*"(\d{4}-\d{2}-\d{2})'
+                "processor": {
+                    "parser": {
+                        "type": "json",
+                        "documents": {
+                            "detail_url_patterns": [
+                                r"^https://opendata\.judicial\.gov\.tw/api/Datasets/\d+$"
+                            ],
+                            "attachment_url_pattern": r"^https://opendata\.judicial\.gov\.tw/api/FilesetLists/\d+/file$",
+                            "detail_body": "always",
+                            "fields": {
+                                "title": {"regex": r'"title"\s*:\s*"([^"]+)"'},
+                                "document_number": {"regex": r'"datasetId"\s*:\s*(\d+)'},
+                                "published_at": {
+                                    "regex": r'"publishedDate"\s*:\s*"(\d{4}-\d{2}-\d{2})'
+                                },
+                                "issuer": {"regex": r'"dataProvider"\s*:\s*"([^"]+)"'},
+                            },
                         },
-                        "issuer": {"regex": r'"dataProvider"\s*:\s*"([^"]+)"'},
+                    },
+                    "extractor": {
+                        "quirks": ["zip_salvage"],
+                    },
+                },
+                "cleaners": {},
+                "storage": {
+                    "archive_approved": True,
+                    "metadata": {
+                        "source_name": "司法院资料开放平台（Judicial Yuan Open Data API）",
+                        "document_type": "案例",
+                        "language": "zh",
+                        "jurisdiction": "TW",
                     },
                 },
             }
@@ -366,7 +389,7 @@ class TestTaiwanJudicialOpenDataApiAndZipExtraction:
     ) -> None:
         """Parsing OpenData catalog JSON discovers categoryDataset 'A' detail endpoints and skips member-gated 'B' items when unauthenticated."""
         config = self._dd580_config()
-        adapter: Any = load_adapter("web")(config)
+        adapter: Any = load_adapter("json")(config)
 
         catalog_url = "https://opendata.judicial.gov.tw/api/Datasets?categoryTheme4Sys%5B0%5D=053&sort.publishedDate.order=desc&page=1"
         catalog_payload = {
@@ -431,8 +454,8 @@ class TestTaiwanJudicialOpenDataApiAndZipExtraction:
         """OpenData pagedList catalog JSON discovers next page when open datasets exist and hasNextPage is true, returns page_limit_exceeded at max_pages, and stops paging when a page contains only unauthenticated category B items."""
         monkeypatch.delenv("JUDICIAL_OPENDATA_BEARER_TOKEN", raising=False)
         config = self._dd580_config()
-        config["adapter_options"] = {"max_pages": 2}
-        adapter: Any = load_adapter("web")(config)
+        config["processor"]["parser"]["options"] = {"max_pages": 2}
+        adapter: Any = load_adapter("json")(config)
 
         page1_url = "https://opendata.judicial.gov.tw/api/Datasets?categoryTheme4Sys%5B0%5D=052&sort.publishedDate.order=desc&page=1"
         page2_url = "https://opendata.judicial.gov.tw/api/Datasets?categoryTheme4Sys%5B0%5D=052&sort.publishedDate.order=desc&page=2"
@@ -555,7 +578,7 @@ class TestTaiwanJudicialOpenDataApiAndZipExtraction:
     ) -> None:
         """Dataset detail JSON and FilesetLists ZIP extract structured Constitutional Court judgment JSON and native PDF while skipping redundant *_OCR.pdf scan overlays."""
         config = self._dd580_config()
-        adapter: Any = load_adapter("web")(config)
+        adapter: Any = load_adapter("json")(config)
 
         detail_url = "https://opendata.judicial.gov.tw/api/Datasets/58978"
         fileset_url = "https://opendata.judicial.gov.tw/api/FilesetLists/71543/file"
@@ -704,11 +727,11 @@ class TestTaiwanJudicialOpenDataApiAndZipExtraction:
         assert members[0]["kind"] == "json"
 
         raw_cfg = self._dd580_config()
-        raw_cfg["budget"]["response_bytes"] = 536870912
-        raw_cfg["fetch"]["page_timeout_ms"] = 1800000
+        raw_cfg["scheduler"]["budget"]["response_bytes"] = 536870912
+        raw_cfg["fetcher"]["page_timeout_ms"] = 1800000
         validated = SourceConfig.model_validate(raw_cfg)
-        assert validated.budget.response_bytes == 536870912
-        assert validated.fetch.page_timeout_ms == 1800000
+        assert validated.scheduler.budget.response_bytes == 536870912
+        assert validated.fetcher.page_timeout_ms == 1800000
 
     def test_salvage_truncated_opendata_zip_stream_preserves_crc_verified_json_member_and_builds_valid_zip(
         self, tmp_path: Path
@@ -718,7 +741,7 @@ class TestTaiwanJudicialOpenDataApiAndZipExtraction:
 
         import pytest
 
-        from wlh.extraction.office import salvage_zip_prefix
+        from wlh.processor.extractors.quirks.zip_salvage import salvage_zip_prefix
 
         json_bytes = json.dumps(
             {"data": {"interpretNo": "793", "interpretContent": "黨產條例合憲"}},

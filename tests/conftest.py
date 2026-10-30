@@ -18,7 +18,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 
 def _close_pooled_connections() -> None:
     try:
-        from wlh.db import close_pool
+        from wlh.storage.db import close_pool
 
         close_pool()
     except Exception:
@@ -137,7 +137,7 @@ def initialized_db(wlh_env: dict[str, str]) -> Generator[dict[str, str], None, N
                 conn.execute("ALTER SCHEMA wlh RENAME TO wlh_samples_backup")
         conn.execute("DROP SCHEMA IF EXISTS wlh CASCADE")
 
-    from wlh.db import initialize
+    from wlh.storage.db import initialize
 
     res = initialize()
     assert res["status"] in {"initialized", "already_initialized"}
