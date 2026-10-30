@@ -13,14 +13,16 @@ import os
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import tempfile
 import zipfile
+import zlib
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
-from wlh.core import WlhError
+from wlh.core import MAX_ORIGINAL_BYTES, WlhError
 from wlh.extraction.markdown import compact
 from wlh.extraction.vi_tcvn3 import (
     legal_markdown,
@@ -319,20 +321,112 @@ def safe_member(name: str) -> str | None:
     return "/".join(parts)
 
 
+def salvage_zip_prefix(buf: bytes) -> bytes:
+    """Rebuild Central Directory over complete CRC-verified PK\\x03\\x04 entries containing a JSON member."""
+    offset = 0
+    n = len(buf)
+    cd_entries: list[bytes] = []
+    has_json = False
+    while offset + 30 <= n:
+        if buf[offset : offset + 4] != b"PK\x03\x04":
+            break
+        _sig, ver, flags, method, mtime, mdate, crc, csize, usize, fn_len, ex_len = struct.unpack(
+            "<4sHHHHHIIIHH", buf[offset : offset + 30]
+        )
+        if flags & 0x08:
+            break
+        header_end = offset + 30 + fn_len + ex_len
+        entry_end = header_end + csize
+        if entry_end > n:
+            break
+        raw_comp = buf[header_end:entry_end]
+        try:
+            raw_uncomp = (
+                zlib.decompress(raw_comp, -15)
+                if method == 8
+                else raw_comp
+                if method == 0
+                else b""
+            )
+        except zlib.error:
+            break
+        if (
+            method not in (0, 8)
+            or (zlib.crc32(raw_uncomp) & 0xFFFFFFFF) != crc
+            or len(raw_uncomp) != usize
+        ):
+            break
+        fn_bytes = buf[offset + 30 : offset + 30 + fn_len]
+        ex_bytes = buf[offset + 30 + fn_len : header_end]
+        fn_str = fn_bytes.decode("utf-8", errors="replace")
+        if (sm := safe_member(fn_str)) is not None and sm.lower().endswith(".json"):
+            has_json = True
+        cd_header = (
+            struct.pack(
+                "<4sHHHHHHIIIHHHHHII",
+                b"PK\x01\x02",
+                ver,
+                ver,
+                flags,
+                method,
+                mtime,
+                mdate,
+                crc,
+                csize,
+                usize,
+                fn_len,
+                ex_len,
+                0,
+                0,
+                0,
+                0,
+                offset,
+            )
+            + fn_bytes
+            + ex_bytes
+        )
+        cd_entries.append(cd_header)
+        offset = entry_end
+    if not cd_entries or not has_json:
+        raise WlhError("zip_invalid")
+    cd_blob = b"".join(cd_entries)
+    eocd = struct.pack(
+        "<4sHHHHIIH",
+        b"PK\x05\x06",
+        0,
+        0,
+        len(cd_entries),
+        len(cd_entries),
+        len(cd_blob),
+        offset,
+        0,
+    )
+    return buf[:offset] + cd_blob + eocd
+
+
 def unpack_zip(path: str | Path, folder: str | Path, max_bytes: int) -> list[dict[str, Any]]:
     """Inner real documents with lineage paths; never hand the outer container to LibreOffice."""
     members: list[dict[str, Any]] = []
     try:
         with zipfile.ZipFile(path) as archive:
-            infos = [i for i in archive.infolist() if not i.is_dir()]
+            raw_infos = [i for i in archive.infolist() if not i.is_dir()]
+            has_json_member = any(
+                (sm := safe_member(i.filename)) is not None and sm.lower().endswith(".json")
+                for i in raw_infos
+            )
+            infos = [
+                i
+                for i in raw_infos
+                if not (
+                    has_json_member
+                    and (sm := safe_member(i.filename)) is not None
+                    and sm.upper().endswith(".PDF")
+                )
+            ]
             if len(infos) > MAX_ZIP_MEMBERS:
                 raise WlhError("zip_member_limit_exceeded")
             if sum(i.file_size for i in infos) > max_bytes:
                 raise WlhError("zip_expanded_size_exceeded")
-            has_json_member = any(
-                (sm := safe_member(i.filename)) is not None and sm.lower().endswith(".json")
-                for i in infos
-            )
             total = 0
             for index, info in enumerate(sorted(infos, key=lambda i: i.filename)):
                 name = safe_member(info.filename)
@@ -351,6 +445,7 @@ def unpack_zip(path: str | Path, folder: str | Path, max_bytes: int) -> list[dic
                 if kind not in ZIP_MEMBER_KINDS and kind != "zip":
                     continue
                 target = Path(folder) / f"member-{index}"
+                target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(data)
                 members.append({"path": name, "file": target, "kind": kind})
     except (zipfile.BadZipFile, OSError, RuntimeError, ValueError):
@@ -390,7 +485,7 @@ def extract_office(
                 "ocr": ocr if ocr is not None else OCRConfig().model_dump(),
                 "parser": cfg,
                 "profile": script_hint or "generic",
-                "max_bytes": 128 * 1024 * 1024,
+                "max_bytes": MAX_ORIGINAL_BYTES,
             },
         )
         return result[0], {**result[1], "detected_format": kind}

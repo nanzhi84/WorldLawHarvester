@@ -12,6 +12,7 @@ from typing import Any, cast
 from wlh.adapters import load as load_adapter
 from wlh.config import SourceConfig
 from wlh.core import digest
+from wlh.extraction.office import unpack_zip
 from wlh.extraction.process import run_extraction
 from wlh.extraction.quality import text_check
 
@@ -424,6 +425,131 @@ class TestTaiwanJudicialOpenDataApiAndZipExtraction:
         assert "https://opendata.judicial.gov.tw/api/Datasets/58978" in discovered_urls
         assert "https://opendata.judicial.gov.tw/api/Datasets/59372" not in discovered_urls
 
+    def test_opendata_catalog_json_pagination_discovers_next_page_enforces_max_pages_and_stops_when_all_items_member_gated(
+        self, monkeypatch: Any
+    ) -> None:
+        """OpenData pagedList catalog JSON discovers next page when open datasets exist and hasNextPage is true, returns page_limit_exceeded at max_pages, and stops paging when a page contains only unauthenticated category B items."""
+        monkeypatch.delenv("JUDICIAL_OPENDATA_BEARER_TOKEN", raising=False)
+        config = self._dd580_config()
+        config["adapter_options"] = {"max_pages": 2}
+        adapter: Any = load_adapter("web")(config)
+
+        page1_url = "https://opendata.judicial.gov.tw/api/Datasets?categoryTheme4Sys%5B0%5D=052&sort.publishedDate.order=desc&page=1"
+        page2_url = "https://opendata.judicial.gov.tw/api/Datasets?categoryTheme4Sys%5B0%5D=052&sort.publishedDate.order=desc&page=2"
+        page3_url = "https://opendata.judicial.gov.tw/api/Datasets?categoryTheme4Sys%5B0%5D=052&sort.publishedDate.order=desc&page=3"
+
+        page1_payload = {
+            "pagedList": {
+                "totalCount": 30,
+                "pageSize": 10,
+                "currentPage": 1,
+                "lastPage": 3,
+                "hasPreviousPage": False,
+                "hasNextPage": True,
+                "items": [
+                    {
+                        "datasetId": 24557,
+                        "title": "釋字第813號解釋",
+                        "categoryDataset": "A",
+                        "dataProvider": "司法院",
+                        "publishedDate": "2021-12-24T00:00:00+08:00",
+                    }
+                ],
+            }
+        }
+        page2_payload = {
+            "pagedList": {
+                "totalCount": 30,
+                "pageSize": 10,
+                "currentPage": 2,
+                "lastPage": 3,
+                "hasPreviousPage": True,
+                "hasNextPage": True,
+                "items": [
+                    {
+                        "datasetId": 24556,
+                        "title": "釋字第812號解釋",
+                        "categoryDataset": "A",
+                        "dataProvider": "司法院",
+                        "publishedDate": "2021-12-10T00:00:00+08:00",
+                    }
+                ],
+            }
+        }
+        gated_page1_url = "https://opendata.judicial.gov.tw/api/Datasets?categoryTheme4Sys%5B0%5D=051&sort.publishedDate.order=desc&page=1"
+        gated_page2_url = "https://opendata.judicial.gov.tw/api/Datasets?categoryTheme4Sys%5B0%5D=051&sort.publishedDate.order=desc&page=2"
+        gated_page1_payload = {
+            "pagedList": {
+                "totalCount": 50,
+                "pageSize": 10,
+                "currentPage": 1,
+                "lastPage": 5,
+                "hasPreviousPage": False,
+                "hasNextPage": True,
+                "items": [
+                    {
+                        "datasetId": 59372,
+                        "title": "202608裁判書--(20261016Update)",
+                        "categoryDataset": "B",
+                        "dataProvider": "司法院",
+                        "publishedDate": "2026-10-16T07:54:53.173+08:00",
+                    }
+                ],
+            }
+        }
+
+        page1_bytes = json.dumps(page1_payload, ensure_ascii=False).encode("utf-8")
+        page2_bytes = json.dumps(page2_payload, ensure_ascii=False).encode("utf-8")
+        gated_page1_bytes = json.dumps(gated_page1_payload, ensure_ascii=False).encode("utf-8")
+
+        ctx = _InMemoryAdapterContext(
+            config,
+            {
+                page1_url: page1_bytes,
+                page2_url: page2_bytes,
+                gated_page1_url: gated_page1_bytes,
+            },
+        )
+
+        # Case 1: Page 1 < max_pages (2) and hasNextPage=True with open dataset A -> discovers detail + page 2
+        parsed_p1: dict[str, Any] = adapter.parse(
+            ctx,
+            {"depth": 0, "payload": {"url": page1_url, "role": "page", "depth": 0}},
+            _acquisition(page1_url, page1_bytes, mime_type="application/json", acq_id=1),
+        )
+        assert parsed_p1.get("truncated") is None
+        assert {"url": "https://opendata.judicial.gov.tw/api/Datasets/24557", "role": "page", "depth": 1} in parsed_p1["requests"]
+        assert {
+            "url": page2_url,
+            "role": "page",
+            "depth": 0,
+            "meta": {"page": 2},
+        } in parsed_p1["requests"]
+
+        # Case 2: Page 2 == max_pages (2) and hasNextPage=True -> discovers detail, stops page 3, marks truncated
+        parsed_p2: dict[str, Any] = adapter.parse(
+            ctx,
+            {
+                "depth": 0,
+                "payload": {"url": page2_url, "role": "page", "depth": 0, "meta": {"page": 2}},
+            },
+            _acquisition(page2_url, page2_bytes, mime_type="application/json", acq_id=2),
+        )
+        assert parsed_p2.get("truncated") == "page_limit_exceeded"
+        p2_urls = [str(req["url"]) for req in parsed_p2["requests"]]
+        assert "https://opendata.judicial.gov.tw/api/Datasets/24556" in p2_urls
+        assert page3_url not in p2_urls
+
+        # Case 3: Page 1 contains only unauthenticated category B items -> discovers no datasets and does not paginate
+        parsed_gated: dict[str, Any] = adapter.parse(
+            ctx,
+            {"depth": 0, "payload": {"url": gated_page1_url, "role": "page", "depth": 0}},
+            _acquisition(gated_page1_url, gated_page1_bytes, mime_type="application/json", acq_id=3),
+        )
+        gated_urls = [str(req["url"]) for req in parsed_gated["requests"]]
+        assert gated_urls == []
+        assert gated_page2_url not in gated_urls
+
     def test_opendata_dataset_detail_json_and_fileset_zip_extract_structured_judgment_and_skip_redundant_ocr_scan_pdf(
         self, tmp_path: Path
     ) -> None:
@@ -555,3 +681,74 @@ class TestTaiwanJudicialOpenDataApiAndZipExtraction:
         zip_markdown = str(zip_deliverables[0]["markdown"])
         assert "警消人員獎懲累積達二大過免職案" in zip_markdown
         assert "警察人員人事條例" in zip_markdown
+
+    def test_opendata_zip_with_json_and_over_fifty_pdf_members_extracts_json_and_config_accepts_large_archive_budgets(
+        self, tmp_path: Path
+    ) -> None:
+        """OpenData mega-dataset ZIP (1 JSON + 57 PDFs exceeding member and byte limits) extracts JSON member cleanly and SourceConfig accepts 512 MiB response_bytes and 30-minute page_timeout_ms."""
+        zip_path = tmp_path / "jy_791.zip"
+        out_dir = tmp_path / "unpacked"
+        json_member_bytes = json.dumps(
+            {"title": "釋字第791號", "content": "通姦罪違憲"},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        pdf_payload = b"%PDF-1.4\n" + (b"0123456789abcdef" * 1920)  # > 30 KiB per PDF
+
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("大法官解釋-釋字第791號.json", json_member_bytes)
+            for idx in range(1, 58):
+                zf.writestr(f"{idx}_意見書.pdf", pdf_payload)
+
+        members = unpack_zip(zip_path, out_dir, max_bytes=1024 * 1024)
+        assert [m["path"] for m in members] == ["大法官解釋-釋字第791號.json"]
+        assert members[0]["kind"] == "json"
+
+        raw_cfg = self._dd580_config()
+        raw_cfg["budget"]["response_bytes"] = 536870912
+        raw_cfg["fetch"]["page_timeout_ms"] = 1800000
+        validated = SourceConfig.model_validate(raw_cfg)
+        assert validated.budget.response_bytes == 536870912
+        assert validated.fetch.page_timeout_ms == 1800000
+
+    def test_salvage_truncated_opendata_zip_stream_preserves_crc_verified_json_member_and_builds_valid_zip(
+        self, tmp_path: Path
+    ) -> None:
+        """Truncated OpenData ZIP stream salvages intact CRC-verified prefix entries (including the structured JSON dataset) into a valid ZIP archive."""
+        import os
+
+        import pytest
+
+        from wlh.extraction.office import salvage_zip_prefix
+
+        json_bytes = json.dumps(
+            {"data": {"interpretNo": "793", "interpretContent": "黨產條例合憲"}},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        pdf1_bytes = b"%PDF-1.4\n" + os.urandom(50 * 1024)
+        pdf2_bytes = b"%PDF-1.4\n" + os.urandom(100 * 1024)
+
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("大法官解釋-釋字第793號.json", json_bytes)
+            zf.writestr("1_意見書.pdf", pdf1_bytes)
+            zf.writestr("2_聲請書.pdf", pdf2_bytes)
+            info3 = zf.getinfo("2_聲請書.pdf")
+            cut_offset = info3.header_offset + 64 + (info3.compress_size // 2)
+
+        full_zip_bytes = zip_buf.getvalue()
+        truncated_bytes = full_zip_bytes[:cut_offset]
+
+        with pytest.raises(zipfile.BadZipFile):
+            zipfile.ZipFile(io.BytesIO(truncated_bytes))
+
+        repaired = salvage_zip_prefix(truncated_bytes)
+        with zipfile.ZipFile(io.BytesIO(repaired)) as repaired_zf:
+            assert repaired_zf.testzip() is None
+            assert repaired_zf.namelist() == ["大法官解釋-釋字第793號.json", "1_意見書.pdf"]
+
+        repaired_path = tmp_path / "repaired.zip"
+        repaired_path.write_bytes(repaired)
+        members = unpack_zip(repaired_path, tmp_path / "out", max_bytes=10 * 1024 * 1024)
+        assert [m["path"] for m in members] == ["大法官解釋-釋字第793號.json"]
+
+

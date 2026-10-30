@@ -298,8 +298,8 @@ class Transport:
                 ),
                 timeout=aiohttp.ClientTimeout(
                     total=total_timeout,
-                    sock_connect=min(5.0, total_timeout),
-                    sock_read=min(30.0, total_timeout),
+                    sock_connect=min(10.0, total_timeout),
+                    sock_read=min(60.0, total_timeout),
                 ),
                 auto_decompress=True,
             )
@@ -371,18 +371,29 @@ class Transport:
                     method, url, data=form, headers=req_headers or None, allow_redirects=False
                 ) as response:
                     body = bytearray()
-                    async for chunk in response.content.iter_chunked(65536):
-                        self.budget.active()
-                        body.extend(chunk)
-                        if len(body) > limit:
-                            return self.recorder.finish(
-                                identity,
-                                "failed",
-                                status=response.status,
-                                outcome="blocked",
-                                error="response_byte_budget_exceeded",
-                                actual_url=str(response.url),
-                            )
+                    try:
+                        async for chunk in response.content.iter_chunked(65536):
+                            self.budget.active()
+                            body.extend(chunk)
+                            if len(body) > limit:
+                                return self.recorder.finish(
+                                    identity,
+                                    "failed",
+                                    status=response.status,
+                                    outcome="blocked",
+                                    error="response_byte_budget_exceeded",
+                                    actual_url=str(response.url),
+                                )
+                    except aiohttp.ClientPayloadError:
+                        if 200 <= response.status < 300 and bytes(body[:4]) == b"PK\x03\x04":
+                            from wlh.extraction.office import salvage_zip_prefix
+
+                            try:
+                                body = bytearray(salvage_zip_prefix(bytes(body)))
+                            except WlhError:
+                                raise
+                        else:
+                            raise
                     status, headers, actual = response.status, response.headers, str(response.url)
             data = bytes(body)
             self.budget.active()

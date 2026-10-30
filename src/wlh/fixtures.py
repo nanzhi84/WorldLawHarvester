@@ -204,6 +204,8 @@ def _prune_unselected_links(
                                 if f"/api/Datasets/{item_dict.get('datasetId')}" in exported_paths:
                                     filtered_items.append(item_dict)
                         paged_list["items"] = filtered_items
+                        paged_list["hasNextPage"] = False
+                        paged_list["lastPage"] = int(paged_list.get("currentPage") or 1)
                         return json.dumps(payload_dict, ensure_ascii=False, indent=2)
         except ValueError:
             pass

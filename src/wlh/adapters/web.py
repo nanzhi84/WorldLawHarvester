@@ -332,6 +332,7 @@ class Adapter(WebDocumentBuilder, Base):
                         pl_obj = cast(dict[str, Any], pl_raw)
                         items_raw = pl_obj.get("items")
                         has_bearer = bool(os.environ.get("JUDICIAL_OPENDATA_BEARER_TOKEN"))
+                        eligible_items = 0
                         if isinstance(items_raw, list):
                             for it_raw in cast(list[Any], items_raw):
                                 if not isinstance(it_raw, dict):
@@ -342,6 +343,7 @@ class Adapter(WebDocumentBuilder, Base):
                                 did = it_map.get("datasetId")
                                 if did is None:
                                     continue
+                                eligible_items += 1
                                 det_link = self.resolve_link(url, f"/api/Datasets/{did}")
                                 if (
                                     det_link
@@ -353,6 +355,55 @@ class Adapter(WebDocumentBuilder, Base):
                                     requests.append(
                                         {"url": det_link, "role": "page", "depth": task["depth"] + 1}
                                     )
+                        if eligible_items > 0:
+                            cur_page_raw = (
+                                pl_obj.get("currentPage")
+                                or pl_obj.get("page")
+                                or cast(Mapping[str, Any], request.get("meta") or {}).get("page", 1)
+                            )
+                            cur_page = (
+                                int(cur_page_raw)
+                                if isinstance(cur_page_raw, (int, str)) and str(cur_page_raw).isdigit()
+                                else 1
+                            )
+                            last_page_raw = pl_obj.get("lastPage")
+                            last_page = (
+                                int(last_page_raw)
+                                if isinstance(last_page_raw, (int, str)) and str(last_page_raw).isdigit()
+                                else cur_page
+                            )
+                            has_next = bool(pl_obj.get("hasNextPage")) or (cur_page < last_page)
+                            if has_next:
+                                if cur_page >= self.max_pages:
+                                    truncated = truncated or "page_limit_exceeded"
+                                elif ctx.follow_links(task):
+                                    next_page = cur_page + 1
+                                    u_parts = urlsplit(url)
+                                    if re.search(r"(?:^|&)page=\d+", u_parts.query):
+                                        next_query = re.sub(
+                                            r"(^|&)page=\d+",
+                                            rf"\g<1>page={next_page}",
+                                            u_parts.query,
+                                        )
+                                    else:
+                                        next_query = (
+                                            f"{u_parts.query}&page={next_page}"
+                                            if u_parts.query
+                                            else f"page={next_page}"
+                                        )
+                                    next_url = urlunsplit(
+                                        (u_parts.scheme, u_parts.netloc, u_parts.path, next_query, "")
+                                    )
+                                    if next_url not in seen_json_links and self.in_scope(next_url):
+                                        seen_json_links.add(next_url)
+                                        requests.append(
+                                            {
+                                                "url": next_url,
+                                                "role": "page",
+                                                "depth": 0,
+                                                "meta": {"page": next_page},
+                                            }
+                                        )
         targets: list[dict[str, Any]] = []
         if detail and not wlh_trunc_code and (kind in TEXT_KINDS | BINARY_KINDS):
             inputs = [{"request": request, "role": "detail"}]

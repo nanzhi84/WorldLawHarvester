@@ -134,7 +134,7 @@ class Budget(Strict):
 class FetchConfig(Strict):
     mode: str = Field(default="http", pattern="^(http|rendered_dom)$")
     max_depth: int = Field(default=3, ge=0, le=100)
-    page_timeout_ms: int = Field(default=30000, ge=100, le=600000)
+    page_timeout_ms: int = Field(default=30000, ge=100, le=1800000)
     wait_until: str = Field(default="domcontentloaded", pattern="^(commit|domcontentloaded|load)$")
     retries: int = Field(default=2, ge=0, le=5)
     retry_backoff_seconds: float = Field(default=0.5, ge=0.0, le=60.0)
