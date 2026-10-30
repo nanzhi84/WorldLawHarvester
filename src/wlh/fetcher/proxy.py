@@ -139,6 +139,14 @@ class EphemeralProxy:
         self.proxy_url: str | None = None
         self.trusted_hosts: set[str] = set()
 
+    @property
+    def url(self) -> str | None:
+        return self.proxy_url
+
+    @url.setter
+    def url(self, value: str | None) -> None:
+        self.proxy_url = value
+
     def _resolve_command_template(self) -> str | None:
         if self.profile:
             prof_key = f"WLH_PROXY_CMD_{self.profile.upper().replace('-', '_')}"
@@ -164,7 +172,7 @@ class EphemeralProxy:
         while asyncio.get_running_loop().time() < deadline:
             if self.process is not None and self.process.returncode is not None:
                 await self.close()
-                raise WlhError("proxy_startup_failed")
+                raise WlhError("ephemeral_proxy_startup_failed")
             try:
                 _, writer = await asyncio.open_connection("127.0.0.1", port)
                 writer.close()
@@ -176,10 +184,14 @@ class EphemeralProxy:
             except OSError:
                 await asyncio.sleep(0.05)
         await self.close()
-        raise WlhError("proxy_startup_timeout")
+        raise WlhError("ephemeral_proxy_startup_failed")
 
     async def start(self) -> str | None:
-        if self.policy == "direct" and not self.proxy_cfg.get("subscription_env") and not self.proxy_cfg.get("fallback_uri_env"):
+        if (
+            self.policy == "direct"
+            and not self.proxy_cfg.get("subscription_env")
+            and not self.proxy_cfg.get("fallback_uri_env")
+        ):
             return None
 
         timeout_sec = float(self.proxy_cfg.get("startup_timeout_seconds") or 15)
@@ -194,17 +206,27 @@ class EphemeralProxy:
 
         cmd_template = self._resolve_command_template()
         if cmd_template:
-            port = _free_loopback_port()
-            rendered_cmd = cmd_template.format(port=port, profile=self.profile or "default")
-            argv = shlex.split(rendered_cmd)
-            self.process = await asyncio.create_subprocess_exec(
-                *argv,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            return await self._wait_for_port(port, timeout_sec)
+            last_err: WlhError | None = None
+            for _ in range(3):
+                port = _free_loopback_port()
+                rendered_cmd = cmd_template.format(
+                    port=port, profile=self.profile or "default"
+                )
+                argv = shlex.split(rendered_cmd)
+                self.process = await asyncio.create_subprocess_exec(
+                    *argv,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                try:
+                    return await self._wait_for_port(port, timeout_sec)
+                except WlhError as exc:
+                    last_err = exc
+            raise last_err or WlhError("ephemeral_proxy_startup_failed")
 
-        sub_env = str(self.proxy_cfg.get("subscription_env") or "WLH_PROXY_SUBSCRIPTION_URL")
+        sub_env = str(
+            self.proxy_cfg.get("subscription_env") or "WLH_PROXY_SUBSCRIPTION_URL"
+        )
         fallback_env = str(self.proxy_cfg.get("fallback_uri_env") or "WLH_PROXY_URI")
         region_regex = str(self.proxy_cfg.get("region_regex") or self.profile or ".*")
 
@@ -244,31 +266,37 @@ class EphemeralProxy:
                 return None
             raise WlhError("proxy_binary_unavailable")
 
-        port = _free_loopback_port()
-        self.temp_dir = tempfile.TemporaryDirectory(prefix="wlh-xray-")
-        cfg_path = Path(self.temp_dir.name) / "config.json"
-        xray_config = {
-            "log": {"loglevel": "none"},
-            "inbounds": [
-                {
-                    "listen": "127.0.0.1",
-                    "port": port,
-                    "protocol": "http",
-                    "settings": {"allowTransparent": False},
-                }
-            ],
-            "outbounds": [cast(dict[str, Any], node["outbound"])],
-        }
-        cfg_path.write_text(json.dumps(xray_config), encoding="utf-8")
-        self.process = await asyncio.create_subprocess_exec(
-            xray_bin,
-            "run",
-            "-c",
-            str(cfg_path),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        return await self._wait_for_port(port, timeout_sec)
+        last_err = None
+        for _ in range(3):
+            port = _free_loopback_port()
+            self.temp_dir = tempfile.TemporaryDirectory(prefix="wlh-xray-")
+            cfg_path = Path(self.temp_dir.name) / "config.json"
+            xray_config = {
+                "log": {"loglevel": "none"},
+                "inbounds": [
+                    {
+                        "listen": "127.0.0.1",
+                        "port": port,
+                        "protocol": "http",
+                        "settings": {"allowTransparent": False},
+                    }
+                ],
+                "outbounds": [cast(dict[str, Any], node["outbound"])],
+            }
+            cfg_path.write_text(json.dumps(xray_config), encoding="utf-8")
+            self.process = await asyncio.create_subprocess_exec(
+                xray_bin,
+                "run",
+                "-c",
+                str(cfg_path),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            try:
+                return await self._wait_for_port(port, timeout_sec)
+            except WlhError as exc:
+                last_err = exc
+        raise last_err or WlhError("ephemeral_proxy_startup_failed")
 
     async def close(self) -> None:
         if self.process is not None:

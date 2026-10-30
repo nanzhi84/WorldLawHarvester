@@ -1178,9 +1178,26 @@ class JsonParser(RecordAdapter):
                 if opinions and isinstance(opinions[0], dict)
                 else {}
             )
+            storage_base = str(self.options.get("storage_base_url") or "").rstrip("/")
+            if not storage_base:
+                allowed = cast(
+                    Sequence[Any],
+                    cast(dict[str, Any], self.config.get("scheduler") or {}).get("allowed_hosts")
+                    or self.config.get("allowed_hosts")
+                    or (),
+                )
+                storage_host = next(
+                    (str(h) for h in allowed if str(h).startswith("storage.")),
+                    "",
+                )
+                storage_base = (
+                    f"https://{storage_host}"
+                    if storage_host
+                    else urljoin(str(acquisition.get("actual_url") or ""), "/").rstrip("/")
+                )
             local_pdf = (
-                "https://storage.courtlistener.com/" + str(first_op["local_path"]).lstrip("/")
-                if first_op.get("local_path")
+                f"{storage_base}/{str(first_op['local_path']).lstrip('/')}"
+                if first_op.get("local_path") and storage_base
                 else None
             )
             url = (

@@ -24,6 +24,11 @@ from wlh.processor.parsers.html.document_builder import (
 from wlh.processor.parsers.html.document_builder import (
     reconcile_range_enabled as _reconcile_range_enabled,
 )
+from wlh.processor.parsers.html.dom_cleanup import (
+    DEFAULT_ATTACHMENT_EXCLUDE_XPATHS,
+    DEFAULT_ATTACHMENT_TITLE_XPATH,
+    clean_attachment_title_attr,
+)
 from wlh.processor.parsers.html.fields import (
     DATE_FIELDS,
     clean_url,
@@ -251,31 +256,48 @@ class HtmlParser(WebDocumentBuilder, Base):
             detail_paths: set[str] = set()
             unexpanded_paths: set[str] = set()
             link_scope = docs.get("link_scope_xpath")
+            next_page_xp = docs.get("next_page_xpath")
             anchors: list[Any] = []
             if not detail and link_scope:
                 scoped_expr = str(link_scope)
-                if self.max_pages > 1 and "hlNext" not in scoped_expr:
-                    scoped_expr = f"{scoped_expr} | //a[@id='hlNext' and @href]"
+                if (
+                    self.max_pages > 1
+                    and next_page_xp
+                    and str(next_page_xp) not in scoped_expr
+                ):
+                    scoped_expr = f"{scoped_expr} | {next_page_xp}"
                 anchors = tree.xpath(scoped_expr)
             if not anchors:
-                if not detail and tree.xpath("//iframe[@id='iframe-data' and @src]"):
-                    anchors = tree.xpath("//iframe[@id='iframe-data' and @src]")
-                elif not detail and tree.xpath("//table[@id='jud']//a[@href]"):
-                    anchors = tree.xpath(
-                        "//table[@id='jud']//a[@href]"
-                        + (" | //a[@id='hlNext' and @href]" if self.max_pages > 1 else "")
-                    )
-                else:
-                    anchors = tree.xpath(
-                        "//a[@href] | //a[@docurl] | //a[@data-url] | //a[@data-href] | //a[@onclick] | //frame[@src] | //iframe[@src]"
-                    )
-            att_excl_xpath = (
-                docs.get("attachment_exclude_xpath")
-                or 'ancestor::*[@id="vblienquan" or contains(@class, "vblienquan") or contains(@class, "Side_Links")]'
-            )
+                default_expr = (
+                    "//a[@href] | //a[@docurl] | //a[@data-url] | //a[@data-href] "
+                    "| //a[@onclick] | //frame[@src] | //iframe[@src]"
+                )
+                if not detail and self.max_pages > 1 and next_page_xp:
+                    default_expr = f"{default_expr} | {next_page_xp}"
+                anchors = tree.xpath(default_expr)
+            raw_att_excl = docs.get("attachment_exclude_xpath")
+            if isinstance(raw_att_excl, str) and raw_att_excl.strip():
+                att_excl_xpaths: tuple[str, ...] = (raw_att_excl.strip(),)
+            elif isinstance(raw_att_excl, Sequence) and raw_att_excl:
+                att_excl_xpaths = tuple(
+                    str(x).strip()
+                    for x in cast(Sequence[Any], raw_att_excl)
+                    if str(x).strip()
+                )
+            else:
+                att_excl_xpaths = DEFAULT_ATTACHMENT_EXCLUDE_XPATHS
             att_title_xpath = (
-                docs.get("attachment_title_xpath")
-                or "preceding-sibling::*[contains(@class, 'file_name')][1] | ../preceding-sibling::*[contains(@class, 'file_name')][1]"
+                docs.get("attachment_title_xpath") or DEFAULT_ATTACHMENT_TITLE_XPATH
+            )
+            title_strip_regexes: Sequence[str] = tuple(
+                str(x)
+                for x in (
+                    cast(dict[str, Any], self.config.get("cleaners") or {}).get(
+                        "title_strip_regexes"
+                    )
+                    or ()
+                )
+                if x
             )
             for anchor in anchors:
                 raw_href: str | None = (
@@ -298,7 +320,7 @@ class HtmlParser(WebDocumentBuilder, Base):
                     detail_paths.add(urlsplit(link).path)
                 if self.attachment.search(unquote(link)) or self.attachment.search(file_name(link)):
                     if self.details and detail:
-                        if att_excl_xpath and anchor.xpath(str(att_excl_xpath)):
+                        if any(anchor.xpath(xp) for xp in att_excl_xpaths):
                             continue
                         text = re.sub(r"\s+", " ", anchor.text_content()).strip()
                         if text.lower() in GENERIC_ATTACHMENT_LABELS:
@@ -310,11 +332,10 @@ class HtmlParser(WebDocumentBuilder, Base):
                             alt_text = (
                                 re.sub(r"\s+", " ", str(alt_nodes[0].text_content())).strip()
                                 if alt_nodes
-                                else re.sub(
-                                    r"\s*[(（][^()（）]*(?:檔案下載|另開新視窗)[^()（）]*[)）]\s*$",
-                                    "",
-                                    str(anchor.get("title") or "").strip(),
-                                ).strip()
+                                else clean_attachment_title_attr(
+                                    str(anchor.get("title") or ""),
+                                    title_strip_regexes,
+                                )
                             )
                             if alt_text and alt_text.lower() not in GENERIC_ATTACHMENT_LABELS:
                                 text = alt_text

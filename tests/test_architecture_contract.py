@@ -5,6 +5,7 @@ import asyncio
 import re
 import socket
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -50,12 +51,26 @@ FORBIDDEN_SITE_DOMAINS = (
     "laws.e-gov.go.jp",
     "nta.go.jp",
     "law.moj.gov.tw",
+    "gazette.nat.gov.tw",
+    "storage.courtlistener.com",
     "judicial.gov.tw",
     "vbpl.vn",
     "congbao.chinhphu.vn",
     "rechtsinformationen.bund.de",
     "entscheidsuche.ch",
 )
+
+
+def _all_forbidden_site_domains() -> set[str]:
+    from wlh.config import load_file
+
+    domains: set[str] = {str(d) for d in FORBIDDEN_SITE_DOMAINS}
+    for src_yaml in (REPO_ROOT / "sources").glob("dd-*.yaml"):
+        cfg = load_file(src_yaml)
+        for host in cfg.scheduler.allowed_hosts:
+            if "." in host:
+                domains.add(host.lower())
+    return domains
 
 
 class TestArchitectureContract:
@@ -124,7 +139,10 @@ class TestArchitectureContract:
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.returns:
                     return_src = ast.unparse(node.returns)
-                    for forbidden_ret in ("RawRecord", "RawUnitSource", "RequestSpec"):
+                    forbidden_returns = ["RawRecord", "RawUnitSource", "RequestSpec"]
+                    if mod_path.name == "transforms.py":
+                        forbidden_returns.extend(["dict[", "Mapping["])
+                    for forbidden_ret in forbidden_returns:
                         assert forbidden_ret not in return_src, (
                             f"Operator {node.name} in {mod_path} must not return {forbidden_ret}. "
                             f"{FORBIDDEN_OPERATOR_ERROR}"
@@ -141,6 +159,7 @@ class TestArchitectureContract:
 
         stage_dirs = ("scheduler", "fetcher", "processor", "cleaners", "storage")
         dd_pattern = re.compile(r"\bdd[-_]\d{3}\b", re.IGNORECASE)
+        forbidden_domains = _all_forbidden_site_domains()
 
         for stage in stage_dirs:
             for py_file in (SRC_WLH / stage).rglob("*.py"):
@@ -150,8 +169,9 @@ class TestArchitectureContract:
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Constant) and isinstance(node.value, str):
                         val = node.value
-                        for domain in FORBIDDEN_SITE_DOMAINS:
-                            assert domain not in val, (
+                        val_lower = val.lower()
+                        for domain in forbidden_domains:
+                            assert domain not in val_lower, (
                                 f"Site domain '{domain}' hardcoded in {py_file}:{node.lineno}"
                             )
                         assert not dd_pattern.search(val), (
@@ -640,6 +660,7 @@ class TestEphemeralProxyManager:
                 assert parts.port is not None
                 assert parts.port != 7890
                 allocated_port = parts.port
+                assert proxy_mgr.url == proxy_url
                 assert "127.0.0.1" in proxy_mgr.trusted_hosts
 
                 _reader, writer = await asyncio.open_connection("127.0.0.1", allocated_port)
@@ -660,3 +681,133 @@ class TestEphemeralProxyManager:
                 assert sock.connect_ex(("127.0.0.1", allocated_port)) != 0
 
         asyncio.run(_run())
+
+    def test_ephemeral_proxy_startup_retries_and_transport_async_context_manager(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from wlh.config import load_file
+        from wlh.fetcher.proxy import EphemeralProxy
+        from wlh.fetcher.transport import Budget, Recorder, Transport
+        from wlh.processor.parsers.html.parser import HtmlParser
+
+        # 1. Verify examples/source.yaml validates under 5-stage SourceConfig
+        example_cfg = load_file(REPO_ROOT / "examples" / "source.yaml")
+        assert example_cfg.id == "dd-499"
+        assert example_cfg.processor.parser.type == "json"
+
+        # 2. Verify html_to_md.py and html/parser.py contain no site-specific selector literals
+        html_to_md_text = (SRC_WLH / "processor" / "extractors" / "html" / "html_to_md.py").read_text(
+            encoding="utf-8"
+        )
+        for forbidden_literal in ("_sblb", "hmc4Table", "xgxw", "gem-c-print-link", '"dataset"'):
+            assert forbidden_literal not in html_to_md_text
+
+        html_parser_text = (SRC_WLH / "processor" / "parsers" / "html" / "parser.py").read_text(
+            encoding="utf-8"
+        )
+        for forbidden_xpath in ("iframe-data", "hlNext", "vblienquan", "Side_Links"):
+            assert forbidden_xpath not in html_parser_text
+
+        # 3. Verify HtmlParser handles attachment_exclude_xpath as list[str] and next_page_xpath
+        h_cfg: dict[str, Any] = {
+            "id": "dd-994",
+            "scheduler": {
+                "scope": "Test attachment_exclude_xpath list and next_page_xpath",
+                "entry_urls": ["https://example.gov/list.html"],
+                "allowed_hosts": ["example.gov"],
+                "max_depth": 2,
+            },
+            "processor": {
+                "parser": {
+                    "type": "html",
+                    "options": {"max_pages": 3},
+                    "documents": {
+                        "detail_url_patterns": [r"^https://example\.gov/detail/\d+\.html$"],
+                        "next_page_xpath": "//a[@class='next-page-link' and @href]",
+                        "attachment_exclude_xpath": [
+                            "ancestor::div[@id='sidebar-related']",
+                            "ancestor::aside[@class='ignored-files']",
+                        ],
+                        "attachment_title_xpath": "preceding-sibling::span[@class='att-name'][1]",
+                    },
+                }
+            },
+            "storage": {"archive_approved": True, "metadata": {"document_type": "法律法规"}},
+        }
+        hp = HtmlParser(h_cfg)
+
+        class _StubRuntime:
+            mode = "collect"
+
+        class _StubCtx:
+            runtime = _StubRuntime()
+
+            @staticmethod
+            def read(_acq: Mapping[str, Any]) -> bytes:
+                return (
+                    b"<html><body>"
+                    b"<div class='main'>"
+                    b"<span class='att-name'>Official Tax Schedule</span>"
+                    b"<a href='/files/valid.pdf'>PDF</a>"
+                    b"</div>"
+                    b"<div id='sidebar-related'><a href='/files/excluded.pdf'>PDF</a></div>"
+                    b"</body></html>"
+                )
+
+            @staticmethod
+            def follow_links(_task: Mapping[str, Any]) -> bool:
+                return True
+
+        parsed_detail = hp.parse(
+            _StubCtx(),
+            {"depth": 1, "payload": {"url": "https://example.gov/detail/1.html", "role": "page"}},
+            {
+                "id": "acq-1",
+                "outcome": "ok",
+                "actual_url": "https://example.gov/detail/1.html",
+                "request_url": "https://example.gov/detail/1.html",
+                "mime_type": "text/html",
+                "charset": "utf-8",
+            },
+        )
+        assert len(parsed_detail["targets"]) == 1
+        target_inputs = parsed_detail["targets"][0]["inputs"]
+        att_inputs = [i for i in target_inputs if i["role"] == "attachment"]
+        assert len(att_inputs) == 1
+        assert att_inputs[0]["request"]["url"] == "https://example.gov/files/valid.pdf"
+        assert att_inputs[0]["text"] == "Official Tax Schedule"
+
+        # 4. Verify EphemeralProxy retries 3 times on startup failure and raises ephemeral_proxy_startup_failed,
+        # and Transport supports async with (__aenter__ / __aexit__)
+        counter_file = tmp_path / "attempts.txt"
+        fail_cmd = (
+            f"{sys.executable} -c "
+            f"\"from pathlib import Path; p = Path({str(counter_file)!r}); "
+            "n = int(p.read_text()) if p.exists() else 0; "
+            "p.write_text(str(n + 1)); raise SystemExit(1)\" {port}"
+        )
+        monkeypatch.setenv("WLH_PROXY_CMD_FAILTEST", fail_cmd)
+
+        async def _run_fail_and_ctx() -> None:
+            with pytest.raises(WlhError, match="ephemeral_proxy_startup_failed"):
+                async with EphemeralProxy(
+                    {"policy": "required", "profile": "failtest", "startup_timeout_seconds": 1}
+                ):
+                    pass
+            assert int(counter_file.read_text()) == 3
+
+            t_cfg: dict[str, Any] = {
+                "fetcher": {"mode": "http", "proxy": {"policy": "direct"}},
+                "scheduler": {"allowed_hosts": ["example.gov"], "allowed_path_prefixes": ["/"]},
+            }
+            transport = Transport(
+                t_cfg,
+                budget=Budget(t_cfg, used=0, deadline=None),
+                recorder=Recorder("run-ctx", 1, "dd-999"),
+            )
+            async with transport as entered:
+                assert entered is transport
+                assert transport.session is not None
+            assert transport.session is None
+
+        asyncio.run(_run_fail_and_ctx())

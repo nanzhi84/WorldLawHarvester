@@ -39,50 +39,14 @@ def _remove_element(el: Any) -> None:
 
 
 def clean_html_tree(node: Any, *, quirks: Sequence[str] | None = None) -> None:
-    """In-place strip of UI chrome, hidden widgets, TOC sidebars, and inline cell scripts."""
-    for sc in list(node.xpath(".//tr/script")):
-        sc_text = sc.text or ""
-        if "document.write" in sc_text and "_sblb" in sc_text:
-            m = re.search(r"var\s+_sblb\s*=\s*['\"]([^'\"]*)['\"]", sc_text)
-            val = m.group(1).strip() if m else ""
-            if val == "原":
-                val = ""
-            td_el = etree.Element("td")
-            td_el.text = val
-            parent = sc.getparent()
-            if parent is not None:
-                parent.replace(sc, td_el)
+    """In-place strip of standard non-content HTML tags and configured DOM cleanup rules."""
+    from wlh.processor.parsers.html.dom_cleanup import clean_site_dom
 
-    for toc_col in list(
-        node.xpath(
-            './/div[contains(@class, "col-md-4") and following-sibling::div[contains(@class, "col-md-8")]//div[contains(@class, "book")]]'
-        )
-    ):
-        _remove_element(toc_col)
-
-    for el in list(node.xpath(".//*[@style]")):
-        st = (el.get("style") or "").lower()
-        if re.search(r"display\s*:\s*none|visibility\s*:\s*hidden", st):
-            _remove_element(el)
-
-    for bad_el in list(
-        node.xpath(
-            './/*[@type="RelatedNewsBox" or @data-controller="legislationContents" '
-            'or @id="xgxw" or @id="history-tab" or @id="related-tab" or @id="language-switcher" '
-            'or contains(@class, "extend_font") or contains(@class, "m3page_funs") '
-            'or contains(@class, "share_icon") or contains(@class, "zrbj") '
-            'or contains(@class, "xgxw") or contains(@class, "xg-list") '
-            'or contains(@class, "hmc4ChgBtn") or contains(@class, "eyd-page-header__share") '
-            'or contains(@class, "eyd-page-anchors") or contains(@class, "eyd-related-pages") '
-            'or contains(@class, "eyd-breadcrumb") or contains(@class, "eyd-side-navigation") '
-            'or contains(@class, "target-hidden") or contains(@class, "document-tip") '
-            'or contains(@class, "tooltip-button") or contains(@class, "box-commen") '
-            'or contains(@class, "text-gopy") or contains(@class, "gopy") '
-            'or contains(@class, "gem-c-print-link") or contains(@class, "skip-links") '
-            'or contains(@class, "to-the-top") or contains(@class, "breadcrumb")]'
-        )
-    ):
-        _remove_element(bad_el)
+    clean_site_dom(
+        node,
+        dom_transforms=("inline_script_cell_restore",),
+        include_defaults=True,
+    )
 
     for bad_tag in list(
         node.xpath(".//script|.//style|.//noscript|.//template|.//svg|.//button|.//nav")
@@ -117,14 +81,13 @@ def json_to_markdown(value: str) -> str:
     if not isinstance(parsed, dict):
         return text_to_markdown(value)
     top = cast(dict[str, Any], parsed)
-    data_raw = top.get("data")
-    dataset_raw = top.get("dataset")
     inner: dict[str, Any] = (
-        cast(dict[str, Any], data_raw)
-        if isinstance(data_raw, dict)
-        else cast(dict[str, Any], dataset_raw)
-        if isinstance(dataset_raw, dict)
-        else top
+        cast(dict[str, Any], next(iter(top.values())))
+        if len(top) == 1 and isinstance(next(iter(top.values())), dict)
+        else next(
+            (cast(dict[str, Any], v) for v in top.values() if isinstance(v, dict)),
+            top,
+        )
     )
     sections: list[str] = []
     seen_values: set[str] = set()
@@ -205,8 +168,6 @@ def html_to_markdown(
         ]
         rows = expand_rows(raw_rows)
         if not rows:
-            return ""
-        if len(rows) == 1 and node.xpath('ancestor::*[contains(@class, "hmc4Table")]'):
             return ""
         if (any(colspan > 1 or rowspan > 1 for row in raw_rows for _, colspan, rowspan in row)
                 or node.xpath(".//table | .//th[@scope]")):

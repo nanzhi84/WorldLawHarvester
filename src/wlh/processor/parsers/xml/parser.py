@@ -649,13 +649,28 @@ class XmlParser(RecordAdapter):
                 self.truncated = "document_budget_exceeded"
                 nodes = nodes[:doc_budget]
             entries = []
+            base_acq_url = str(
+                acquisition.get("actual_url") or acquisition.get("request_url") or ""
+            )
+            detail_tpl = str(
+                cast(
+                    dict[str, Any],
+                    cast(dict[str, Any], self.config.get("processor") or {}).get("parser") or {},
+                )
+                .get("options", {})
+                .get("detail_url_template")
+                or ""
+            )
             for n in nodes:
                 meta_id = select(n, "MetaId")
-                rec_url = (
-                    f"https://gazette.nat.gov.tw/egFront/detail.do?metaid={meta_id}&log=detailLog"
-                    if meta_id
-                    else select(n, "GazetteHTML")
-                )
+                if meta_id and detail_tpl:
+                    rec_url: str | None = detail_tpl.format(meta_id=meta_id)
+                elif meta_id and base_acq_url:
+                    rec_url = urljoin(
+                        base_acq_url, f"/egFront/detail.do?metaid={meta_id}&log=detailLog"
+                    )
+                else:
+                    rec_url = select(n, "GazetteHTML")
                 doc_style = select(n, "Doc_Style_LName")
                 rec_title = (
                     select(n, "Title")
