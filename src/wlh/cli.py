@@ -78,16 +78,16 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         from wlh.api.server import serve
 
         return serve(args.config, args.host, args.port)
-    from wlh.db import initialize, require_current
+    from wlh.storage.db import initialize, require_current
 
     if args.command == "init":
         return initialize()
     if args.command == "snapshot":
-        from wlh.domain import snapshots
+        from wlh.storage import snapshots
 
         require_current()
         if args.operation == "create":
-            from wlh.domain.snapshot_overrides import load
+            from wlh.storage.snapshots import load
 
             return snapshots.create(load(args.version_overrides) if args.version_overrides else [])
         if args.operation == "list":
@@ -95,12 +95,12 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         if args.operation == "inspect":
             return snapshots.inspect(args.snapshot_id, args.limit, args.after, args.source_after)
         return snapshots.publish(args.snapshot_id)
-    from wlh.engine.objects import Objects
+    from wlh.storage.cas import Objects
 
     Objects().check()
     require_current()
     if args.command == "worker":
-        from wlh.engine.queue import worker
+        from wlh.scheduler.queue import worker
 
         return worker(args.once)
     if args.command == "fixture":
@@ -114,12 +114,12 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
             max_resources=args.max_resources,
         )
     if args.command == "quality":
-        from wlh.domain.delivery_quality import verify_source_delivery
+        from wlh.cleaners.delivery_quality import verify_source_delivery
 
         req_multi = True if args.require_multi_resource else None
         return verify_source_delivery(args.source_id, require_multi_resource=req_multi)
-    from wlh.engine.progress import ProgressPanel
-    from wlh.engine.runs import execute_run, prepare_run, receipt
+    from wlh.scheduler.progress import ProgressPanel
+    from wlh.scheduler.runs import execute_run, prepare_run, receipt
 
     run_id = prepare_run(args.source, args.command, enqueue=args.enqueue)
     if args.enqueue:

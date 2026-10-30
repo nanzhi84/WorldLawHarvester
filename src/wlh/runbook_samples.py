@@ -961,7 +961,7 @@ def _extract_payload_snippet(
     if raw_bytes.startswith(b"\xd0\xcf\x11\xe0"):
         return ""
 
-    from wlh.adapters.web_fields import decode
+    from wlh.processor.parsers.html.fields import decode
 
     text, enc = decode(raw_bytes, charset)
     if enc == "utf-8-replace":
@@ -977,7 +977,7 @@ def _extract_payload_snippet(
             import lxml.etree as etree
             from lxml import html as lxml_html  # type: ignore[import-untyped]
 
-            from wlh.extraction.markdown import clean_html_tree
+            from wlh.processor.extractors.html.html_to_md import clean_html_tree
 
             etree_mod: Any = etree
             lxml_html_mod: Any = lxml_html
@@ -1036,7 +1036,7 @@ def _extract_payload_snippet(
 
 
 def _make_objects_for_bucket(bucket: str) -> Any:
-    from wlh.engine.objects import Objects
+    from wlh.storage.cas import Objects
 
     prev_bucket = os.environ.get("WLH_S3_BUCKET")
     os.environ["WLH_S3_BUCKET"] = bucket
@@ -1382,9 +1382,11 @@ def generate_verification_samples_from_db(
                 yaml_path = Path(__file__).resolve().parents[2] / "sources" / f"{source_id}.yaml"
             content_xpath: str | None = None
             if yaml_path.is_file():
+                from wlh.processor.parsers import normalize_parser_config
+
                 raw_cfg: Any = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
                 if isinstance(raw_cfg, dict):
-                    cfg_dict = cast(dict[str, Any], raw_cfg)
+                    cfg_dict = normalize_parser_config(cast(dict[str, Any], raw_cfg))
                     docs_cfg = cfg_dict.get("documents")
                     if isinstance(docs_cfg, dict):
                         docs_dict = cast(dict[str, Any], docs_cfg)

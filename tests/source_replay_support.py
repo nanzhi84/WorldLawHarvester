@@ -158,10 +158,11 @@ def replay_config(
     if not source_file.is_file():
         pytest.skip(f"Private source config {source_file.name} not present")
     cfg: dict[str, Any] = yaml.safe_load(source_file.read_text())
-    hosts: list[str] = cfg["allowed_hosts"]
+    sched = cfg["scheduler"]
+    hosts: list[str] = sched["allowed_hosts"]
     destination = urlsplit(origin)
-    entry_urls: list[str] = cfg["entry_urls"]
-    cfg["entry_urls"] = [
+    entry_urls: list[str] = sched["entry_urls"]
+    sched["entry_urls"] = [
         urlunsplit((destination.scheme, destination.netloc, p.path, p.query, ""))
         for p in (urlsplit(url) for url in entry_urls)
     ]
@@ -179,15 +180,16 @@ def replay_config(
             return re.sub(r"^\^https?://", "^http://", value)
         return value
 
-    for section in ("documents", "adapter_options"):
-        if section in cfg:
-            cfg[section] = localize(cfg[section])
-    cfg["allowed_hosts"] = ["127.0.0.1"]
-    if "host_path_scopes" in cfg:
-        cfg["host_path_scopes"] = {
-            "127.0.0.1": sorted({p for ps in cfg["host_path_scopes"].values() for p in ps})
+    parser_cfg = cfg.get("processor", {}).get("parser", {})
+    for section in ("documents", "options"):
+        if section in parser_cfg:
+            parser_cfg[section] = localize(parser_cfg[section])
+    sched["allowed_hosts"] = ["127.0.0.1"]
+    if "host_path_scopes" in sched:
+        sched["host_path_scopes"] = {
+            "127.0.0.1": sorted({p for ps in sched["host_path_scopes"].values() for p in ps})
         }
-    cfg["delay"] = 0
+    cfg.setdefault("fetcher", {})["delay"] = 0
     path = directory / f"{source_id}.yaml"
     path.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
     return path
@@ -196,7 +198,7 @@ def replay_config(
 def collect_artifact(
     source_id: str, config: Path, env: dict[str, str], name: str, requests: list[str]
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    from wlh.engine.objects import Objects
+    from wlh.storage.cas import Objects
 
     directory = ARTIFACTS / name
     directory.mkdir(parents=True, exist_ok=True)

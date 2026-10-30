@@ -113,43 +113,50 @@ class TestCollectionSnapshotAndDeliveryApi:
             source_yaml.write_text(
                 f"""
 id: dd-902
-adapter: web
-archive_approved: true
-scope: "Multi-volume and independent attachment portal test"
-entry_urls:
-  - "http://127.0.0.1:{port}/portal/index.html"
-allowed_hosts:
-  - "127.0.0.1"
-allowed_path_prefixes:
-  - "/portal/"
-metadata:
-  source_name: "Trade Law Portal"
-  document_type: "法律法规"
-  language: "en"
-  jurisdiction: "VN"
-documents:
-  detail_url_patterns:
-    - "^http://127\\\\.0\\\\.0\\\\.1:{port}/portal/detail/.*\\\\.html$"
-  detail_body: "auto"
-  fields:
-    title:
-      xpath: "//h1[@class='doc-title']/text()"
-    document_number:
-      xpath: "//span[@class='doc-num']/text()"
-    issuer:
-      xpath: "//span[@class='issuer']/text()"
-    published_at:
-      xpath: "//span[@class='pub-date']/text()"
-    effective_at:
-      xpath: "//span[@class='eff-date']/text()"
-    status:
-      xpath: "//span[@class='status']/text()"
+scheduler:
+  scope: "Multi-volume and independent attachment portal test"
+  entry_urls:
+    - "http://127.0.0.1:{port}/portal/index.html"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/portal/"
+fetcher:
+  mode: http
+processor:
+  parser:
+    type: html
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{port}/portal/detail/.*\\\\.html$"
+      detail_body: "auto"
+      fields:
+        title:
+          xpath: "//h1[@class='doc-title']/text()"
+        document_number:
+          xpath: "//span[@class='doc-num']/text()"
+        issuer:
+          xpath: "//span[@class='issuer']/text()"
+        published_at:
+          xpath: "//span[@class='pub-date']/text()"
+        effective_at:
+          xpath: "//span[@class='eff-date']/text()"
+        status:
+          xpath: "//span[@class='status']/text()"
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "Trade Law Portal"
+    document_type: "法律法规"
+    language: "en"
+    jurisdiction: "VN"
 """.strip(),
                 encoding="utf-8",
             )
 
-            from wlh.domain import snapshots
-            from wlh.engine.runs import execute_run, prepare_run
+            from wlh.scheduler.runs import execute_run, prepare_run
+            from wlh.storage import snapshots
 
             c_run = prepare_run(source_yaml, "collect")
             c_res = execute_run(c_run)
@@ -207,7 +214,7 @@ callers:
                 items_default = data_default["items"]
                 assert len(items_default) == 3
 
-                from wlh.projections.canonical import COLUMNS
+                from wlh.storage.snapshots import COLUMNS
 
                 assert "source_id" in COLUMNS
                 assert "jurisdiction" in COLUMNS

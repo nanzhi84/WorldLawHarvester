@@ -36,17 +36,29 @@ def _routes() -> dict[str, tuple[bytes, str]]:
 
 def _config(tmp_path: Path, origin: str, *, from_directory: bool) -> Path:
     config: dict[str, Any] = {
-        "id": "dd-940", "adapter": "web", "archive_approved": True,
-        "entry_urls": [origin + (CATALOG if from_directory else PDF)],
-        "allowed_hosts": ["127.0.0.1"], "allowed_path_prefixes": [CATALOG, PDF],
-        "scope": "Explicit one-document corpus from full recorded NTA directory; no completeness claim for all NTA documents",
-        "robots": False, "delay": 0,
-        "fetch": {"mode": "http", "max_depth": 3, "retries": 0},
-        "budget": {"requests": 6, "documents": 2, "seconds": 90},
-        "metadata": {"source_name": "国税庁", "document_type": "税务资料", "language": "ja"},
-        "documents": {
-            "detail_url_patterns": [r"\.pdf$"], "require_complete_text": True,
-            "binary_title_from_link": True,
+        "id": "dd-940",
+        "scheduler": {
+            "scope": "Explicit one-document corpus from full recorded NTA directory; no completeness claim for all NTA documents",
+            "entry_urls": [origin + (CATALOG if from_directory else PDF)],
+            "allowed_hosts": ["127.0.0.1"],
+            "allowed_path_prefixes": [CATALOG, PDF],
+            "max_depth": 3,
+            "budget": {"requests": 6, "documents": 2, "seconds": 90},
+        },
+        "fetcher": {"mode": "http", "delay": 0.0, "retries": 0, "robots": False},
+        "processor": {
+            "parser": {
+                "type": "html",
+                "documents": {
+                    "detail_url_patterns": [r"\.pdf$"],
+                    "binary_title_from_link": True,
+                },
+            }
+        },
+        "cleaners": {"require_complete_text": True},
+        "storage": {
+            "archive_approved": True,
+            "metadata": {"source_name": "国税庁", "document_type": "税务资料", "language": "ja"},
         },
     }
     path = tmp_path / "dd-940.yaml"

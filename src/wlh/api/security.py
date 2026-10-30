@@ -47,7 +47,7 @@ class Caller(Strict):
     @field_validator("projection")
     @classmethod
     def valid_projection(cls, value: str) -> str:
-        from wlh.projections import PROJECTORS
+        from wlh.storage.snapshots import PROJECTORS
 
         if value not in PROJECTORS:
             raise ValueError("invalid_projection")

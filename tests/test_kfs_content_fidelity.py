@@ -117,8 +117,12 @@ def _run(
     with source_server(routes, ["www.kfs.go.jp"]) as (origin, requests):
         config = replay_config("dd-582", origin, tmp_path)
         cfg: dict[str, Any] = yaml.safe_load(config.read_text())
-        cfg["budget"] = {"requests": 40, "documents": 10, "seconds": 90,
-                         "response_bytes": 10485760}
+        cfg["scheduler"]["budget"] = {
+            "requests": 40,
+            "documents": 10,
+            "seconds": 90,
+            "response_bytes": 10485760,
+        }
         config.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
         report, rows = collect_artifact(
             "dd-582", config, env, str(OUTPUT.relative_to(ARTIFACTS) / name), requests

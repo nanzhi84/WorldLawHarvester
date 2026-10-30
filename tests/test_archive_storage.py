@@ -13,7 +13,7 @@ class TestDatabaseInitialization:
         self, initialized_db: dict[str, str]
     ) -> None:
         """Running database initialization repeatedly succeeds and ensures all `wlh` tables exist."""
-        from wlh.db import initialize
+        from wlh.storage.db import initialize
 
         second = initialize()
         assert second["status"] in {"initialized", "already_initialized"}
@@ -55,8 +55,8 @@ class TestDatabaseInitialization:
         from urllib.parse import urlsplit
 
         from wlh.core import WlhError
-        from wlh.db import connect, dsn, initialize
-        from wlh.engine.objects import Objects
+        from wlh.storage.cas import Objects
+        from wlh.storage.db import connect, dsn, initialize
 
         active_db = urlsplit(os.environ["WLH_DATABASE_URL"]).path.lstrip("/")
         assert active_db.endswith("_test") or active_db.startswith("test_")
@@ -96,7 +96,7 @@ class TestContentAddressableStorage:
         self, wlh_env: dict[str, str]
     ) -> None:
         """Storing bytes in CAS returns their SHA-256 digest and retrieves the exact payload."""
-        from wlh.engine.objects import Objects
+        from wlh.storage.cas import Objects
 
         objects = Objects()
         objects.check()
@@ -115,7 +115,7 @@ class TestContentAddressableStorage:
     ) -> None:
         """Requesting an unknown or malformed SHA-256 digest raises a deterministic archive error."""
         from wlh.core import WlhError
-        from wlh.engine.objects import Objects
+        from wlh.storage.cas import Objects
 
         objects = Objects()
         objects.check()

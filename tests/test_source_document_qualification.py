@@ -79,8 +79,8 @@ class TestSourceDocumentQualification:
         with source_server(routes, ["www.nta.go.jp"]) as (origin, requests):
             config = replay_config("dd-520", origin, tmp_path)
             cfg: dict[str, Any] = yaml.safe_load(config.read_text())
-            assert cfg["entry_urls"] == [origin + "/law/index.htm"]
-            cfg["budget"].update(requests=1500, documents=1000, seconds=75)
+            assert cfg["scheduler"]["entry_urls"] == [origin + "/law/index.htm"]
+            cfg["scheduler"]["budget"].update(requests=1500, documents=1000, seconds=75)
             config.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
             report, rows = collect_artifact("dd-520", config, initialized_db, NAME, requests)
 

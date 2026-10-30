@@ -242,8 +242,8 @@ def application(
 
 
 def serve(path: str | PathLike[str] | None, host: str, port: int) -> dict[str, str]:
-    from wlh.db import dsn, require_current
-    from wlh.engine.objects import Objects
+    from wlh.storage.cas import Objects
+    from wlh.storage.db import dsn, require_current
 
     if not path:
         raise WlhError("WLH_API_CONFIG_required")

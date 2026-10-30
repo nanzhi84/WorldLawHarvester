@@ -21,11 +21,11 @@ import pymupdf as _fitz  # type: ignore[import-untyped]
 import yaml
 from psycopg.rows import dict_row
 
-from wlh.adapters.web import Adapter as WebAdapter
-from wlh.adapters.web_fields import parse_html
 from wlh.config import load_file
-from wlh.engine.objects import Objects
-from wlh.extraction.pdf_scan import extract_pdf
+from wlh.processor.extractors.pdf.scan_detector import extract_pdf
+from wlh.processor.parsers.html.fields import parse_html
+from wlh.processor.parsers.html.parser import HtmlParser as WebAdapter
+from wlh.storage.cas import Objects
 
 from .conftest import run_wlh_cli
 from .source_replay_support import (
@@ -103,15 +103,17 @@ class TestOfflineReparseArchivedTargetRecovery:
         with source_server(routes, ["www.kfs.go.jp"]) as (origin, requests):
             config = replay_config("dd-582", origin, tmp_path)
             cfg: dict[str, Any] = yaml.safe_load(config.read_text())
-            original_xpath = cfg["documents"]["content_xpath"]
-            cfg["documents"]["content_xpath"] = '//*[@id="unmatched_during_initial_collect"]'
+            original_xpath = cfg["processor"]["parser"]["documents"]["content_xpath"]
+            cfg["processor"]["parser"]["documents"]["content_xpath"] = (
+                '//*[@id="unmatched_during_initial_collect"]'
+            )
             config.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
             _, collect_rows = collect_artifact(
                 "dd-582", config, initialized_db, "kfs-reparse-recovery-collect", requests
             )
             assert "/service/JP/120/01/index.html" in requests
             assert collect_rows == []
-            cfg["documents"]["content_xpath"] = original_xpath
+            cfg["processor"]["parser"]["documents"]["content_xpath"] = original_xpath
             config.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
 
         code, stdout, stderr = run_wlh_cli("reparse", str(config), "--no-progress", env=initialized_db)

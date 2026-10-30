@@ -14,7 +14,7 @@ from xml.etree import ElementTree
 import pytest
 import yaml
 
-from wlh.extraction.pdf_scan import extract_pdf
+from wlh.processor.extractors.pdf.scan_detector import extract_pdf
 
 from .source_replay_support import (
     ROOT,
@@ -197,19 +197,37 @@ class TestJapanTaxAppealCatalog:
         with source_server(routes, ["www.kfs.go.jp"]) as (origin, requests):
             config = tmp_path / "dd-946.yaml"
             cfg = {
-                "id": "dd-946", "adapter": "web", "archive_approved": True,
-                "scope": "Isolated real Japanese ruling with required image-only legal annexes",
-                "entry_urls": [origin + base + "index.html"], "allowed_hosts": ["127.0.0.1"],
-                "allowed_path_prefixes": [base], "robots": False, "delay": 0,
-                "fetch": {"mode": "http", "max_depth": 2, "retries": 0},
-                "budget": {"requests": 20, "documents": 10, "seconds": 60, "response_bytes": 10485760},
-                "metadata": {"source_name": "国税不服審判所", "document_type": "税务资料", "language": "ja", "jurisdiction": "JP"},
-                "documents": {
-                    "detail_url_patterns": [r"/service/JP/55/01/index\.html$"],
-                    "attachment_url_pattern": r"/service/JP/55/01/0[1-4]\.html$",
-                    "require_complete_text": True,
-                    "detail_body": "always", "content_xpath": '//*[@id="main"]',
-                    "fields": {"title": {"xpath": "(//h1)[1]"}},
+                "id": "dd-946",
+                "scheduler": {
+                    "scope": "Isolated real Japanese ruling with required image-only legal annexes",
+                    "entry_urls": [origin + base + "index.html"],
+                    "allowed_hosts": ["127.0.0.1"],
+                    "allowed_path_prefixes": [base],
+                    "max_depth": 2,
+                    "budget": {"requests": 20, "documents": 10, "seconds": 60, "response_bytes": 10485760},
+                },
+                "fetcher": {"mode": "http", "delay": 0.0, "retries": 0, "robots": False},
+                "processor": {
+                    "parser": {
+                        "type": "html",
+                        "documents": {
+                            "detail_url_patterns": [r"/service/JP/55/01/index\.html$"],
+                            "attachment_url_pattern": r"/service/JP/55/01/0[1-4]\.html$",
+                            "detail_body": "always",
+                            "content_xpath": '//*[@id="main"]',
+                            "fields": {"title": {"xpath": "(//h1)[1]"}},
+                        },
+                    }
+                },
+                "cleaners": {"require_complete_text": True},
+                "storage": {
+                    "archive_approved": True,
+                    "metadata": {
+                        "source_name": "国税不服審判所",
+                        "document_type": "税务资料",
+                        "language": "ja",
+                        "jurisdiction": "JP",
+                    },
                 },
             }
             config.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
@@ -274,14 +292,32 @@ class TestJapanTaxGuidanceCatalog:
         with source_server({path: (payload, "application/pdf")}, ["www.nta.go.jp"]) as (origin, requests):
             config = tmp_path / "dd-945.yaml"
             cfg = {
-                "id": "dd-945", "adapter": "web", "archive_approved": True,
-                "scope": "Isolated complete original NTA form, no claim of source census",
-                "entry_urls": [origin + path], "allowed_hosts": ["127.0.0.1"],
-                "allowed_path_prefixes": ["/law/"], "robots": False, "delay": 0,
-                "fetch": {"mode": "http", "max_depth": 1, "retries": 0},
-                "budget": {"requests": 4, "documents": 2, "seconds": 60, "response_bytes": 10485760},
-                "metadata": {"source_name": "国税庁", "document_type": "税务资料", "language": "ja", "jurisdiction": "JP"},
-                "documents": {"detail_url_patterns": [r"/besshi04\.pdf$"], "require_complete_text": True},
+                "id": "dd-945",
+                "scheduler": {
+                    "scope": "Isolated complete original NTA form, no claim of source census",
+                    "entry_urls": [origin + path],
+                    "allowed_hosts": ["127.0.0.1"],
+                    "allowed_path_prefixes": ["/law/"],
+                    "max_depth": 1,
+                    "budget": {"requests": 4, "documents": 2, "seconds": 60, "response_bytes": 10485760},
+                },
+                "fetcher": {"mode": "http", "delay": 0.0, "retries": 0, "robots": False},
+                "processor": {
+                    "parser": {
+                        "type": "html",
+                        "documents": {"detail_url_patterns": [r"/besshi04\.pdf$"]},
+                    }
+                },
+                "cleaners": {"require_complete_text": True},
+                "storage": {
+                    "archive_approved": True,
+                    "metadata": {
+                        "source_name": "国税庁",
+                        "document_type": "税务资料",
+                        "language": "ja",
+                        "jurisdiction": "JP",
+                    },
+                },
             }
             config.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
             report, rows = collect_artifact("dd-945", config, initialized_db, name, requests)

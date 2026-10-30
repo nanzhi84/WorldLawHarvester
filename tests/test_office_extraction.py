@@ -8,7 +8,7 @@ from pathlib import Path
 class TestLegacyVietnameseAndDisguisedOfficeExtraction:
     def test_mixed_unicode_and_tcvn3_lines_recover_vietnamese_diacritics(self) -> None:
         """Line-level TCVN3 recovery preserves existing Unicode headers while converting TCVN3 lines."""
-        from wlh.extraction.vi_tcvn3 import normalize_detected_tcvn3
+        from wlh.processor.extractors.quirks.vi_tcvn3 import normalize_detected_tcvn3
 
         unicode_header = "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM"
         tcvn3_line = (
@@ -25,7 +25,7 @@ class TestLegacyVietnameseAndDisguisedOfficeExtraction:
         self, tmp_path: Path
     ) -> None:
         """Files named `.doc` that actually contain HTML or TCVN3 RTF are sniffed and extracted accurately."""
-        from wlh.extraction.office import extract_office
+        from wlh.processor.extractors.word.office import extract_office
 
         disguised_html_doc = tmp_path / "disguised_html.doc"
         disguised_html_doc.write_bytes(
@@ -58,7 +58,7 @@ class TestLegacyVietnameseAndDisguisedOfficeExtraction:
         from docx.shared import Inches  # type: ignore[import-untyped]
 
         from wlh.core import WlhError
-        from wlh.extraction.office import extract_office
+        from wlh.processor.extractors.word.office import extract_office
 
         fitz_mod: Any = fitz
         img_doc = fitz_mod.open()

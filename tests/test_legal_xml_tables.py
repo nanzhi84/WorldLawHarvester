@@ -391,7 +391,7 @@ class TestLegalXmlTables:
         with source_server(routes, []) as (origin, requests):
             config = replay_config("dd-517", origin, work)
             cfg = yaml.safe_load(config.read_text())
-            cfg["budget"] = {"requests": 10, "documents": 2, "seconds": 90, "response_bytes": 67108864}
+            cfg["scheduler"]["budget"] = {"requests": 10, "documents": 2, "seconds": 90, "response_bytes": 67108864}
             config.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
             (ARTIFACTS / "source-config.yaml").write_text(config.read_text())
             report, rows = collect_artifact("dd-517", config, initialized_db, NAME, requests)

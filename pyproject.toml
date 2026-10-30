@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
   "aiohttp>=3.12",
   "boto3>=1.36",
+  "charset-normalizer>=3.3",
   "lxml>=5",
   "openpyxl>=3.1",
   "pillow>=11",
@@ -23,10 +24,10 @@ dependencies = [
   "rich>=13",
   "cryptography>=44",
   "protego>=0.4",
-  "scrapy>=2.12",
   "selectolax>=0.3",
   "striprtf>=0.0.29",
   "xlrd>=2",
+  "yarl>=1.18",
 ]
 
 [project.scripts]

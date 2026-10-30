@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 import pytest
 import yaml
 
-from wlh.domain.delivery_quality import (
+from wlh.cleaners.delivery_quality import (
     assert_delivery_quality,
     verify_source_delivery,
 )
@@ -141,21 +141,25 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             raw_cfg: dict[str, Any] = yaml.safe_load(
                 src_yaml_path.read_text(encoding="utf-8")
             )
-            orig_hosts = list(raw_cfg.get("allowed_hosts", []))
+            sched: dict[str, Any] = raw_cfg["scheduler"]
+            fetcher: dict[str, Any] = raw_cfg.setdefault("fetcher", {})
+            parser: dict[str, Any] = raw_cfg.get("processor", {}).get("parser", {})
+
+            orig_hosts = list(sched.get("allowed_hosts", []))
             primary_host = orig_hosts[0]
             secondary_hosts = orig_hosts[1:]
 
             rewritten_urls: list[str] = []
-            entry_urls: list[str] = raw_cfg["entry_urls"]
+            entry_urls: list[str] = sched["entry_urls"]
             for entry_url in entry_urls:
                 parts = urlsplit(entry_url)
                 rewritten_urls.append(
                     urlunsplit(("http", f"127.0.0.1:{port}", parts.path, parts.query, ""))
                 )
-            raw_cfg["entry_urls"] = rewritten_urls
-            raw_cfg["allowed_hosts"] = ["127.0.0.1", "::1"] if secondary_hosts else ["127.0.0.1"]
-            if "host_path_scopes" in raw_cfg:
-                orig_scopes: dict[str, list[str]] = raw_cfg["host_path_scopes"]
+            sched["entry_urls"] = rewritten_urls
+            sched["allowed_hosts"] = ["127.0.0.1", "::1"] if secondary_hosts else ["127.0.0.1"]
+            if "host_path_scopes" in sched:
+                orig_scopes: dict[str, list[str]] = sched["host_path_scopes"]
                 new_scopes: dict[str, list[str]] = {}
                 if primary_host in orig_scopes:
                     new_scopes["127.0.0.1"] = list(orig_scopes[primary_host])
@@ -166,40 +170,50 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                             sec_scoped.append(p)
                 if sec_scoped:
                     new_scopes["::1"] = sec_scoped
-                raw_cfg["host_path_scopes"] = new_scopes
-                allowed_prefixes: list[str] = list(raw_cfg.get("allowed_path_prefixes", []))
+                sched["host_path_scopes"] = new_scopes
+                allowed_prefixes: list[str] = list(sched.get("allowed_path_prefixes", []))
                 for p_list in new_scopes.values():
                     for p in p_list:
                         if p not in allowed_prefixes:
                             allowed_prefixes.append(p)
-                raw_cfg["allowed_path_prefixes"] = allowed_prefixes
-            raw_cfg["delay"] = 0.0
-            if "documents" in raw_cfg:
+                sched["allowed_path_prefixes"] = allowed_prefixes
+            fetcher["delay"] = 0.0
 
-                def _rewrite_pat(pat: str) -> str:
-                    out = pat
-                    for sec_host in secondary_hosts:
-                        out = out.replace(re.escape(sec_host), rf"\[::1\]:{port_v6}")
-                        out = out.replace(sec_host.replace(".", r"\."), rf"\[::1\]:{port_v6}")
-                    out = out.replace(re.escape(primary_host), rf"127\.0\.0\.1:{port}")
-                    out = out.replace(primary_host.replace(".", r"\."), rf"127\.0\.0\.1:{port}")
-                    out = re.sub(r"^\^https?://", "^http://", out)
-                    return out
+            def _rewrite_pat(pat: str) -> str:
+                out = pat
+                for sec_host in secondary_hosts:
+                    out = out.replace(re.escape(sec_host), rf"\[::1\]:{port_v6}")
+                    out = out.replace(sec_host.replace(".", r"\."), rf"\[::1\]:{port_v6}")
+                out = out.replace(re.escape(primary_host), rf"127\.0\.0\.1:{port}")
+                out = out.replace(primary_host.replace(".", r"\."), rf"127\.0\.0\.1:{port}")
+                out = re.sub(r"^\^https?://", "^http://", out)
+                return out
 
-                if "detail_url_patterns" in raw_cfg["documents"]:
-                    raw_cfg["documents"]["detail_url_patterns"] = [
-                        _rewrite_pat(pat) for pat in raw_cfg["documents"]["detail_url_patterns"]
+            if "url_rewrites" in sched:
+                for rw in sched["url_rewrites"]:
+                    rw["pattern"] = _rewrite_pat(rw["pattern"])
+                    rw["replacement"] = re.sub(r"^https://", "http://", rw["replacement"])
+
+            if "documents" in parser and isinstance(parser["documents"], dict):
+                docs = cast(dict[str, Any], parser["documents"])
+                if "detail_url_patterns" in docs:
+                    docs["detail_url_patterns"] = [
+                        _rewrite_pat(str(pat)) for pat in docs["detail_url_patterns"]
                     ]
-                if "attachment_url_pattern" in raw_cfg["documents"]:
-                    raw_cfg["documents"]["attachment_url_pattern"] = _rewrite_pat(
-                        raw_cfg["documents"]["attachment_url_pattern"]
+                if "exclude_detail_url_patterns" in docs:
+                    docs["exclude_detail_url_patterns"] = [
+                        _rewrite_pat(str(pat)) for pat in docs["exclude_detail_url_patterns"]
+                    ]
+                if "attachment_url_pattern" in docs:
+                    docs["attachment_url_pattern"] = _rewrite_pat(
+                        str(docs["attachment_url_pattern"])
                     )
                 # Navigation patterns carry the same origin as document patterns.
                 # Preserve their paths and matching rules when replaying locally.
-                options = raw_cfg.get("adapter_options", {})
+                options: dict[str, Any] = parser.get("options", {})
                 if "navigation_url_patterns" in options:
                     options["navigation_url_patterns"] = [
-                        _rewrite_pat(pat) for pat in options["navigation_url_patterns"]
+                        _rewrite_pat(str(pat)) for pat in options["navigation_url_patterns"]
                     ]
 
             replay_yaml = tmp_path / f"{source_id}-replay.yaml"
@@ -208,8 +222,8 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                 encoding="utf-8",
             )
 
-            from wlh.engine.runs import execute_run, prepare_run
-            from wlh.projections.canonical import project_canonical
+            from wlh.scheduler.runs import execute_run, prepare_run
+            from wlh.storage.snapshots import project_canonical
 
             c_run = prepare_run(replay_yaml, "collect")
             c_res = execute_run(c_run)
@@ -290,7 +304,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         (source_id,),
                     ).fetchall()
                     assert len(rows) >= 1, f"Expected document_row for {source_id}"
-                    from wlh.engine.objects import Objects
+                    from wlh.storage.cas import Objects
 
                     objs = Objects()
                     quality_report = assert_delivery_quality(
@@ -427,10 +441,11 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                     if source_id == "dd-509":
                         assert projected["published_at"] == "2004-05-19"
                         assert projected["effective_at"] == "2004-05-19"
-                        from wlh.adapters.web_fields import extract_detail_fields
+                        from wlh.processor.parsers.html.fields import extract_detail_fields
 
+                        issuer_rule = raw_cfg["processor"]["parser"]["documents"]["fields"]["issuer"]
                         treaty_fields, _, _ = extract_detail_fields(
-                            {"issuer": raw_cfg["documents"]["fields"]["issuer"]},
+                            {"issuer": issuer_rule},
                             '<table class="table"><tr><th>簽約國：</th><td>歐洲地區 ＞ 波蘭</td></tr></table>'.encode(
                                 "utf-8"
                             ),
@@ -441,7 +456,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         assert treaty_fields.get("issuer") != "歐洲地區 ＞ 波蘭"
 
                         domestic_fields, _, _ = extract_detail_fields(
-                            {"issuer": raw_cfg["documents"]["fields"]["issuer"]},
+                            {"issuer": issuer_rule},
                             '<table class="table"><tr><th>法規類別：</th><td>行政 ＞ 臺灣省政府 ＞ 組織目</td></tr></table>'.encode(
                                 "utf-8"
                             ),
@@ -451,10 +466,11 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         )
                         assert domestic_fields.get("issuer") == "臺灣省政府"
                     if source_id == "dd-162":
-                        from wlh.adapters.web_fields import extract_detail_fields
+                        from wlh.processor.parsers.html.fields import extract_detail_fields
 
+                        issuer_rule = raw_cfg["processor"]["parser"]["documents"]["fields"]["issuer"]
                         law_fields, _, _ = extract_detail_fields(
-                            {"issuer": raw_cfg["documents"]["fields"]["issuer"]},
+                            {"issuer": issuer_rule},
                             '<div id="lawText"><span id="lblUnit">市場監理 &gt; 證券商管理</span></div>'.encode(
                                 "utf-8"
                             ),

@@ -8,7 +8,7 @@ class TestHtmlToMarkdownConversion:
         self,
     ) -> None:
         """HTML within `content_xpath` converts headings, relative links, and tables into Markdown."""
-        from wlh.extraction.markdown import html_to_markdown
+        from wlh.processor.extractors.html.html_to_md import html_to_markdown
 
         html = """
         <html>
@@ -43,7 +43,7 @@ class TestHtmlToMarkdownConversion:
         self,
     ) -> None:
         """HTML containing UI chrome (font widgets, print/back buttons, share bars, anchors without href, adjacent bolds) renders clean Markdown."""
-        from wlh.extraction.markdown import html_to_markdown
+        from wlh.processor.extractors.html.html_to_md import html_to_markdown
 
         html = """
         <html>
@@ -115,7 +115,7 @@ class TestHtmlToMarkdownConversion:
         self,
     ) -> None:
         """IRS IRB two-column layout strips the `col-md-4` table-of-contents sidebar and empty anchor links while keeping `col-md-8` body text."""
-        from wlh.extraction.markdown import html_to_markdown
+        from wlh.processor.extractors.html.html_to_md import html_to_markdown
 
         html = (
             '<div id="block-pup-irs-barrio-content">'
