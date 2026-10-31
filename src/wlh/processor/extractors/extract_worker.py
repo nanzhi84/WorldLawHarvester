@@ -185,6 +185,11 @@ def main() -> None:
     signal.signal(signal.SIGTERM, terminate)
     threading.Thread(target=watch_parent, args=(os.getppid(),), daemon=True).start()
     if "--daemon" in sys.argv[1:]:
+        from wlh.processor.extractors.pdf.scan_detector import (
+            extract_pdf as _warm_pdf,
+        )
+
+        _ = _warm_pdf
         for line in sys.stdin:
             line = line.strip()
             if not line:

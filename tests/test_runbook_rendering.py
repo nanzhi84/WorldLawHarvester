@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 
 class TestRunbookVerificationSamples:
@@ -418,3 +420,178 @@ class TestRunbookVerificationSamples:
                     f"payload_truncated={p_trunc} (len={len(p_text)}), "
                     f"markdown_truncated={m_trunc} (len={len(m_text)})"
                 )
+
+    def test_anomaly_first_stratified_sampling_prioritizes_p5_p95_warning_and_missing_metadata_boundaries(
+        self,
+    ) -> None:
+        """Anomaly-First Stratified Sampling prioritizes shortest (P5), longest (P95), accept_with_warning, and missing doc_number/effective_at boundary samples over fixed first-N items."""
+        from wlh.runbook_samples import (
+            render_source_verification_html,
+            stratify_verification_samples,
+        )
+
+        assert stratify_verification_samples([], max_items=5) == []
+        assert stratify_verification_samples([{"title": "T"}], max_items=0) == []
+
+        candidates: list[dict[str, object]] = []
+        # First 20 items: normal baseline documents (~260 visible chars, complete metadata, accept route)
+        for i in range(1, 21):
+            body = f"# 常规税法样本第{i:02d}号\n\n" + (
+                f"第一条 纳税人应当依法按期办理纳税申报，税务机关依法核定税额（常规条目 {i:02d}）。\n"
+                * 6
+            )
+            candidates.append(
+                {
+                    "detail_url": f"https://fgk.chinatax.gov.cn/normal/{i}.html",
+                    "raw_payload": f"<div class='law'><p>{body}</p></div>",
+                    "markdown": body,
+                    "title": f"常规税法样本第{i:02d}号",
+                    "doc_number": f"税总发〔2026〕{i}号",
+                    "issuer": "国家税务总局",
+                    "published_at": "2026-03-01",
+                    "effective_at": "2026-04-01",
+                    "quality_route": "accept",
+                }
+            )
+
+        # Tail items (indices 20..24): anomaly & boundary samples that fixed first-N would drop
+        candidates.append(
+            {
+                "detail_url": "https://fgk.chinatax.gov.cn/anomaly/p5-shortest.html",
+                "raw_payload": "<div class='law'><p>第一条 极短批复全文。</p></div>",
+                "markdown": "# 极短批复样本\n\n第一条 极短批复全文。",
+                "title": "边界样本_P5最短正文",
+                "doc_number": "税总函〔2026〕901号",
+                "issuer": "国家税务总局",
+                "published_at": "2026-03-10",
+                "effective_at": "2026-03-10",
+                "quality_route": "accept",
+            }
+        )
+        long_body = "# 超长实施细则样本\n\n" + (
+            "第一条 为全面规范跨境数字贸易税收征管流程、账簿凭证留存与信息报送义务，特制定本细则。\n\n"
+            * 45
+        )
+        candidates.append(
+            {
+                "detail_url": "https://fgk.chinatax.gov.cn/anomaly/p95-longest.html",
+                "raw_payload": f"<div class='law'><p>{long_body}</p></div>",
+                "markdown": long_body,
+                "title": "边界样本_P95最长正文",
+                "doc_number": "税总发〔2026〕902号",
+                "issuer": "国家税务总局",
+                "published_at": "2026-03-11",
+                "effective_at": "2026-05-01",
+                "quality_route": "accept",
+            }
+        )
+        candidates.append(
+            {
+                "detail_url": "https://fgk.chinatax.gov.cn/anomaly/warning-route.html",
+                "raw_payload": "<div class='law'><p>含单字符替换警告\ufffd的OCR文本内容。</p></div>",
+                "markdown": "# 警告路由样本\n\n"
+                + ("第二条 含单字符替换警告\ufffd的OCR扫描件正文内容，用于抽检核验。\n" * 5),
+                "title": "边界样本_警告路由",
+                "doc_number": "税总发〔2026〕903号",
+                "issuer": "国家税务总局",
+                "published_at": "2026-03-12",
+                "effective_at": "2026-05-01",
+                "quality_route": "accept_with_warning",
+            }
+        )
+        candidates.append(
+            {
+                "detail_url": "https://fgk.chinatax.gov.cn/anomaly/missing-doc-num.html",
+                "raw_payload": "<div class='law'><p>无文号公告正文内容。</p></div>",
+                "markdown": "# 缺失文号样本\n\n"
+                + ("第三条 本公告无发文字号，专门用于检验缺失文号边界样本抽样。\n" * 6),
+                "title": "边界样本_缺失文号",
+                "doc_number": None,
+                "issuer": "国家税务总局",
+                "published_at": "2026-03-13",
+                "effective_at": "2026-05-01",
+                "quality_route": "accept",
+            }
+        )
+        candidates.append(
+            {
+                "detail_url": "https://fgk.chinatax.gov.cn/anomaly/missing-effective-at.html",
+                "raw_payload": "<div class='law'><p>无生效日通知正文内容。</p></div>",
+                "markdown": "# 缺失生效日样本\n\n"
+                + ("第四条 本通知未记载生效日期，专门用于检验缺失生效日边界样本抽样。\n" * 6),
+                "title": "边界样本_缺失生效日",
+                "doc_number": "税总发〔2026〕905号",
+                "issuer": "国家税务总局",
+                "published_at": "2026-03-14",
+                "effective_at": None,
+                "quality_route": "accept",
+            }
+        )
+
+        sampled = stratify_verification_samples(candidates, max_items=6)
+        assert len(sampled) == 6
+        sampled_titles = [str(it.get("title")) for it in sampled]
+        for expected_boundary_title in (
+            "边界样本_P5最短正文",
+            "边界样本_P95最长正文",
+            "边界样本_警告路由",
+            "边界样本_缺失文号",
+            "边界样本_缺失生效日",
+        ):
+            assert expected_boundary_title in sampled_titles[:5], (
+                f"Expected {expected_boundary_title!r} in top-5 anomaly-first strata, got {sampled_titles}"
+            )
+
+        all_strata: set[str] = {
+            str(tag)
+            for it in sampled
+            for tag in cast(Sequence[object], it.get("sampling_strata") or ())
+        }
+        assert {
+            "p5_shortest",
+            "p95_longest",
+            "accept_with_warning",
+            "missing_doc_number",
+            "missing_effective_at",
+            "baseline",
+        }.issubset(all_strata)
+
+        # Even if most early candidates lack effective_at, per-stratum quota prevents starving complete baseline items
+        sparse_eff_candidates: list[dict[str, object]] = []
+        for idx, item in enumerate(candidates):
+            cloned = dict(item)
+            if idx < 15:
+                cloned["effective_at"] = None
+            sparse_eff_candidates.append(cloned)
+        sparse_sampled = stratify_verification_samples(sparse_eff_candidates, max_items=6)
+        sparse_strata: set[str] = {
+            str(tag)
+            for it in sparse_sampled
+            for tag in cast(Sequence[object], it.get("sampling_strata") or ())
+        }
+        assert "baseline" in sparse_strata
+        assert "missing_effective_at" in sparse_strata
+
+        rendered_html = render_source_verification_html(
+            [
+                {
+                    "source_id": "dd-501",
+                    "source_name": "国家税务总局法规库",
+                    "status": "[x] 已实网跑通",
+                    "continent": "1. 亚洲法域 (Asia)",
+                    "jurisdiction": "1.1 中国大陆 (China Mainland)",
+                    "subcategory": "—",
+                    "items": candidates,
+                }
+            ],
+            max_items_per_source=6,
+        )
+        for expected_boundary_title in (
+            "边界样本_P5最短正文",
+            "边界样本_P95最长正文",
+            "边界样本_警告路由",
+            "边界样本_缺失文号",
+            "边界样本_缺失生效日",
+        ):
+            assert expected_boundary_title in rendered_html
+

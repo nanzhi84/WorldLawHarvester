@@ -493,3 +493,78 @@ class TestDeliverySemanticQualityContract:
             )
             assert "polluted_or_malformed_doc_number" in bad_codes
 
+    def test_declarative_rule_pack_isolates_language_and_jurisdiction_specific_rules(
+        self, wlh_env: dict[str, str]
+    ) -> None:
+        """Declarative delivery quality rule packs load by jurisdiction/language so Vietnamese agency prefixes and placeholders apply to VN/vi sources without polluting US/en sources."""
+        from wlh.cleaners.delivery_quality import load_delivery_quality_rules
+        from wlh.storage.cas import Objects
+
+        vn_pack = load_delivery_quality_rules(language="vi", jurisdiction="VN")
+        us_pack = load_delivery_quality_rules(language="en", jurisdiction="US")
+
+        assert vn_pack.language == "vi"
+        assert vn_pack.jurisdiction == "VN"
+        assert "tải file đính kèm" in vn_pack.boilerplate_titles
+        assert any("bạn chưa đăng nhập" in pat for pat in vn_pack.placeholder_patterns)
+        assert any("bộ" in pat.lower() for pat in vn_pack.salutation_prefix_regexes)
+
+        assert us_pack.language == "en"
+        assert us_pack.jurisdiction == "US"
+        assert "contents" in us_pack.boilerplate_titles
+        assert "tải file đính kèm" not in us_pack.boilerplate_titles
+        assert not (set(vn_pack.placeholder_patterns) & set(us_pack.placeholder_patterns))
+        assert not us_pack.salutation_prefix_regexes
+
+
+        objs = Objects()
+        comparative_md_hash = objs.put(
+            (
+                "# Comparative Study on Administrative Portals\n\n"
+                "Section 1. This study quotes the phrase 'Bạn chưa đăng nhập thành viên' "
+                "as an example of an access-control notice in Southeast Asian portals."
+            ).encode("utf-8")
+        )
+        row = {
+            "source_id": "dd-990",
+            "resource_id": "res-comp-1",
+            "row_index": 1,
+            "role": "primary",
+            "title": "Bộ Tài chính: Comparative Fiscal Governance Analysis",
+            "markdown_file": f"comp_{'a' * 8}_{comparative_md_hash[:8]}.md",
+            "doc_type": "政策文件",
+            "acquired_at": "2026-10-31 09:00:00",
+            "original_file": None,
+            "volume_order": None,
+            "doc_number": "US-GAO-2026-01",
+            "issuer": "Government Accountability Office",
+            "published_at": "2026-10-01",
+            "effective_at": "2026-10-15",
+            "expired_at": None,
+            "status": "Active",
+            "source_name": "US Comparative Policy Archive",
+            "detail_url": "https://www.gao.gov/products/gao-26-01",
+            "source_record_hash": "a" * 64,
+            "markdown_hash": comparative_md_hash,
+            "original_hash": None,
+        }
+
+        us_cfg = {"storage": {"metadata": {"language": "en", "jurisdiction": "US"}}}
+        vn_cfg = {"storage": {"metadata": {"language": "vi", "jurisdiction": "VN"}}}
+
+        rep_us = audit_delivery_rows(
+            [row], objects=objs, source_config=us_cfg, require_multi_resource=False
+        )
+        assert rep_us["passed"] is True, f"Expected US/en audit to pass, got {rep_us['violations']}"
+        assert rep_us["rule_pack"] == {"language": "en", "jurisdiction": "US"}
+
+        rep_vn = audit_delivery_rows(
+            [row], objects=objs, source_config=vn_cfg, require_multi_resource=False
+        )
+        assert rep_vn["passed"] is False
+        assert rep_vn["rule_pack"] == {"language": "vi", "jurisdiction": "VN"}
+        vn_codes = set(rep_vn["violation_codes"])
+        assert "boilerplate_or_garbage_title" in vn_codes
+        assert "blocked_or_placeholder_markdown" in vn_codes
+
+

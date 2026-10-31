@@ -235,7 +235,10 @@ def _execute_attempt(
                     break
             if progress:
                 progress.update(run_id)
-            time.sleep(0.2)
+            try:
+                process.wait(timeout=0.05)
+            except subprocess.TimeoutExpired:
+                pass
     finally:
         stop_process(process)
     state = receipt(run_id)
