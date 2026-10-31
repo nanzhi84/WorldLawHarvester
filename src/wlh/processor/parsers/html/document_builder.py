@@ -19,6 +19,7 @@ from wlh.processor.extractors.html.html_to_md import (
 )
 from wlh.processor.extractors.html.images import require_textual_images
 from wlh.processor.extractors.word.office import detect_real_format
+from wlh.processor.extractors.xml.markdown import xml_to_markdown
 from wlh.processor.parsers.html.dom_cleanup import clean_site_dom
 from wlh.processor.parsers.html.fields import (
     decode,
@@ -31,7 +32,7 @@ from wlh.processor.parsers.html.fields import (
 from wlh.processor.parsers.html.titles import directory_title
 
 etree: Any = _etree
-TEXT_KINDS: set[str] = {"html", "txt", "json"}
+TEXT_KINDS: set[str] = {"html", "txt", "json", "xml"}
 BINARY_KINDS: set[str] = {"pdf", "doc", "docx", "rtf", "xls", "xlsx", "zip"}
 GENERIC_ATTACHMENT_LABELS: set[str] = {
     "tải file đính kèm",
@@ -239,6 +240,13 @@ class WebDocumentBuilder:
         if kind == "json":
             text, _ = decode(data, acquisition["charset"])
             md = json_to_markdown(text)
+            return (
+                apply_text_cleaners(md, strip_pats) if strip_pats else md,
+                None,
+                ["markdown", "quality"],
+            )
+        if kind == "xml":
+            md = xml_to_markdown(data)
             return (
                 apply_text_cleaners(md, strip_pats) if strip_pats else md,
                 None,

@@ -256,10 +256,6 @@ class TestArchitectureContract:
                         isinstance(node, ast.FunctionDef)
                         and node.name.endswith("_to_markdown")
                         and rel_parts[:2] != ("processor", "extractors")
-                        and not (
-                            rel_parts == ("processor", "parsers", "transforms.py")
-                            and node.name == "gpo_xml_to_markdown"
-                        )
                     ):
                         raise AssertionError(
                             f"Markdown conversion function '{node.name}' must live in "
@@ -271,6 +267,7 @@ class TestArchitectureContract:
 
         from wlh.processor.extractors.xml import (
             dokument_xml_to_markdown,
+            egov_law_xml_to_markdown,
             gazette_html_to_markdown,
             gpo_xml_to_markdown,
             inline_content,
@@ -280,7 +277,7 @@ class TestArchitectureContract:
         )
 
         etree: Any = _etree
-        law_root: Any = etree.fromstring(
+        law_xml_bytes = (
             b"<Law><LawBody><LawTitle>Environmental Act</LawTitle>"
             b"<Article><ArticleCaption>Purpose</ArticleCaption><ArticleTitle>Article 1</ArticleTitle>"
             b"<Paragraph><Sentence>This Act applies to <Ruby>law<Rt>hou</Rt></Ruby> and CO<Sub>2</Sub>.</Sentence></Paragraph>"
@@ -291,7 +288,9 @@ class TestArchitectureContract:
             b"</TableRow></Table></TableStruct>"
             b"</LawBody></Law>"
         )
-        law_md = markdown(law_root)
+        law_root: Any = etree.fromstring(law_xml_bytes)
+        law_md = markdown(law_root, title="Environmental Act")
+        assert law_md.startswith("# Environmental Act\n\n")
         assert "## Environmental Act" in law_md
         assert "## Purpose" in law_md
         assert "Article 1" in law_md
@@ -299,6 +298,31 @@ class TestArchitectureContract:
         assert "CO<sub>2</sub>" in law_md
         assert 'colspan="2"' in law_md
         assert "border-top:1px solid currentColor;border-bottom:none" in law_md
+
+        # xml_to_markdown must also convert non-GPO standard Legal XML and <dokument> XML
+        law_bytes_md = xml_to_markdown(law_xml_bytes)
+        assert "## Environmental Act" in law_bytes_md
+        assert "<ruby>law<rt>hou</rt></ruby>" in law_bytes_md
+
+        egov_root: Any = etree.fromstring(
+            b"<Law><LawBody><LawTitle>Water Pollution Prevention Act</LawTitle>"
+            b"<Article><ArticleTitle>Article 1</ArticleTitle>"
+            b"<Paragraph><Sentence>Standards are shown in <Fig src='./pict/table1.pdf'/>.</Sentence></Paragraph>"
+            b"</Article></LawBody></Law>"
+        )
+        egov_md = egov_law_xml_to_markdown(
+            egov_root,
+            title="Water Pollution Prevention Act",
+            number="Act No. 138 of 1970",
+            enforcement_comment="Enforced within 6 months",
+            scheduled_enforcement_date="2026-04-01",
+            att_srcs=("pict/table1.pdf", "pict/annex2.pdf"),
+        )
+        assert egov_md.startswith("# Water Pollution Prevention Act\n\nAct No. 138 of 1970")
+        assert "施行期日参考情報：Enforced within 6 months" in egov_md
+        assert "施行期日参考情報（予定）：2026-04-01" in egov_md
+        assert "[添付ファイル: pict/table1.pdf]" in egov_md
+        assert "[添付ファイル: pict/annex2.pdf]" in egov_md
 
         tbl_node: Any = law_root.find(".//Table")
         assert tbl_node is not None
@@ -317,11 +341,20 @@ class TestArchitectureContract:
         assert "## Supplementary Information" in xml_to_markdown(gpo_raw)
         assert "# Supplementary Information" in gpo_xml_to_markdown(gpo_raw)
 
-        dok_root: Any = etree.fromstring(
-            b"<dokument><leitsatz>Guiding principle.</leitsatz><tenor>The appeal is dismissed.</tenor></dokument>"
+        dok_bytes = (
+            b"<dokument><leitsatz>Guiding principle on environmental liability.</leitsatz>"
+            b"<tenor>The appeal is dismissed.</tenor></dokument>"
         )
-        assert dokument_xml_to_markdown(dok_root) == "Guiding principle.\n\nThe appeal is dismissed."
-        assert "Gazette body" in gazette_html_to_markdown("<p>Gazette body</p>", "https://example.gov")
+        dok_root: Any = etree.fromstring(dok_bytes)
+        assert (
+            dokument_xml_to_markdown(dok_root)
+            == "Guiding principle on environmental liability.\n\nThe appeal is dismissed."
+        )
+        assert "Guiding principle on environmental liability." in xml_to_markdown(dok_bytes)
+        gaz_md = gazette_html_to_markdown(
+            "<p>Gazette body</p>", "https://example.gov", title="Gazette Notice"
+        )
+        assert gaz_md.startswith("# Gazette Notice\n\n") and "Gazette body" in gaz_md
 
 
 class TestSourceConfigContract:

@@ -22,6 +22,7 @@ from wlh.cleaners.dates import (
 from wlh.cleaners.text_cleaner import compact
 from wlh.config import PARSER_TRANSFORMS
 from wlh.core import WlhError
+from wlh.processor.extractors.xml.markdown import gpo_xml_to_markdown
 
 etree: Any = _etree
 
@@ -118,15 +119,6 @@ def restore_inline_script_cells(target: Any, context: Mapping[str, Any] | None =
         return f"{prefix}{html_lib.escape(assign_val)}{suffix}"
 
     return _INLINE_SCRIPT_CELL_RE.sub(_replace_cell, text)
-
-
-def gpo_xml_to_markdown(raw: bytes | str, context: Mapping[str, Any] | None = None) -> str:
-    """Convert GPO bulk printing XML (HD/SECTNO/GPOTABLE/EXTRACT) into structured Markdown via Stage 3b XML extractor."""
-    from wlh.processor.extractors.xml.markdown import (
-        gpo_xml_to_markdown as _extract_gpo_xml_to_markdown,
-    )
-
-    return _extract_gpo_xml_to_markdown(raw, context)
 
 
 def external_figure_sources(root: Any) -> list[str]:

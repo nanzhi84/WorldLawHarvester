@@ -1022,7 +1022,7 @@ class JsonParser(RecordAdapter):
                     "published_at": item.get("first_action_date") or item.get("latest_action_date"),
                     "status": item.get("status") or item.get("latest_action_description"),
                     "detail_url": detail,
-                    "text": "# " + item["title"] + "\n\n" + body if body else "",
+                    "text": text_to_markdown(body, title=str(item["title"])) if body else "",
                     "downloads": downloads,
                 }
             )

@@ -17,11 +17,11 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 import lxml.etree as _etree  # type: ignore[import-untyped]
 
 from wlh.cleaners.dates import resolve_moj_law_dates_and_meta
-from wlh.cleaners.text_cleaner import normalized
 from wlh.config import MAX_ORIGINAL_BYTES
 from wlh.core import WlhError, guard, public_url
 from wlh.processor.extractors.xml import (
     dokument_xml_to_markdown,
+    egov_law_xml_to_markdown,
     gazette_html_to_markdown,
     markdown,
 )
@@ -220,16 +220,11 @@ def japan_records(
                 raw_s = str(cast(dict[str, Any], item).get("src") or "").strip()
                 if raw_s:
                     att_srcs.append(_normalize_attachment_src(raw_s))
-    fig_srcs: list[str] = []
-    fig_placeholders: list[tuple[str, str]] = []
-    for fig in root.xpath(".//Fig[normalize-space(@src)!='']"):
-        norm_fig_src = _normalize_attachment_src(str(fig.get("src") or ""))
-        if norm_fig_src:
-            token = f"@@WLHFIG{len(fig_placeholders)}@@"
-            fig_srcs.append(norm_fig_src)
-            fig_placeholders.append((token, f"[添付ファイル: {norm_fig_src}]"))
-            fig.text = token
-            fig.attrib.pop("src", None)
+    fig_srcs = [
+        norm_fig_src
+        for fig in root.xpath(".//Fig[normalize-space(@src)!='']")
+        if (norm_fig_src := _normalize_attachment_src(str(fig.get("src") or "")))
+    ]
     required_srcs = list(dict.fromkeys([*fig_srcs, *att_srcs]))
     inline_zip_b64 = str(att_map.get("image_data") or "").strip()
     if required_srcs and inline_zip_b64:
@@ -239,38 +234,18 @@ def japan_records(
             )
         except ValueError:
             raise WlhError("egov_attachments_unverified") from None
-    body = root.find("LawBody")
-    for heading in list(body.findall("LawTitle")):
-        body.remove(heading)
-    text = markdown(body)
-    for token, label in fig_placeholders:
-        text = text.replace(token, label)
-    extra_att_notes = [
-        f"[添付ファイル: {src}]" for src in att_srcs if src not in set(fig_srcs)
-    ]
-    if extra_att_notes:
-        text = text.rstrip() + "\n\n" + "\n\n".join(extra_att_notes)
-    if not text.strip():
-        raise WlhError("egov_law_text_missing")
     status = str(revision.get("current_revision_status") or "").strip()
     comment = str(revision.get("amendment_enforcement_comment") or "").strip()
     effective = _effective(root, revision)
-    date_notes: list[str] = []
-    if comment:
-        date_notes.append("施行期日参考情報：" + comment)
     scheduled = _day(revision.get("amendment_scheduled_enforcement_date"))
-    if scheduled:
-        date_notes.append("施行期日参考情報（予定）：" + scheduled)
     number = str(law.get("law_num") or "").strip() or None
-    full_text = normalized(
-        "\n\n".join(
-            [
-                "# " + title,
-                *([number] if number else []),
-                *date_notes,
-                text,
-            ]
-        )
+    full_text = egov_law_xml_to_markdown(
+        root,
+        title=title,
+        number=number,
+        enforcement_comment=comment or None,
+        scheduled_enforcement_date=scheduled,
+        att_srcs=att_srcs,
     )
     record_out: dict[str, Any] = {
         "external_key": law_id,
@@ -711,14 +686,14 @@ class XmlParser(RecordAdapter):
                     published = f"{published[:4]}-{published[4:6]}-{published[6:]}"
             html_content = select(node, "HTMLContent") if tag == "Gazette" else None
             if html_content:
-                body_md = gazette_html_to_markdown(
+                text_body = gazette_html_to_markdown(
                     html_content,
                     key,
                     fallback_parts=(select(node, "ThemeSubject"), select(node, "Explain")),
+                    title=title,
                 )
-                text_body = "# " + title + "\n\n" + body_md
             else:
-                text_body = "# " + title + "\n\n" + markdown(node)
+                text_body = markdown(node, title=title)
             moj_extra = moj_meta_lookup.get(id(node)) or {}
             result.append(
                 {
