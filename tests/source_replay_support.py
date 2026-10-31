@@ -71,16 +71,9 @@ def rendered_table_rows(markdown: str, cell_text: Callable[[str], str]) -> list[
 
 
 def fixture_routes(source_id: str) -> dict[str, Route]:
-    directory = ROOT / "tests" / "fixtures" / source_id
-    manifest = json.loads((directory / "manifest.json").read_text())
-    routes: dict[str, Route] = {}
-    for route in manifest["routes"]:
-        if "fixture" in route:
-            routes[route["path"]] = (
-                (directory / route["fixture"]).read_bytes(),
-                route["content_type"],
-            )
-    return routes
+    from wlh.fixtures import FixtureRouter
+
+    return FixtureRouter(ROOT / "tests" / "fixtures").load_route_map(source_id)
 
 
 def recorded_scope_routes(source_id: str) -> dict[str, Route]:
@@ -100,6 +93,8 @@ def recorded_scope_routes(source_id: str) -> dict[str, Route]:
 
 @contextmanager
 def source_server(routes: dict[str, Route], hosts: list[str]) -> Generator[tuple[str, list[str]]]:
+    from wlh.fixtures import FixtureRouter
+
     requests: list[str] = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -108,31 +103,14 @@ def source_server(routes: dict[str, Route], hosts: list[str]) -> Generator[tuple
 
         def do_GET(self) -> None:
             requests.append(self.path)
-            found = routes.get(self.path)
-            if found is None:
-                parts = urlsplit(self.path)
-                parameters = parse_qs(parts.query)
-                offset = parameters.get("offset", ["0"])[0]
-                page = parameters.get("page", ["0"])[0]
-                found = (
-                    routes.get(f"{parts.path}?offset={offset}")
-                    or routes.get(f"{parts.path}?page={page}")
-                    or routes.get(parts.path)
-                )
-            if self.path == "/robots.txt":
-                found = (b"User-agent: *\nAllow: /\n", "text/plain")
-            if found is None:
+            origin = f"http://127.0.0.1:{self.server.server_port}"  # type: ignore[attr-defined]
+            resolved = FixtureRouter.resolve_from_route_map(routes, self.path, origin, hosts)
+            if resolved is None:
                 self.send_response(404)
                 self.end_headers()
                 return
-            payload, media = found
-            if any(t in media for t in ("text", "xml", "json")):
-                origin = f"http://127.0.0.1:{self.server.server_port}".encode()  # type: ignore[attr-defined]
-                payload = payload.replace(b"{host}", origin.removeprefix(b"http://"))
-                for host in hosts:
-                    payload = payload.replace(f"https://{host}".encode(), origin)
-                    payload = payload.replace(f"http://{host}".encode(), origin)
-            self.send_response(200)
+            status, media, payload = resolved
+            self.send_response(status)
             self.send_header("Content-Type", media)
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
@@ -152,11 +130,8 @@ def source_server(routes: dict[str, Route], hosts: list[str]) -> Generator[tuple
 def replay_config(
     source_id: str, origin: str, directory: Path, *, template: Path | None = None
 ) -> Path:
-    import pytest
-
     source_file = template or ROOT / "sources" / f"{source_id}.yaml"
-    if not source_file.is_file():
-        pytest.skip(f"Private source config {source_file.name} not present")
+    assert source_file.is_file(), f"Required source config {source_file} not found"
     cfg: dict[str, Any] = yaml.safe_load(source_file.read_text())
     sched = cfg["scheduler"]
     hosts: list[str] = sched["allowed_hosts"]

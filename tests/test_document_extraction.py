@@ -252,3 +252,128 @@ class TestPdfExtractionAndOcrFallback:
         assert info["method"] == "ocr"
         assert "ocr" in parsers
         assert "RESOLUTION NO 325" in md.upper() or "DIGITAL INFRASTRUCTURE" in md.upper()
+
+    def test_remote_br_ocr_service_polls_status_transitions_and_falls_back_on_error_state(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`br-ocr-v1` submits `/file_parse`, polls `/status/{uuid}` across `PROCESSING -> SUCCESS`, fetches `/result/{uuid}`, and falls back cleanly to local Tesseract when `/status/{uuid}` returns `FAILED`."""
+        import json
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from typing import Any
+
+        from wlh.processor.extractors.pdf.scan_detector import extract_pdf
+
+        scanned_pdf = make_scanned_pdf(
+            tmp_path / "br_ocr_scan.pdf",
+            [
+                "SUPREME COURT OF THE UNITED STATES\nOPINION NO. 26-700\nJudgment Affirmed on October 30, 2026."
+            ],
+        )
+
+        state: dict[str, Any] = {
+            "mode": "success",
+            "status_polls": 0,
+            "submitted_payloads": [],
+        }
+
+        class _BrOcrHandler(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def _send_json(self, payload: dict[str, Any]) -> None:
+                body = json.dumps(payload).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self) -> None:
+                if self.path == "/api/v1/file_parse":
+                    length = int(self.headers.get("Content-Length", "0"))
+                    raw = json.loads(self.rfile.read(length).decode("utf-8"))
+                    state["submitted_payloads"].append(raw)
+                    self._send_json(
+                        {
+                            "code": 200,
+                            "data": {"task_uuid": str(raw.get("task_uuid") or "task-1")},
+                        }
+                    )
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+            def do_GET(self) -> None:
+                if self.path.startswith("/api/v1/status/"):
+                    state["status_polls"] += 1
+                    if state["mode"] == "failed":
+                        self._send_json({"code": 200, "data": {"task_status": "FAILED"}})
+                    elif state["status_polls"] == 1:
+                        self._send_json({"code": 200, "data": {"task_status": "PROCESSING"}})
+                    else:
+                        self._send_json({"code": 200, "data": {"task_status": "SUCCESS"}})
+                elif self.path.startswith("/api/v1/result/"):
+                    self._send_json(
+                        {
+                            "code": 200,
+                            "data": {
+                                "whole_text_md": (
+                                    "# SUPREME COURT OF THE UNITED STATES\n\n"
+                                    "OPINION NO. 26-700 — Judgment Affirmed on October 30, 2026."
+                                ),
+                                "page_parse_json": [
+                                    {
+                                        "page_idx": 0,
+                                        "type": "text",
+                                        "text": (
+                                            "SUPREME COURT OF THE UNITED STATES "
+                                            "OPINION NO. 26-700 Judgment Affirmed on October 30, 2026."
+                                        ),
+                                    }
+                                ],
+                            },
+                        }
+                    )
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), _BrOcrHandler)
+        port = srv.server_address[1]
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+
+        try:
+            monkeypatch.setenv("WLH_BR_OCR_URL", f"http://127.0.0.1:{port}/api/v1")
+            ocr_cfg = {
+                "engine": "br-ocr-v1",
+                "languages": "eng",
+                "model": "br-ocr-v1",
+                "timeout_seconds": 30,
+                "poll_seconds": 0.05,
+                "max_pages": 50,
+                "dpi": 150,
+                "max_page_pixels": 20000000,
+                "max_result_bytes": 16777216,
+            }
+            md_ok, info_ok, _, parsers_ok = extract_pdf(scanned_pdf, ocr_cfg, "latin")
+            assert "OPINION NO. 26-700" in md_ok
+            assert info_ok["method"] == "ocr"
+            assert info_ok["ocr"]["engine"] == "br-ocr-v1"
+            assert state["status_polls"] >= 2
+            assert len(state["submitted_payloads"]) == 1
+            assert "ocr" in parsers_ok
+
+            state["mode"] = "failed"
+            state["status_polls"] = 0
+            md_fb, info_fb, _, _ = extract_pdf(scanned_pdf, ocr_cfg, "latin")
+            assert "SUPREME COURT" in md_fb.upper()
+            assert info_fb["ocr"]["engine"] == "tesseract"
+            assert info_fb["ocr"]["fallback_from"] == "br-ocr-v1"
+            assert info_fb["ocr"]["fallback_reason"] == "br_ocr_failed"
+        finally:
+            srv.shutdown()
+            thread.join(timeout=2.0)
+            srv.server_close()
+

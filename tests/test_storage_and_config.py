@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -144,16 +145,11 @@ storage:
         monkeypatch.setenv("WLH_ALLOW_LOOPBACK", "0")
         repo_root = Path(__file__).resolve().parents[1]
         sources_dir = repo_root / "sources"
-        if not any(sources_dir.glob("dd-*.yaml")):
-            pytest.skip("Private source configs not present")
+        assert any(sources_dir.glob("dd-*.yaml")), "Expected sources/dd-*.yaml configs"
         matrix_csv = repo_root / "docs" / "runbooks" / "source-adaptation-matrix.csv"
         matrix_md = repo_root / "docs" / "runbooks" / "source-adaptation-matrix.md"
-        if (
-            not matrix_csv.is_file()
-            or not matrix_md.is_file()
-            or not any(sources_dir.glob("dd-*.yaml"))
-        ):
-            pytest.skip("Private source configs or adaptation matrix ledger not present")
+        assert matrix_csv.is_file(), f"Missing adaptation matrix CSV: {matrix_csv}"
+        assert matrix_md.is_file(), f"Missing adaptation matrix Markdown: {matrix_md}"
 
         assert render_markdown_from_csv(matrix_csv, matrix_md) == matrix_md.read_text(
             encoding="utf-8"
@@ -163,7 +159,7 @@ storage:
             matrix_rows = {row["Source ID"]: row for row in csv.DictReader(handle)}
 
         yaml_files = sorted(sources_dir.glob("*.yaml"))
-        assert len(yaml_files) >= 9
+        assert len(yaml_files) >= 72
 
         configured_ids: set[str] = set()
         for yaml_path in yaml_files:
@@ -202,6 +198,49 @@ storage:
         assert verified_in_csv.issubset(configured_ids), (
             f"Matrix [x]/[~] sources missing YAML files: {verified_in_csv - configured_ids}"
         )
+
+        # Enforce 100% fixture bundle, sampling_strata, expectations, and replay test registration
+        from tests.test_source_adapters import TestAdaptedSourceConfigReplayAndZeroTargetGuard
+        from wlh.fixtures import load_fixture_manifest
+        from wlh.runbook_samples import FORBIDDEN_PLACEHOLDERS, STRATA_BADGE_LABELS
+
+        fixtures_root = repo_root / "tests" / "fixtures"
+        test_fn = (
+            TestAdaptedSourceConfigReplayAndZeroTargetGuard.test_adapted_production_source_configs_collect_and_reparse_against_local_samples
+        )
+        marks = getattr(test_fn, "pytestmark", [])
+        param_mark = next(m for m in marks if m.name == "parametrize")
+        registered_replay_ids = {str(entry[0]) for entry in param_mark.args[1]}
+        assert verified_in_csv.issubset(registered_replay_ids), (
+            f"Matrix [x]/[~] sources missing from test_source_adapters.py: {sorted(verified_in_csv - registered_replay_ids)}"
+        )
+
+        for sid in sorted(verified_in_csv):
+            manifest = load_fixture_manifest(fixtures_root, sid)
+            strata_raw = manifest.get("sampling_strata")
+            assert isinstance(strata_raw, list)
+            strata = [str(s) for s in cast(list[Any], strata_raw)]
+            assert len(strata) >= 1, (
+                f"{sid} fixture manifest missing sampling_strata"
+            )
+            assert set(strata).issubset(set(STRATA_BADGE_LABELS.keys())), (
+                f"{sid} fixture manifest has unknown sampling_strata: {strata}"
+            )
+            expectations_raw = manifest.get("expectations")
+            assert isinstance(expectations_raw, dict), f"{sid} fixture manifest missing expectations"
+            expectations = cast(dict[str, Any], expectations_raw)
+            assert expectations.get("require_multi_resource") == (sid != "dd-375")
+            for route in manifest["routes"]:
+                assert "binary_attr" not in route and "binary_provider" not in route, (
+                    f"{sid} route {route.get('path')} must use real fixture file, not binary_attr/binary_provider"
+                )
+            for fpath in (fixtures_root / sid).iterdir():
+                if fpath.is_file():
+                    raw_bytes = fpath.read_bytes()
+                    for bad_str in FORBIDDEN_PLACEHOLDERS:
+                        assert bad_str.encode("utf-8") not in raw_bytes, (
+                            f"{sid} fixture file {fpath.name} contains forbidden synthetic placeholder {bad_str!r}"
+                        )
 
     def test_matrix_partial_status_renders_tilde_checkbox_and_bolds_note_prefix(
         self, tmp_path: Path
@@ -258,8 +297,7 @@ storage:
         monkeypatch.setenv("WLH_ALLOW_LOOPBACK", "0")
         repo_root = Path(__file__).resolve().parents[1]
         sources_dir = repo_root / "sources"
-        if not any(sources_dir.glob("dd-*.yaml")):
-            pytest.skip("Private source configs not present")
+        assert any(sources_dir.glob("dd-*.yaml")), "Expected sources/dd-*.yaml configs"
         forbidden_prefix_exts = (
             ".html",
             ".htm",

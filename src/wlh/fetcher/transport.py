@@ -322,8 +322,11 @@ class Transport:
                 trusted_hosts = (
                     self.ephemeral_proxy.trusted_hosts if self.ephemeral_proxy is not None else ()
                 )
+                session_headers: dict[str, str] = {"User-Agent": user_agent}
+                if os.environ.get("WLH_ALLOW_LOOPBACK") == "1" and self.config.get("id"):
+                    session_headers["X-WLH-Source-Id"] = str(self.config["id"])
                 self.session = aiohttp.ClientSession(
-                    headers={"User-Agent": user_agent},
+                    headers=session_headers,
                     cookie_jar=aiohttp.CookieJar(unsafe=True),
                     trust_env=(os.environ.get("WLH_ALLOW_LOOPBACK") != "1" and not self.proxy_url),
                     connector=aiohttp.TCPConnector(

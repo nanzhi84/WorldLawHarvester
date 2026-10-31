@@ -7,9 +7,6 @@ from pathlib import Path
 import psycopg
 
 from .bridge_fixture_support import (
-    BridgeFixtureHandler as _BridgeFixtureHandler,
-)
-from .bridge_fixture_support import (
     bridge_fixture_servers as bridge_fixture_servers,
 )
 
@@ -23,9 +20,8 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
     ) -> None:
         """When an entry page returns HTTP 200 OK but discovers 0 document targets, collect fails with `zero_targets_discovered` without polluting HTTP failure cases."""
         port, _ = bridge_fixture_servers
-        _BridgeFixtureHandler.active_source_id = "dd-998"
 
-        try:
+        if True:
             empty_yaml = tmp_path / "dd-998.yaml"
             empty_yaml.write_text(
                 f"""
@@ -84,8 +80,6 @@ storage:
             assert "http_404" in nf_res["errors"]
             assert "zero_targets_discovered" not in nf_res["errors"]
             assert nf_res["report"]["failures"] == {"network_failed": 1}
-        finally:
-            _BridgeFixtureHandler.active_source_id = ""
 
     def test_browser_detail_subrequest_http_503_propagates_failure_and_blocks_target(
         self,
@@ -95,8 +89,7 @@ storage:
     ) -> None:
         """When a rendered_dom detail page encounters a same-origin/in-scope subrequest HTTP 503, collect propagates `http_503` and refuses to commit the truncated detail target."""
         srv_port, _ = bridge_fixture_servers
-        _BridgeFixtureHandler.active_source_id = "dd-997"
-        try:
+        if True:
             sub503_yaml = tmp_path / "dd-997.yaml"
             sub503_yaml.write_text(
                 f"""
@@ -157,5 +150,3 @@ storage:
                         """
                     ).fetchone()
                     assert row_count is not None and row_count[0] == 0
-        finally:
-            _BridgeFixtureHandler.active_source_id = ""

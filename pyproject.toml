@@ -43,6 +43,12 @@ packages = ["src/wlh"]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
 asyncio_mode = "auto"
+markers = [
+  "contract: Pure schema, architecture, config, and quality contract tests (< 15s)",
+  "extractor: Local HTML/XML/PDF/DOCX/OCR extraction and layout tests (< 60s)",
+  "pipeline: End-to-end DB + S3 CAS + HTTP collection/reparse/snapshot/queue pipeline tests",
+  "replay: Multi-jurisdiction source fixture replay acceptance tests",
+]
 
 [tool.ruff]
 target-version = "py312"
