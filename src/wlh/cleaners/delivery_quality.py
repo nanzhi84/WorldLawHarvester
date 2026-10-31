@@ -94,10 +94,11 @@ def _source_metadata_from_id(source_id: str) -> tuple[str | None, str | None, st
 
 def _extract_config_context(
     source_config: Any,
-) -> tuple[str | None, str | None, str, tuple[str, ...]]:
+) -> tuple[str | None, str | None, str, tuple[str, ...], str | None]:
     if source_config is None:
-        return None, None, "", ()
+        return None, None, "", (), None
     if not isinstance(source_config, Mapping):
+        cfg_id = str(getattr(source_config, "id", None) or "").strip() or None
         storage_obj = getattr(source_config, "storage", None)
         meta_obj = (
             getattr(storage_obj, "metadata", None)
@@ -105,7 +106,7 @@ def _extract_config_context(
             else None
         )
         cleaners_obj = getattr(source_config, "cleaners", None)
-        if meta_obj is not None or cleaners_obj is not None:
+        if meta_obj is not None or cleaners_obj is not None or cfg_id is not None:
             lang = str(getattr(meta_obj, "language", None) or "").strip() or None
             jur = str(getattr(meta_obj, "jurisdiction", None) or "").strip() or None
             src_name = str(getattr(meta_obj, "source_name", None) or "").strip()
@@ -117,10 +118,11 @@ def _extract_config_context(
                     for p in cast(Sequence[Any], raw_inv)
                     if str(p).strip()
                 )
-            return lang, jur, src_name, tuple(extra_inv)
-        return None, None, "", ()
+            return lang, jur, src_name, tuple(extra_inv), cfg_id
+        return None, None, "", (), None
 
     cfg_map = cast(Mapping[str, Any], source_config)
+    cfg_id = str(cfg_map.get("id") or cfg_map.get("source_id") or "").strip() or None
     cleaners_raw = cfg_map.get("cleaners")
     cleaners_map: Mapping[str, Any] = (
         cast(Mapping[str, Any], cleaners_raw) if isinstance(cleaners_raw, Mapping) else {}
@@ -157,7 +159,7 @@ def _extract_config_context(
             for p in cast(Sequence[Any], raw_invalid)
             if str(p).strip()
         )
-    return lang, jur, src_name, tuple(extra_invalid)
+    return lang, jur, src_name, tuple(extra_invalid), cfg_id
 
 
 @lru_cache(maxsize=256)
@@ -174,30 +176,29 @@ def _build_rule_pack_cached(
     sections_to_merge: list[Mapping[str, Any]] = [common_sec]
 
     if resolved_lang is not None or resolved_jur is not None:
-        lang_key = (
-            resolved_lang.split("-")[0].split("_")[0].lower()
-            if resolved_lang
-            else None
-        )
+        lang_keys: list[str] = []
+        if resolved_lang:
+            for raw_part in re.split(r"[,;/+|\s]+", resolved_lang):
+                base_lang = raw_part.split("-")[0].split("_")[0].strip().lower()
+                if base_lang and base_lang not in lang_keys:
+                    lang_keys.append(base_lang)
         jur_key = resolved_jur.upper() if resolved_jur else None
 
         if jur_key and isinstance(jurisdictions_sec.get(jur_key), Mapping):
             jur_pack = cast(Mapping[str, Any], jurisdictions_sec[jur_key])
-            if lang_key is None:
-                linked_langs = jur_pack.get("languages")
-                if isinstance(linked_langs, Sequence) and not isinstance(
-                    linked_langs, (str, bytes)
-                ):
-                    for lk in cast(Sequence[Any], linked_langs):
-                        lk_str = str(lk).strip().lower()
-                        if isinstance(languages_sec.get(lk_str), Mapping):
-                            sections_to_merge.append(
-                                cast(Mapping[str, Any], languages_sec[lk_str])
-                            )
+            linked_langs = jur_pack.get("languages")
+            if isinstance(linked_langs, Sequence) and not isinstance(
+                linked_langs, (str, bytes)
+            ):
+                for lk in cast(Sequence[Any], linked_langs):
+                    lk_str = str(lk).strip().lower()
+                    if lk_str and lk_str not in lang_keys:
+                        lang_keys.append(lk_str)
             sections_to_merge.append(jur_pack)
 
-        if lang_key and isinstance(languages_sec.get(lang_key), Mapping):
-            sections_to_merge.append(cast(Mapping[str, Any], languages_sec[lang_key]))
+        for lk_str in lang_keys:
+            if isinstance(languages_sec.get(lk_str), Mapping):
+                sections_to_merge.append(cast(Mapping[str, Any], languages_sec[lk_str]))
     else:
         for lang_pack in languages_sec.values():
             if isinstance(lang_pack, Mapping):
@@ -272,12 +273,15 @@ def load_delivery_quality_rules(
     source_id: str | None = None,
 ) -> DeliveryQualityRulePack:
     """Load and merge declarative delivery quality rules for `language` and `jurisdiction`."""
-    cfg_lang, cfg_jur, _cfg_name, extra_invalid = _extract_config_context(source_config)
+    cfg_lang, cfg_jur, _cfg_name, extra_invalid, cfg_sid = _extract_config_context(
+        source_config
+    )
     resolved_lang = (language or cfg_lang or "").strip() or None
     resolved_jur = (jurisdiction or cfg_jur or "").strip() or None
+    effective_sid = (source_id or cfg_sid or "").strip() or None
 
-    if resolved_lang is None and resolved_jur is None and source_id:
-        sid_lang, sid_jur, _sid_name = _source_metadata_from_id(source_id)
+    if resolved_lang is None and resolved_jur is None and effective_sid:
+        sid_lang, sid_jur, _sid_name = _source_metadata_from_id(effective_sid)
         resolved_lang = sid_lang
         resolved_jur = sid_jur
 
@@ -408,9 +412,15 @@ def audit_delivery_rows(
     first_source_id = (
         str(rows[0].get("source_id") or "").strip() or None if rows else None
     )
+    row_lang = (
+        str(rows[0].get("language") or "").strip() or None if rows else None
+    )
+    row_jur = (
+        str(rows[0].get("jurisdiction") or "").strip() or None if rows else None
+    )
     rules = load_delivery_quality_rules(
-        language=language,
-        jurisdiction=jurisdiction,
+        language=language or row_lang,
+        jurisdiction=jurisdiction or row_jur,
         source_config=source_config,
         source_id=first_source_id,
     )
@@ -431,11 +441,12 @@ def audit_delivery_rows(
             "violation_codes": ["empty_delivery"],
         }
 
-    _cfg_lang, _cfg_jur, cfg_source_name, _extra_inv = _extract_config_context(
-        source_config
+    _cfg_lang, _cfg_jur, cfg_source_name, _extra_inv, cfg_sid = (
+        _extract_config_context(source_config)
     )
-    if not cfg_source_name and first_source_id:
-        _sid_l, _sid_j, cfg_source_name = _source_metadata_from_id(first_source_id)
+    effective_sid = first_source_id or cfg_sid
+    if not cfg_source_name and effective_sid:
+        _sid_l, _sid_j, cfg_source_name = _source_metadata_from_id(effective_sid)
 
     bare_doc_number_re = (
         re.compile(

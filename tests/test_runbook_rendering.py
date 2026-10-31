@@ -595,3 +595,87 @@ class TestRunbookVerificationSamples:
         ):
             assert expected_boundary_title in rendered_html
 
+        import importlib
+        from typing import Any
+
+        lxml_html: Any = importlib.import_module("lxml.html")
+        tree: Any = lxml_html.fromstring(rendered_html)
+        badge_texts = {
+            str(el.text_content() or "").strip()
+            for el in tree.xpath('//span[contains(@class, "strata-badge")]')
+        }
+        assert badge_texts == {
+            "P5最短",
+            "P95最长",
+            "告警路由",
+            "缺文号",
+            "缺生效日",
+            "基线样本",
+        }
+        assert "生效日期" in rendered_html
+
+        # 1-row and 2-row candidate pools: P5 and P95 must never contradictorily overlap on the shortest document
+        one_row = stratify_verification_samples(
+            [
+                {
+                    "title": "Single Doc",
+                    "markdown": "第一条 单篇正文。",
+                    "doc_number": "DOC-1",
+                    "effective_at": None,
+                }
+            ],
+            max_items=5,
+        )
+        assert len(one_row) == 1
+        assert "p5_shortest" in one_row[0]["sampling_strata"]
+        assert "p95_longest" not in one_row[0]["sampling_strata"]
+        assert "missing_effective_at" in one_row[0]["sampling_strata"]
+
+        two_rows = stratify_verification_samples(
+            [
+                {
+                    "title": "Short Doc",
+                    "markdown": "短正文",
+                    "doc_number": "DOC-1",
+                    "effective_at": "2026-01-01",
+                },
+                {
+                    "title": "Long Doc",
+                    "markdown": "长正文内容" * 30,
+                    "doc_number": "DOC-2",
+                    "effective_at": "2026-01-02",
+                },
+            ],
+            max_items=5,
+        )
+        assert two_rows[0]["sampling_strata"] == ["p5_shortest"]
+        assert two_rows[1]["sampling_strata"] == ["p95_longest"]
+
+        # Even when len(items) <= max_items_per_source, unstratified items are reordered anomaly-first
+        small_pool = [
+            *candidates[:3],
+            candidates[22],  # 边界样本_警告路由
+        ]
+        small_html = render_source_verification_html(
+            [
+                {
+                    "source_id": "dd-501",
+                    "source_name": "国家税务总局法规库",
+                    "status": "[x] 已实网跑通",
+                    "continent": "1. 亚洲法域 (Asia)",
+                    "jurisdiction": "1.1 中国大陆 (China Mainland)",
+                    "subcategory": "—",
+                    "items": small_pool,
+                }
+            ],
+            max_items_per_source=10,
+        )
+        small_tree: Any = lxml_html.fromstring(small_html)
+        small_badge_strata = [
+            str(el.get("data-stratum") or "")
+            for el in small_tree.xpath('//span[contains(@class, "strata-badge")]')
+        ]
+        assert "accept_with_warning" in small_badge_strata
+        assert "baseline" in small_badge_strata
+
+

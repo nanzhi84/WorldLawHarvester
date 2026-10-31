@@ -280,6 +280,16 @@ def _resolve_candidate_quality_route(
     return "accept"
 
 
+STRATA_BADGE_LABELS: dict[str, tuple[str, str]] = {
+    "p5_shortest": ("P5最短", "strata-p5"),
+    "p95_longest": ("P95最长", "strata-p95"),
+    "accept_with_warning": ("告警路由", "strata-warning"),
+    "missing_doc_number": ("缺文号", "strata-missing-doc"),
+    "missing_effective_at": ("缺生效日", "strata-missing-eff"),
+    "baseline": ("基线样本", "strata-baseline"),
+}
+
+
 def stratify_verification_samples(
     candidates: Sequence[Mapping[str, Any]],
     *,
@@ -308,18 +318,19 @@ def stratify_verification_samples(
         md_text = str(cand.get("markdown") or "")
         md_lengths.append(len(_visible_chars_only(md_text)))
         routes.append(_resolve_candidate_quality_route(cand, md_text))
-        missing_doc_nums.append(not bool(str(cand.get("doc_number") or "").strip()))
+        doc_num_str = str(cand.get("doc_number") or "").strip()
+        missing_doc_nums.append(doc_num_str in {"", "—", "-"})
         eff_raw = cand.get("effective_at")
         eff_str = (
             eff_raw.isoformat()[:10]
             if isinstance(eff_raw, (date, datetime))
             else str(eff_raw or "").strip()
         )
-        missing_eff_dates.append(not bool(eff_str))
+        missing_eff_dates.append(eff_str in {"", "—", "-"})
 
     sorted_by_len = sorted(range(total), key=lambda idx: (md_lengths[idx], idx))
     p5_idx = int(0.05 * (total - 1))
-    p95_idx = int(0.95 * (total - 1))
+    p95_idx = (total - 1) - p5_idx
 
     p5_bucket: list[int] = []
     for candidate_idx in (
@@ -331,13 +342,14 @@ def stratify_verification_samples(
             p5_bucket.append(candidate_idx)
 
     p95_bucket: list[int] = []
-    for candidate_idx in (
-        sorted_by_len[-1],
-        sorted_by_len[p95_idx],
-        *reversed(sorted_by_len[p95_idx:]),
-    ):
-        if candidate_idx not in p95_bucket:
-            p95_bucket.append(candidate_idx)
+    if total > 1:
+        for candidate_idx in (
+            sorted_by_len[-1],
+            sorted_by_len[p95_idx],
+            *reversed(sorted_by_len[p95_idx:]),
+        ):
+            if candidate_idx not in p95_bucket and candidate_idx not in p5_bucket:
+                p95_bucket.append(candidate_idx)
 
     warning_bucket = [
         idx for idx in range(total) if routes[idx] == "accept_with_warning"
@@ -456,12 +468,18 @@ def render_source_verification_html(
             if isinstance(raw_items, Sequence)
             else []
         )
+        already_stratified = bool(items_seq) and all(
+            isinstance(it.get("sampling_strata"), Sequence)
+            and not isinstance(it.get("sampling_strata"), (str, bytes))
+            and bool(it.get("sampling_strata"))
+            for it in items_seq
+        )
         selected_items = (
-            stratify_verification_samples(
+            list(items_seq)[:max_items_per_source]
+            if already_stratified and len(items_seq) <= max_items_per_source
+            else stratify_verification_samples(
                 items_seq, max_items=max_items_per_source
             )
-            if len(items_seq) > max_items_per_source
-            else list(items_seq)[:max_items_per_source]
         )
         normalized_items = [_normalize_item(it) for it in selected_items]
         cache_map[source_id] = normalized_items
@@ -532,9 +550,24 @@ def render_source_verification_html(
             doc_number = str(item.get("doc_number") or "").strip() or "—"
             issuer = str(item.get("issuer") or "").strip() or "—"
             published_at = str(item.get("published_at") or "").strip() or "—"
+            effective_at = str(item.get("effective_at") or "").strip() or "—"
 
             left_parts: list[str] = ['<div class="cell-meta">']
             left_parts.append(f'<span class="sample-index">#{idx}</span>')
+            raw_strata = item.get("sampling_strata")
+            strata_tags: list[str] = (
+                [str(s) for s in cast(Sequence[Any], raw_strata) if str(s).strip()]
+                if isinstance(raw_strata, Sequence)
+                and not isinstance(raw_strata, (str, bytes))
+                else []
+            )
+            for tag in strata_tags:
+                badge_label, badge_cls = STRATA_BADGE_LABELS.get(
+                    tag, (tag, "strata-baseline")
+                )
+                left_parts.append(
+                    f' <span class="strata-badge {badge_cls}" data-stratum="{std_html.escape(tag)}">{std_html.escape(badge_label)}</span>'
+                )
             if detail_url:
                 esc_detail = std_html.escape(detail_url, quote=True)
                 left_parts.append(
@@ -611,7 +644,8 @@ def render_source_verification_html(
                 f"<div><strong>标题</strong>: {std_html.escape(title)}</div>"
                 f"<div><strong>文号</strong>: {std_html.escape(doc_number)} · "
                 f"<strong>发布机关</strong>: {std_html.escape(issuer)} · "
-                f"<strong>发布日期</strong>: {std_html.escape(published_at)}</div>"
+                f"<strong>发布日期</strong>: {std_html.escape(published_at)} · "
+                f"<strong>生效日期</strong>: {std_html.escape(effective_at)}</div>"
                 "</div>",
                 '<div class="md-label">📝 解析交付 Markdown</div>',
                 f'<pre class="markdown-box"><code>{std_html.escape(md_str)}</code></pre>',
@@ -949,6 +983,18 @@ def render_source_verification_html(
       font-weight: 700;
       font-size: 12px;
     }}
+    .strata-badge {{
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-left: 4px;
+    }}
+    .strata-p5, .strata-p95 {{ background: #e0e7ff; color: #3730a3; }}
+    .strata-warning {{ background: #fef3c7; color: #92400e; }}
+    .strata-missing-doc, .strata-missing-eff {{ background: #fce7f3; color: #9d174d; }}
+    .strata-baseline {{ background: #dcfce7; color: #166534; }}
     .attachment-box {{
       margin: 8px 0 10px 0;
       padding: 8px 12px;

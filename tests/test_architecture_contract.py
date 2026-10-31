@@ -267,8 +267,37 @@ class TestArchitectureContract:
         assert dq_rules_yaml.is_file(), (
             "Declarative rule pack src/wlh/cleaners/delivery_quality_rules.yaml must exist"
         )
+        from typing import cast
+
+        import yaml
+
+        from wlh.config import load_file
+
+        raw_rules: Any = yaml.safe_load(dq_rules_yaml.read_text(encoding="utf-8"))
+        assert isinstance(raw_rules, Mapping)
+        rules_map = cast(Mapping[str, Any], raw_rules)
+        defined_langs: set[str] = set(
+            cast(Mapping[str, Any], rules_map.get("languages") or {}).keys()
+        )
+        defined_jurs: set[str] = set(
+            cast(Mapping[str, Any], rules_map.get("jurisdictions") or {}).keys()
+        )
+        for src_yaml in (REPO_ROOT / "sources").glob("dd-*.yaml"):
+            src_cfg = load_file(src_yaml)
+            if src_cfg.storage.metadata.language:
+                base_l = src_cfg.storage.metadata.language.split("-")[0].lower()
+                assert base_l in defined_langs, (
+                    f"{src_yaml.name} language {base_l!r} missing from delivery_quality_rules.yaml"
+                )
+            if src_cfg.storage.metadata.jurisdiction:
+                jur_u = src_cfg.storage.metadata.jurisdiction.upper()
+                assert jur_u in defined_jurs, (
+                    f"{src_yaml.name} jurisdiction {jur_u!r} missing from delivery_quality_rules.yaml"
+                )
+
         dq_tree = ast.parse(dq_path.read_text(encoding="utf-8"), filename=str(dq_path))
         forbidden_dq_globals = {
+            "BOILERPLATE_TITLES",
             "_VI_PLACEHOLDER_PATTERNS",
             "_SALUTATION_PREFIX_RE",
             "_GAZETTE_RUNNING_HEADER_RE",
