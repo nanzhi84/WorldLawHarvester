@@ -15,9 +15,6 @@ from wlh.cleaners.delivery_quality import (
 )
 
 from .bridge_fixture_support import (
-    BridgeFixtureHandler as _BridgeFixtureHandler,
-)
-from .bridge_fixture_support import (
     bridge_fixture_servers as bridge_fixture_servers,
 )
 
@@ -26,48 +23,48 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
     @pytest.mark.parametrize(
         ("source_id", "expected_doc_type", "expected_substr"),
         [
-            ("dd-017", "案例", "指导性案例220号"),
-            ("dd-040", "政策文件", "2026年第1号"),
+            ("dd-017", "案例", "指导性案例271号"),
+            ("dd-040", "政策文件", "2026年第2号"),
             ("dd-041", "案例", "第六十批指导性案例"),
-            ("dd-102", "通知公告", "京汇罚〔2026〕15号"),
-            ("dd-183", "政策文件", "地方政府专项债券用途调整操作指引"),
+            ("dd-102", "通知公告", "京汇罚〔2026〕27号"),
+            ("dd-183", "政策文件", "推进政府债务信息公开 筑牢风险防控底线——财政部印发《地方政府债务信息公开办法》"),
             ("dd-375", "行业标准", "国统字〔2019〕66号"),
-            ("dd-448", "通知公告", "影剧备字〔2026〕第1230号"),
+            ("dd-448", "通知公告", "影剧备字〔2026〕第1133号"),
             ("dd-455", "通知公告", "2026年进口网络游戏审批信息"),
-            ("dd-492", "法律法规", "105/2026/NĐ-CP"),
-            ("dd-493", "法律法规", "48/2026/QĐ-TTg"),
-            ("dd-501", "政策文件", "国办发〔2026〕12号"),
-            ("dd-502", "法律法规", "国令第779号"),
-            ("dd-513", "法律法规", "37/CT-TTg"),
-            ("dd-495", "法律法规", "145/2026/TT-BTC"),
-            ("dd-496", "案例", "1463/2026/DS-PT"),
-            ("dd-499", "法律法规", "2026-08801"),
+            ("dd-492", "法律法规", "10744/VPCP-CN"),
+            ("dd-493", "法律法规", "113/2026/VBHN-TT-NHNN"),
+            ("dd-501", "政策文件", "中华人民共和国国家发展和改革委员会令（第45号）"),
+            ("dd-502", "法律法规", "河南省人民政府令第128号"),
+            ("dd-513", "法律法规", "227-QĐ/TW"),
+            ("dd-495", "法律法规", "2030/QĐ-TTg"),
+            ("dd-496", "案例", "39/2026/QĐST-HNGĐ"),
+            ("dd-499", "法律法规", "2026-21699"),
             ("dd-519", "案例", "選挙無効請求事件"),
             ("dd-520", "税务资料", "産科医療特別給付事業"),
-            ("dd-527", "税务资料", "Tax Treatment of Research & Development Expenditure"),
-            ("dd-548", "案例", "[2024] UKSC 1"),
-            ("dd-549", "税务资料", "ADML3100"),
-            ("dd-550", "法律法规", "GG"),
-            ("dd-551", "案例", "VIII ZR 12/25"),
-            ("dd-556", "案例", "4A_101/2026"),
+            ("dd-527", "税务资料", "Obtaining a Copy of Documents Issued by IRAS"),
+            ("dd-548", "案例", "[2026] UKFTT 01453 (GRC)"),
+            ("dd-549", "税务资料", "ARTG2100"),
+            ("dd-550", "法律法规", "EheRG 1"),
+            ("dd-551", "案例", "2 ARs 569/09"),
+            ("dd-556", "案例", "5A_959/2026"),
             ("dd-558", "法律法规", "1"),
-            ("dd-559", "法律法规", "1 CFR Part 1"),
-            ("dd-560", "法律法规", "HB 1091"),
-            ("dd-561", "案例", "25-1402"),
-            ("dd-562", "案例", "26A388"),
-            ("dd-563", "税务资料", "2026-16"),
+            ("dd-559", "法律法规", "1 CFR Part 9"),
+            ("dd-560", "法律法规", "HB 1185"),
+            ("dd-561", "案例", "24-1921"),
+            ("dd-562", "案例", "23A843"),
+            ("dd-563", "税务资料", "2026-40"),
             ("dd-582", "税务资料", "裁決"),
-            ("dd-564", "法律法规", "A-1"),
-            ("dd-565", "案例", "2022 SCC 18"),
-            ("dd-570", "法律法规", "2024 No 1"),
-            ("dd-572", "法律法规", "Act No. 718 of 1963"),
-            ("dd-506", "案例", "HCAL 371/2021"),
+            ("dd-564", "法律法规", "C-49"),
+            ("dd-565", "案例", "2026 SCC 30"),
+            ("dd-570", "法律法规", "2026 No 74"),
+            ("dd-572", "法律法规", "Western Cape Provincial Gazette 9196 on 18 February 2026 (372.7 KB)"),
+            ("dd-506", "案例", "CACV 382/2024"),
             ("dd-507", "税务资料", "dipn03"),
-            ("dd-512", "法律法规", "46/2026/QH16"),
-            ("dd-514", "案例", "84/2026/AL"),
-            ("dd-516", "税务资料", "Đề nghị hướng dẫn"),
+            ("dd-512", "法律法规", "35/2026/QH16"),
+            ("dd-514", "案例", "81/2025/AL"),
+            ("dd-516", "税务资料", "Công ty chúng tôi có dự kiến điều chỉnh tiến độ thực hiện dự án"),
             ("dd-517", "法律法规", "明治八年太政官布告第五十四号"),
-            ("dd-575", "法律法规", "Luật sửa đổi, bổ sung một số điều của 09 luật về quân sự, quốc phòng"),
+            ("dd-575", "法律法规", "Luật sửa đổi, bổ sung Điều 6 và Phụ lục IV về"),
             ("dd-525", "法律法规", "Accountants Act 2004"),
             ("dd-557", "法律法规", "Public Law 118–5"),
             ("dd-571", "税务资料", "2026-NZSC-121"),
@@ -130,14 +127,35 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
         from urllib.parse import urlsplit, urlunsplit
 
         port, port_v6 = bridge_fixture_servers
-        _BridgeFixtureHandler.active_source_id = source_id
 
-        try:
+        if True:
             repo_root = Path(__file__).resolve().parents[1]
             src_yaml_path = repo_root / "sources" / f"{source_id}.yaml"
             fixture_manifest_path = repo_root / "tests" / "fixtures" / source_id / "manifest.json"
-            if not src_yaml_path.is_file() or not fixture_manifest_path.is_file():
-                pytest.skip(f"Private source config or fixture for {source_id} not present")
+            assert src_yaml_path.is_file(), f"Missing source config {src_yaml_path}"
+            assert fixture_manifest_path.is_file(), f"Missing fixture manifest {fixture_manifest_path}"
+
+            from wlh.fixtures import load_fixture_manifest
+            from wlh.runbook_samples import STRATA_BADGE_LABELS, stratify_verification_samples
+
+            manifest = load_fixture_manifest(repo_root / "tests" / "fixtures", source_id)
+            manifest_strata_raw = manifest.get("sampling_strata")
+            assert isinstance(manifest_strata_raw, list)
+            manifest_strata = [str(s) for s in cast(list[Any], manifest_strata_raw)]
+            assert len(manifest_strata) >= 1, (
+                f"{source_id} manifest.json must declare non-empty sampling_strata"
+            )
+            assert set(manifest_strata).issubset(set(STRATA_BADGE_LABELS.keys())), (
+                f"{source_id} manifest.json has invalid sampling_strata: {manifest_strata}"
+            )
+            expectations = cast(dict[str, Any], manifest.get("expectations") or {})
+            assert expectations.get("doc_type") == expected_doc_type
+            assert expectations.get("substr") == expected_substr
+            require_multi = bool(
+                expectations.get("require_multi_resource", source_id != "dd-375")
+            )
+            assert require_multi == (source_id != "dd-375")
+
             raw_cfg: dict[str, Any] = yaml.safe_load(
                 src_yaml_path.read_text(encoding="utf-8")
             )
@@ -208,8 +226,6 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                     docs["attachment_url_pattern"] = _rewrite_pat(
                         str(docs["attachment_url_pattern"])
                     )
-                # Navigation patterns carry the same origin as document patterns.
-                # Preserve their paths and matching rules when replaying locally.
                 options: dict[str, Any] = parser.get("options", {})
                 if "navigation_url_patterns" in options:
                     options["navigation_url_patterns"] = [
@@ -228,64 +244,6 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             c_run = prepare_run(replay_yaml, "collect")
             c_res = execute_run(c_run)
             assert c_res["status"] == "complete", f"{source_id} collect failed: {c_res}"
-
-            multi_resource_sources = {
-                "dd-017",
-                "dd-019",
-                "dd-039",
-                "dd-108",
-                "dd-132",
-                "dd-142",
-                "dd-143",
-                "dd-153",
-                "dd-162",
-                "dd-198",
-                "dd-209",
-                "dd-265",
-                "dd-320",
-                "dd-323",
-                "dd-324",
-                "dd-327",
-                "dd-337",
-                "dd-385",
-                "dd-423",
-                "dd-482",
-                "dd-492",
-                "dd-493",
-                "dd-502",
-                "dd-506",
-                "dd-507",
-                "dd-509",
-                "dd-510",
-                "dd-511",
-                "dd-512",
-                "dd-514",
-                "dd-516",
-                "dd-517",
-                "dd-518",
-                "dd-519",
-                "dd-520",
-                "dd-525",
-                "dd-527",
-                "dd-548",
-                "dd-549",
-                "dd-550",
-                "dd-551",
-                "dd-557",
-                "dd-558",
-                "dd-559",
-                "dd-562",
-                "dd-564",
-                "dd-565",
-                "dd-570",
-                "dd-571",
-                "dd-572",
-                "dd-575",
-                "dd-577",
-                "dd-578",
-                "dd-579",
-                "dd-580",
-            }
 
             with psycopg.connect(initialized_db["WLH_DATABASE_URL"]) as conn:
                 from psycopg.rows import dict_row
@@ -311,16 +269,49 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         rows,
                         objects=objs,
                         source_config=raw_cfg,
-                        require_multi_resource=(source_id in multi_resource_sources),
+                        require_multi_resource=require_multi,
                     )
                     assert quality_report["passed"] is True
                     assert quality_report["violations"] == []
 
                     verified = verify_source_delivery(
                         source_id,
-                        require_multi_resource=(source_id in multi_resource_sources),
+                        require_multi_resource=require_multi,
                     )
                     assert verified["passed"] is True
+
+                    # Verify Anomaly-First Stratified Sampling (`sampling_strata`) on replayed resources
+                    primary_by_res: dict[str, dict[str, Any]] = {}
+                    for r in rows:
+                        rid = str(r["resource_id"])
+                        if rid not in primary_by_res or r["role"] != "independent_attachment":
+                            if rid not in primary_by_res:
+                                primary_by_res[rid] = dict(r)
+                    strat_candidates: list[dict[str, Any]] = []
+                    for rid, pr in primary_by_res.items():
+                        md_val = objs.get(pr["markdown_hash"]).decode("utf-8", errors="replace")
+                        strat_candidates.append(
+                            {
+                                "resource_id": rid,
+                                "title": pr.get("title"),
+                                "doc_number": pr.get("doc_number"),
+                                "effective_at": pr.get("effective_at"),
+                                "markdown": md_val,
+                            }
+                        )
+                    stratified_replay = stratify_verification_samples(
+                        strat_candidates, max_items=len(strat_candidates)
+                    )
+                    assert len(stratified_replay) == len(strat_candidates)
+                    observed_strata = {
+                        tag
+                        for item in stratified_replay
+                        for tag in item.get("sampling_strata", [])
+                    }
+                    assert observed_strata.issubset(set(STRATA_BADGE_LABELS.keys()))
+                    assert "p5_shortest" in observed_strata
+                    if require_multi:
+                        assert "p95_longest" in observed_strata
 
                     projected_rows = [project_canonical(r) for r in rows]
                     projected = next(
@@ -337,152 +328,118 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         expected_substr in (projected["doc_number"] or "")
                         or expected_substr in (projected["title"] or "")
                     ), f"Expected {expected_substr} in {projected}"
-                    if source_id in {
-                        "dd-492",
-                        "dd-493",
-                        "dd-499",
-                        "dd-507",
-                        "dd-512",
-                        "dd-513",
-                        "dd-514",
-                        "dd-560",
-                        "dd-561",
-                        "dd-562",
-                        "dd-565",
-                        "dd-575",
-                    }:
+
+                    if expectations.get("require_original_for_all_resources"):
                         assert {
                             r["resource_id"] for r in rows if r["original_hash"] is not None
                         } == {r["resource_id"] for r in rows}, (
                             f"Expected captured attachment/original for every resource of {source_id}"
                         )
-                    if source_id in {"dd-512", "dd-516", "dd-565", "dd-575"}:
-                        primary_rows = [r for r in rows if r["role"] == "primary"] or rows
+
+                    primary_rows = [r for r in rows if r["role"] == "primary"] or rows
+                    if "primary_markdown_contains_any" in expectations:
+                        any_tokens = [str(t) for t in expectations["primary_markdown_contains_any"]]
                         for r in primary_rows:
-                            md_text = objs.get(r["markdown_hash"]).decode(
-                                "utf-8", errors="replace"
+                            md_text = objs.get(r["markdown_hash"]).decode("utf-8", errors="replace")
+                            assert any(tok in md_text for tok in any_tokens), (
+                                f"Expected one of {any_tokens} in {source_id} markdown"
                             )
-                            if source_id == "dd-575":
-                                assert "Toàn văn hồ sơ dự án" in md_text
-                            elif source_id == "dd-512":
-                                assert (
-                                    "Official Legal Document" in md_text or "Nghị quyết" in md_text
-                                )
-                            elif source_id == "dd-516":
-                                assert r["doc_number"] is None
-                                assert "Đề nghị hướng dẫn" in md_text
-                                assert "Trả lời:" in md_text
+                    if "primary_markdown_contains_all" in expectations:
+                        all_tokens = [str(t) for t in expectations["primary_markdown_contains_all"]]
+                        for r in primary_rows:
+                            md_text = objs.get(r["markdown_hash"]).decode("utf-8", errors="replace")
+                            for tok in all_tokens:
+                                assert tok in md_text, f"Expected {tok!r} in {source_id} markdown"
+                            if "Trả lời:" in all_tokens:
                                 ans_part = md_text.split("Trả lời:", 1)[1].strip()
-                                assert "Căn cứ " in ans_part and len(ans_part) >= 50
-                            elif source_id == "dd-565":
-                                assert (
-                                    md_text.count(
-                                        "Full judgment reasons of the Supreme Court of Canada"
-                                    )
-                                    == 1
-                                )
-                    if source_id in {"dd-550", "dd-558"}:
-                        assert rows[0]["original_media_type"] == "application/zip"
-                        assert (projected["original_file"] or "").endswith(".zip")
-                    if source_id == "dd-512":
-                        assert projected["issuer"] == "Quốc hội"
-                        assert projected["published_at"] == "2026-08-24"
-                        assert projected["title"] != projected["doc_number"]
-                        assert not re.fullmatch(
-                            r"(?:Luật|Pháp lệnh|Nghị quyết)(?:\s+số)?\s+"
-                            + re.escape(projected["doc_number"] or ""),
-                            (projected["title"] or "").strip(),
-                            re.I,
-                        ), (
-                            f"dd-512 title {projected['title']!r} must include descriptive subject (Trích yếu), "
-                            "not just bare document number"
+                                assert len(ans_part) >= 50
+                    if "primary_markdown_exact_occurrences" in expectations:
+                        occ_map = cast(
+                            dict[str, int], expectations["primary_markdown_exact_occurrences"]
                         )
-                    if source_id == "dd-516":
-                        assert projected["issuer"] == "Bộ Tài chính"
-                        assert not (projected["title"] or "").startswith("Bộ Tài")
-                        assert not (projected["title"] or "").endswith("...")
-                    if source_id == "dd-575":
-                        assert "Bộ Quốc phòng" in (projected["issuer"] or "")
+                        for r in primary_rows:
+                            md_text = objs.get(r["markdown_hash"]).decode("utf-8", errors="replace")
+                            for phrase, exp_cnt in occ_map.items():
+                                assert md_text.count(phrase) == exp_cnt
+
+                    if expectations.get("all_rows_doc_number_is_null"):
                         for r in rows:
                             assert r["doc_number"] is None
-                            assert r["role"] == "primary"
-                            assert r["original_hash"] is not None
-                    if source_id == "dd-548":
-                        assert projected["issuer"] == "The Supreme Court"
-                        assert projected["published_at"] == "2024-01-11"
-                    if source_id == "dd-496":
-                        assert projected["issuer"] == "TAND TP. Cần Thơ"
-                        assert projected["published_at"] == "2026-10-15"
-                    if source_id == "dd-502":
-                        assert projected["issuer"] == "国务院"
-                        assert projected["published_at"] == "2026-10-03"
-                    if source_id == "dd-520":
-                        reply = next(p for p in projected_rows if p["title"] == "産科医療特別給付事業に基づき支払われる給付金の所得税法上の取扱いについて")
-                        assert reply["issuer"] == "国税庁課税部審理室長"
-                    if source_id == "dd-549":
-                        assert projected["issuer"] == "HM Revenue & Customs"
-                        assert projected["published_at"] == "2016-03-11"
-                    if source_id == "dd-562":
-                        assert projected["issuer"] == "Supreme Court of the United States"
-                        assert projected["published_at"] in {"2026-09-25", "2026-06-30"}
-                        assert " v. " in (projected["title"] or "")
-                    if source_id == "dd-578":
-                        const_row = next(p for p in projected_rows if p["title"] == "中華民國憲法")
-                        assert const_row["published_at"] == "1947-01-01"
-                        assert const_row["effective_at"] == "1947-12-25"
-                        assert const_row["status"] == "現行有效"
-                        assert all("＞" not in (p["issuer"] or "") and ">" not in (p["issuer"] or "") for p in projected_rows)
-                    if source_id == "dd-579":
-                        assert projected["effective_at"] == "1947-07-19"
-                        assert projected["expired_at"] == "1991-05-17"
-                        assert projected["status"] == "已廢止"
-                        assert projected["issuer"] == "行政院"
-                        assert all("＞" not in (p["issuer"] or "") and ">" not in (p["issuer"] or "") for p in projected_rows)
-                    if source_id == "dd-509":
-                        assert projected["published_at"] == "2004-05-19"
-                        assert projected["effective_at"] == "2004-05-19"
+                    if "all_rows_role" in expectations:
+                        for r in rows:
+                            assert r["role"] == expectations["all_rows_role"]
+                    if "original_media_type" in expectations:
+                        assert rows[0]["original_media_type"] == expectations["original_media_type"]
+                    if "original_file_suffix" in expectations:
+                        assert (projected["original_file"] or "").endswith(
+                            str(expectations["original_file_suffix"])
+                        )
+                    if "issuer" in expectations:
+                        assert projected["issuer"] == expectations["issuer"]
+                    if "issuer_contains" in expectations:
+                        assert str(expectations["issuer_contains"]) in (projected["issuer"] or "")
+                    if "issuer_forbidden_chars" in expectations:
+                        for ch in expectations["issuer_forbidden_chars"]:
+                            assert all(str(ch) not in (p["issuer"] or "") for p in projected_rows)
+                    if "published_at" in expectations:
+                        assert projected["published_at"] == expectations["published_at"]
+                    if "published_at_in" in expectations:
+                        assert projected["published_at"] in set(expectations["published_at_in"])
+                    if "effective_at" in expectations:
+                        assert projected["effective_at"] == expectations["effective_at"]
+                    if "expired_at" in expectations:
+                        assert projected["expired_at"] == expectations["expired_at"]
+                    if "status" in expectations:
+                        assert projected["status"] == expectations["status"]
+                    if "title_contains" in expectations:
+                        assert str(expectations["title_contains"]) in (projected["title"] or "")
+                    if expectations.get("title_not_equal_doc_number"):
+                        assert projected["title"] != projected["doc_number"]
+                    if "title_not_bare_doc_number_prefix_regex" in expectations:
+                        pref_re = str(expectations["title_not_bare_doc_number_prefix_regex"])
+                        assert not re.fullmatch(
+                            pref_re + re.escape(projected["doc_number"] or ""),
+                            (projected["title"] or "").strip(),
+                            re.I,
+                        )
+                    if "title_not_startswith" in expectations:
+                        assert not (projected["title"] or "").startswith(
+                            str(expectations["title_not_startswith"])
+                        )
+                    if "title_not_endswith" in expectations:
+                        assert not (projected["title"] or "").endswith(
+                            str(expectations["title_not_endswith"])
+                        )
+                    for row_spec in cast(
+                        list[dict[str, Any]], expectations.get("specific_row_assertions") or []
+                    ):
+                        target_row = next(
+                            p for p in projected_rows if p["title"] == row_spec["match_title"]
+                        )
+                        for k, v in row_spec.items():
+                            if k != "match_title":
+                                assert target_row[k] == v
+
+                    for probe in cast(
+                        list[dict[str, Any]], expectations.get("field_rule_probes") or []
+                    ):
                         from wlh.processor.parsers.html.fields import extract_detail_fields
 
-                        issuer_rule = raw_cfg["processor"]["parser"]["documents"]["fields"]["issuer"]
-                        treaty_fields, _, _ = extract_detail_fields(
-                            {"issuer": issuer_rule},
-                            '<table class="table"><tr><th>簽約國：</th><td>歐洲地區 ＞ 波蘭</td></tr></table>'.encode(
-                                "utf-8"
-                            ),
+                        field_name = str(probe["field"])
+                        rule_def = raw_cfg["processor"]["parser"]["documents"]["fields"][field_name]
+                        extracted_fields, _, _ = extract_detail_fields(
+                            {field_name: rule_def},
+                            str(probe["html"]).encode("utf-8"),
                             "html",
                             {"charset": "utf-8"},
-                            "https://law.moj.gov.tw/LawClass/LawAll.aspx?pcode=Y0010530",
+                            str(probe["url"]),
                         )
-                        assert treaty_fields.get("issuer") != "歐洲地區 ＞ 波蘭"
-
-                        domestic_fields, _, _ = extract_detail_fields(
-                            {"issuer": issuer_rule},
-                            '<table class="table"><tr><th>法規類別：</th><td>行政 ＞ 臺灣省政府 ＞ 組織目</td></tr></table>'.encode(
-                                "utf-8"
-                            ),
-                            "html",
-                            {"charset": "utf-8"},
-                            "https://law.moj.gov.tw/LawClass/LawAll.aspx?pcode=A0010001",
-                        )
-                        assert domestic_fields.get("issuer") == "臺灣省政府"
-                    if source_id == "dd-162":
-                        from wlh.processor.parsers.html.fields import extract_detail_fields
-
-                        issuer_rule = raw_cfg["processor"]["parser"]["documents"]["fields"]["issuer"]
-                        law_fields, _, _ = extract_detail_fields(
-                            {"issuer": issuer_rule},
-                            '<div id="lawText"><span id="lblUnit">市場監理 &gt; 證券商管理</span></div>'.encode(
-                                "utf-8"
-                            ),
-                            "html",
-                            {"charset": "utf-8"},
-                            "https://twse-regulation.twse.com.tw/TW/lawsystem/DAT0201.aspx?FLCODE=FL007009",
-                        )
-                        assert law_fields.get("issuer") == "臺灣證券交易所股份有限公司"
+                        if "expected_equal" in probe:
+                            assert extracted_fields.get(field_name) == probe["expected_equal"]
+                        if "expected_not_equal" in probe:
+                            assert extracted_fields.get(field_name) != probe["expected_not_equal"]
 
             rp_run = prepare_run(replay_yaml, "reparse")
             rp_res = execute_run(rp_run)
             assert rp_res["status"] == "complete", f"{source_id} reparse failed: {rp_res}"
             assert rp_res["report"]["external_requests"] == 0
-        finally:
-            _BridgeFixtureHandler.active_source_id = ""

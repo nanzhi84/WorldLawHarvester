@@ -104,9 +104,90 @@ def wlh_env(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
     return env
 
 
+_PYRAMID_MARKERS_BY_FILE: dict[str, str] = {
+    "test_architecture_contract.py": "contract",
+    "test_storage_and_config.py": "contract",
+    "test_runbook_rendering.py": "contract",
+    "test_runbook_publication.py": "contract",
+    "test_runbook_sample_store.py": "contract",
+    "test_source_document_qualification.py": "contract",
+    "test_document_extraction.py": "extractor",
+    "test_html_extraction.py": "extractor",
+    "test_office_extraction.py": "extractor",
+    "test_delivery_quality.py": "extractor",
+    "test_document_titles.py": "replay",
+    "test_legal_document_layout.py": "replay",
+    "test_legal_html_presentation.py": "replay",
+    "test_legal_xml_tables.py": "replay",
+    "test_legacy_legal_tables.py": "replay",
+    "test_kfs_content_fidelity.py": "replay",
+    "test_nta_pdf_body.py": "replay",
+    "test_archive_storage.py": "pipeline",
+    "test_pipeline_and_api.py": "pipeline",
+    "test_collection_concurrency.py": "pipeline",
+    "test_session_replay.py": "pipeline",
+    "test_source_collection_failures.py": "pipeline",
+    "test_japan_pipeline_recovery.py": "pipeline",
+    "test_source_adapters.py": "replay",
+    "test_fixture_replay.py": "replay",
+    "test_bridge_adapters.py": "replay",
+    "test_japan_sources.py": "replay",
+    "test_japan_court_catalog.py": "replay",
+    "test_taiwan_judicial_sources.py": "replay",
+    "test_taiwan_source_delivery.py": "replay",
+}
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Tag every test item with its test-pyramid marker (`contract`, `extractor`, `pipeline`, `replay`)."""
+    for item in items:
+        fname = Path(str(item.fspath)).name
+        marker_name = _PYRAMID_MARKERS_BY_FILE.get(fname)
+        if marker_name:
+            item.add_marker(getattr(pytest.mark, marker_name))
+
+
+TRUNCATE_TABLES_SQL = """
+TRUNCATE TABLE
+    wlh.source,
+    wlh.decision,
+    wlh.run,
+    wlh.frontier,
+    wlh.acquisition,
+    wlh.task,
+    wlh.task_input,
+    wlh.resource,
+    wlh.observation,
+    wlh.observation_evidence,
+    wlh.delivery_conflict,
+    wlh.version,
+    wlh.document_row,
+    wlh.snapshot,
+    wlh.snapshot_source,
+    wlh.snapshot_item,
+    wlh.snapshot_file,
+    wlh.snapshot_publication
+RESTART IDENTITY CASCADE;
+INSERT INTO wlh.publication (singleton, published_snapshot_id)
+VALUES (TRUE, NULL)
+ON CONFLICT (singleton) DO UPDATE SET published_snapshot_id = NULL;
+DO $$
+BEGIN
+    IF to_regclass('public.procrastinate_jobs') IS NOT NULL THEN
+        TRUNCATE TABLE
+            public.procrastinate_jobs,
+            public.procrastinate_events,
+            public.procrastinate_periodic_defers,
+            public.procrastinate_workers
+        RESTART IDENTITY CASCADE;
+    END IF;
+END $$;
+"""
+
+
 @pytest.fixture()
 def initialized_db(wlh_env: dict[str, str]) -> Generator[dict[str, str], None, None]:
-    """Initialize a clean wlh schema in the isolated test PostgreSQL database before the test, preserving unified real-network samples."""
+    """Initialize a clean wlh schema in the isolated test PostgreSQL database before the test via fast TRUNCATE."""
     from urllib.parse import urlsplit
 
     import psycopg
@@ -114,47 +195,33 @@ def initialized_db(wlh_env: dict[str, str]) -> Generator[dict[str, str], None, N
     db_name = urlsplit(wlh_env["WLH_DATABASE_URL"]).path.lstrip("/")
     if not (db_name.endswith("_test") or db_name.startswith("test_")):
         raise RuntimeError(
-            f"Refusing to DROP SCHEMA on non-test database: {db_name!r}"
+            f"Refusing to reset schema on non-test database: {db_name!r}"
         )
 
     _close_pooled_connections()
+    needs_ddl_init = False
     with psycopg.connect(wlh_env["WLH_DATABASE_URL"], autocommit=True) as conn:
-        has_backup = (
-            conn.execute(
-                "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'wlh_samples_backup'"
-            ).fetchone()
-            is not None
-        )
-        has_wlh_source = (
-            conn.execute(
-                "SELECT 1 FROM information_schema.tables WHERE table_schema = 'wlh' AND table_name = 'source'"
-            ).fetchone()
-            is not None
-        )
-        if not has_backup and has_wlh_source:
-            src_cnt_row = conn.execute("SELECT COUNT(*) FROM wlh.source").fetchone()
-            if src_cnt_row and int(src_cnt_row[0]) >= 10:
-                conn.execute("ALTER SCHEMA wlh RENAME TO wlh_samples_backup")
-        conn.execute("DROP SCHEMA IF EXISTS wlh CASCADE")
+        conn.execute("DROP SCHEMA IF EXISTS wlh_sandbox CASCADE")
+        conn.execute("DROP SCHEMA IF EXISTS wlh_samples_backup CASCADE")
+        tbl_cnt_row = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'wlh'"
+        ).fetchone()
+        if tbl_cnt_row and int(tbl_cnt_row[0]) >= 19:
+            conn.execute(TRUNCATE_TABLES_SQL)
+        else:
+            conn.execute("DROP SCHEMA IF EXISTS wlh CASCADE")
+            needs_ddl_init = True
 
-    from wlh.storage.db import initialize
+    if needs_ddl_init:
+        from wlh.storage.db import initialize
 
-    res = initialize()
-    assert res["status"] in {"initialized", "already_initialized"}
+        res = initialize()
+        assert res["status"] in {"initialized", "already_initialized"}
+
     try:
         yield wlh_env
     finally:
         _close_pooled_connections()
-        with psycopg.connect(wlh_env["WLH_DATABASE_URL"], autocommit=True) as conn:
-            has_backup = (
-                conn.execute(
-                    "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'wlh_samples_backup'"
-                ).fetchone()
-                is not None
-            )
-            if has_backup:
-                conn.execute("DROP SCHEMA IF EXISTS wlh CASCADE")
-                conn.execute("ALTER SCHEMA wlh_samples_backup RENAME TO wlh")
 
 
 def make_native_pdf(path: Path, pages_text: list[str]) -> Path:

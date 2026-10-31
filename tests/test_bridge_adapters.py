@@ -10,9 +10,6 @@ import psycopg
 import pytest
 
 from .bridge_fixture_support import (
-    BridgeFixtureHandler as _BridgeFixtureHandler,
-)
-from .bridge_fixture_support import (
     bridge_fixture_servers as bridge_fixture_servers,
 )
 
@@ -42,9 +39,8 @@ class TestStructuredXmlAndBridgeAdapters:
     ) -> None:
         """Each structured XML and bridge parser collects into `wlh.document_row` and replays offline without network."""
         port, _ = bridge_fixture_servers
-        _BridgeFixtureHandler.active_source_id = source_id
 
-        try:
+        if True:
             prefix = "/" + entry_path.strip("/").split("/")[0] + "/"
             docs_block = (
                 """
@@ -127,8 +123,6 @@ storage:
             rp_res = execute_run(rp_run)
             assert rp_res["status"] == "complete", f"{parser_type} reparse failed: {rp_res}"
             assert rp_res["report"]["external_requests"] == 0
-        finally:
-            _BridgeFixtureHandler.active_source_id = ""
 
     def test_rss_uslm_plaw_feed_discovers_uslm_detail_links_and_parses_public_law_metadata_and_sections(
         self,

@@ -20,7 +20,7 @@ from typing import Any, cast
 
 DEFAULT_CSV_PATH = Path("docs/runbooks/source-adaptation-matrix.csv")
 DEFAULT_OUTPUT_PATH = Path("docs/runbooks/source-verification-samples.html")
-DEFAULT_SAMPLES_DATABASE_URL = "postgresql://wlh:wlh@127.0.0.1:15432/wlh_test"
+DEFAULT_SAMPLES_DATABASE_URL = "postgresql://wlh:wlh@127.0.0.1:15432/wlh_samples"
 DEFAULT_SAMPLES_S3_BUCKET = "wlh-archive-test"
 FALLBACK_SAMPLES_DATABASE_URL = "postgresql://wlh:wlh@127.0.0.1:15432/wlh"
 FALLBACK_SAMPLES_S3_BUCKET = "wlh-archive"
@@ -278,6 +278,10 @@ def _resolve_candidate_quality_route(
 
         return str(text_check(md_text).get("recommended_route") or "accept")
     return "accept"
+
+
+resolve_candidate_quality_route = _resolve_candidate_quality_route
+
 
 
 STRATA_BADGE_LABELS: dict[str, tuple[str, str]] = {
@@ -1624,7 +1628,7 @@ def generate_verification_samples_from_db(
     fallback_database_url: str | None = None,
     fallback_s3_bucket: str | None = None,
 ) -> Path:
-    """Query PostgreSQL (`wlh_test`, with automatic fallback to production `wlh`) + S3 CAS (`wlh-archive-test` -> `wlh-archive`) for all `[x]`/`[~]` sources and write `source-verification-samples.html`."""
+    """Query PostgreSQL (`wlh_samples`, with automatic fallback to production `wlh`) + S3 CAS (`wlh-archive-test` -> `wlh-archive`) for all `[x]`/`[~]` sources and write `source-verification-samples.html`."""
     from contextlib import ExitStack
 
     import psycopg
@@ -1634,13 +1638,11 @@ def generate_verification_samples_from_db(
     target_db_url = (
         database_url
         or os.environ.get("WLH_SAMPLES_DATABASE_URL")
-        or os.environ.get("WLH_DATABASE_URL")
         or DEFAULT_SAMPLES_DATABASE_URL
     )
     target_bucket = (
         s3_bucket
         or os.environ.get("WLH_SAMPLES_S3_BUCKET")
-        or os.environ.get("WLH_S3_BUCKET")
         or DEFAULT_SAMPLES_S3_BUCKET
     )
     prod_db_url = (
@@ -1708,24 +1710,6 @@ def generate_verification_samples_from_db(
                 seen_resource_keys,
                 "wlh",
             )
-            if len(items) < max_items_per_source:
-                has_backup = (
-                    conn.execute(
-                        "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'wlh_samples_backup'"
-                    ).fetchone()
-                    is not None
-                )
-                if has_backup:
-                    _extract_source_items_from_store(
-                        conn,
-                        primary_objs,
-                        source_id,
-                        content_xpath,
-                        max_items_per_source,
-                        items,
-                        seen_resource_keys,
-                        "wlh_samples_backup",
-                    )
 
             if (
                 len(items) < max_items_per_source

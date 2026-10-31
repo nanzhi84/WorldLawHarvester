@@ -162,3 +162,57 @@ class TestHtmlToMarkdownConversion:
 
         assert "# Internal Revenue Bulletin: 2026-35" in md
         assert "Substantive bulletin text on Section 43 inflation adjustment." in md
+
+    def test_complex_table_with_rowspan_colspan_and_multicalendar_dates_preserves_grid_and_normalizes_iso_dates(
+        self,
+    ) -> None:
+        """Complex HTML tables with `rowspan`/`colspan` preserve cell alignment and multi-calendar dates (Japanese eras, ROC Minguo, localized formats) normalize to ISO `YYYY-MM-DD`."""
+        from wlh.cleaners.dates import era_date, parse_date, parse_taiwan_date
+        from wlh.processor.extractors.html.html_to_md import html_to_markdown
+
+        html = """
+        <html>
+          <body>
+            <main id="content">
+              <table>
+                <tr>
+                  <th rowspan="2">Category</th>
+                  <th colspan="2">Tax Rate Schedule</th>
+                </tr>
+                <tr>
+                  <th>Standard</th>
+                  <th>Reduced</th>
+                </tr>
+                <tr>
+                  <td rowspan="2">Consumption Tax</td>
+                  <td>10%</td>
+                  <td>8%</td>
+                </tr>
+                <tr>
+                  <td>National 7.8%</td>
+                  <td>Local 2.2%</td>
+                </tr>
+              </table>
+            </main>
+          </body>
+        </html>
+        """
+        md = html_to_markdown(
+            html,
+            base_url="https://www.nta.go.jp/taxes/shiraberu/taxanswer/shohi/6303.htm",
+            content_xpath="//main[@id='content']",
+        )
+        assert "Consumption Tax" in md
+        assert "Tax Rate Schedule" in md
+        assert "10%" in md and "8%" in md
+        assert "National 7.8%" in md and "Local 2.2%" in md
+
+        # Japanese eras (Reiwa, Heisei, Showa, Gannen) and ROC Minguo dates
+        assert era_date("令和元年5月1日") == "2019-05-01"
+        assert era_date("令和6年10月25日") == "2024-10-25"
+        assert era_date("平成三十一年四月三十日") == "2019-04-30"
+        assert parse_taiwan_date("中華民國113年05月20日") == "2024-05-20"
+        assert parse_taiwan_date("民國一百十二年十二月一日") == "2023-12-01"
+        assert parse_date("24.10.2026") == "2026-10-24"
+        assert parse_date("October 24, 2026") == "2026-10-24"
+

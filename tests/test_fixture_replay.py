@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 
@@ -27,30 +27,96 @@ class TestCasFixtureBundleExportAndReplay:
     def test_all_fixture_directories_contain_valid_manifest_without_hardcoded_route_table(
         self,
     ) -> None:
-        """Every `dd-*` fixture directory in `tests/fixtures/` is self-describing via a valid `wlh.fixture.v1` `manifest.json`."""
-        if not FIXTURES_DIR.is_dir():
-            import pytest
-
-            pytest.skip("Private fixture directory tests/fixtures not present")
+        """Every `dd-*` fixture directory in `tests/fixtures/` is self-describing via a valid `wlh.fixture.v1` `manifest.json` with real on-disk fixtures and stratified sampling metadata."""
+        assert FIXTURES_DIR.is_dir(), "Fixture directory tests/fixtures must exist"
         fixture_dirs = sorted(
             d for d in FIXTURES_DIR.iterdir() if d.is_dir() and d.name.startswith("dd-")
         )
-        if not fixture_dirs:
-            import pytest
-
-            pytest.skip("No private dd-* fixture directories present in tests/fixtures")
-        assert len(fixture_dirs) >= 40
+        assert len(fixture_dirs) >= 72
+        valid_strata = {
+            "p5_shortest",
+            "p95_longest",
+            "accept_with_warning",
+            "missing_doc_number",
+            "missing_effective_at",
+            "baseline",
+        }
         for d in fixture_dirs:
             manifest = load_fixture_manifest(FIXTURES_DIR, d.name)
             assert manifest["schema"] == "wlh.fixture.v1", f"Invalid schema in {d}"
             assert manifest["source_id"] == d.name
             routes: list[dict[str, Any]] = manifest["routes"]
             assert len(routes) >= 1
+            for route in routes:
+                assert "binary_attr" not in route, (
+                    f"{d.name} route {route.get('path')} must use real fixture file instead of binary_attr"
+                )
+            if "sampling_strata" in manifest:
+                raw_strata = manifest["sampling_strata"]
+                assert isinstance(raw_strata, list)
+                strata = [str(s) for s in cast(list[Any], raw_strata)]
+                assert len(strata) >= 1
+                assert set(strata).issubset(valid_strata)
+
+    def test_stateless_fixture_routing_resolves_concurrent_sources_without_global_active_source_id(
+        self, bridge_fixture_servers: tuple[int, int]
+    ) -> None:
+        """`FixtureRouter` and `BridgeFixtureHandler` resolve routes statelessly via `X-WLH-Source-Id` header or `/__source__/<source_id>/...` path prefix without any global `active_source_id` state."""
+        import urllib.error
+        import urllib.request
+
+        from .bridge_fixture_support import BridgeFixtureHandler
+
+        assert not hasattr(BridgeFixtureHandler, "active_source_id")
+        port, _port_v6 = bridge_fixture_servers
+        base_url = f"http://127.0.0.1:{port}"
+
+        req_header = urllib.request.Request(
+            f"{base_url}/eng/ppr/dip.htm",
+            headers={"X-WLH-Source-Id": "dd-507"},
+        )
+        with urllib.request.urlopen(req_header, timeout=5) as resp:
+            assert resp.status == 200
+            body_header = resp.read().decode("utf-8", errors="ignore")
+            assert "dipn03.pdf" in body_header
+
+        req_prefix = urllib.request.Request(
+            f"{base_url}/__source__/dd-501/gongbao/2026/issue_13046/202610/content_7083670.html"
+        )
+        with urllib.request.urlopen(req_prefix, timeout=5) as resp:
+            assert resp.status == 200
+            body_prefix = resp.read().decode("utf-8", errors="ignore")
+            assert "中华人民共和国国家发展和改革委员会令（第45号）" in body_prefix
+
+        req_missing_source = urllib.request.Request(f"{base_url}/eng/ppr/dip.htm")
+        try:
+            urllib.request.urlopen(req_missing_source, timeout=5)
+            raise AssertionError("Expected HTTP 400 when source_id is omitted")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
 
     def test_collected_run_exports_cas_fixture_bundle_and_replays_cleanly_via_fixture_router(
         self, initialized_db: dict[str, str], tmp_path: Path
     ) -> None:
-        """A collected source in PostgreSQL + S3 CAS exports via `wlh fixture export` into a self-contained `manifest.json` bundle and replays offline without the original server."""
+        """A collected source in PostgreSQL + S3 CAS exports via `wlh fixture export` into a self-contained `manifest.json` bundle with Anomaly-First Stratified Sampling (`sampling_strata`) covering all 6 strata and replays offline without the original server."""
+        from wlh.runbook_samples import stratify_verification_samples
+        from wlh.storage.cas import Objects
+
+        single_strat = stratify_verification_samples(
+            [
+                {
+                    "resource_id": "single-1",
+                    "title": "Single Resource Act 2026",
+                    "doc_number": "Act 1",
+                    "effective_at": "2026-01-01",
+                    "markdown": "Section 1. Normal legal body text for single item stratification.",
+                }
+            ],
+            max_items=5,
+        )
+        assert len(single_strat) == 1
+        assert single_strat[0]["sampling_strata"] == ["p5_shortest"]
+
         origin_port_holder: list[int] = []
 
         class _OriginHandler(BaseHTTPRequestHandler):
@@ -67,7 +133,9 @@ class TestCasFixtureBundleExportAndReplay:
                         f"<html><body><ul>"
                         f'<li><a href="http://127.0.0.1:{port}/laws/act-1.html">Digital Commerce Act 2026</a></li>'
                         f'<li><a href="http://127.0.0.1:{port}/laws/act-2.html">Electronic Signatures Act 2026</a></li>'
-                        f'<li><a href="http://127.0.0.1:{port}/laws/act-3.html">Data Governance Act 2026</a></li>'
+                        f'<li><a href="http://127.0.0.1:{port}/laws/act-3.html">Data Governance Guidelines 2026</a></li>'
+                        f'<li><a href="http://127.0.0.1:{port}/laws/act-4.html">Cybersecurity Resilience Act 2026</a></li>'
+                        f'<li><a href="http://127.0.0.1:{port}/laws/act-5.html">Cross-Border Payments Regulation 2026</a></li>'
                         f"</ul></body></html>"
                     ).encode("utf-8")
                     ctype = "text/html; charset=utf-8"
@@ -76,8 +144,9 @@ class TestCasFixtureBundleExportAndReplay:
                         "<html><body>"
                         '<h1 class="doc-title">Digital Commerce Act 2026</h1>'
                         '<div class="doc-meta"><span class="doc-no">Act No. 11 of 2026</span>'
-                        '<span class="pub-date">2026-03-15</span></div>'
-                        '<div class="law-body"><p>Section 1. This Act regulates commercial electronic transactions, intermediary liability, and consumer protection across digital marketplaces.</p></div>'
+                        '<span class="pub-date">2026-03-15</span>'
+                        '<span class="eff-date">2026-04-01</span></div>'
+                        '<div class="law-body"><p>Section 1. This Act regulates commercial electronic transactions and digital marketplaces.</p></div>'
                         "</body></html>"
                     ).encode("utf-8")
                     ctype = "text/html; charset=utf-8"
@@ -87,17 +156,44 @@ class TestCasFixtureBundleExportAndReplay:
                         '<h1 class="doc-title">Electronic Signatures Act 2026</h1>'
                         '<div class="doc-meta"><span class="doc-no">Act No. 12 of 2026</span>'
                         '<span class="pub-date">2026-04-20</span></div>'
-                        '<div class="law-body"><p>Section 1. Qualified electronic signatures backed by accredited cryptographic certificates shall carry full legal equivalence to handwritten signatures.</p></div>'
+                        '<div class="law-body">'
+                        "<p>Section 1. Qualified electronic signatures backed by accredited cryptographic certificates shall carry full legal equivalence to handwritten signatures across all commercial and administrative proceedings.</p>"
+                        "<p>Section 2. Certification authorities shall maintain auditable revocation registries, hardware security modules, and cross-border mutual recognition protocols in accordance with international standards.</p>"
+                        "<p>Section 3. Relying parties and supervisory bodies shall verify timestamping tokens and long-term archival validation records under uniform technical rules.</p>"
+                        "</div>"
                         "</body></html>"
                     ).encode("utf-8")
                     ctype = "text/html; charset=utf-8"
                 elif self.path == "/laws/act-3.html":
                     body = (
                         "<html><body>"
-                        '<h1 class="doc-title">Data Governance Act 2026</h1>'
-                        '<div class="doc-meta"><span class="doc-no">Act No. 13 of 2026</span>'
-                        '<span class="pub-date">2026-05-10</span></div>'
+                        '<h1 class="doc-title">Data Governance Guidelines 2026</h1>'
+                        '<div class="doc-meta">'
+                        '<span class="pub-date">2026-05-10</span>'
+                        '<span class="eff-date">2026-06-01</span></div>'
                         '<div class="law-body"><p>Section 1. Public-sector data sharing, cross-border data stewardship, and algorithmic accountability obligations shall be supervised by the Data Governance Commission.</p></div>'
+                        "</body></html>"
+                    ).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                elif self.path == "/laws/act-4.html":
+                    body = (
+                        "<html><body>"
+                        '<h1 class="doc-title">Cybersecurity Resilience Act 2026</h1>'
+                        '<div class="doc-meta"><span class="doc-no">Act No. 14 of 2026</span>'
+                        '<span class="pub-date">2026-06-15</span>'
+                        '<span class="eff-date">2026-07-01</span></div>'
+                        '<div class="law-body"><p>Section 1. Critical infrastructure operators shall establish incident response plans, vulnerability disclosure channels, and supply chain risk assessments.</p></div>'
+                        "</body></html>"
+                    ).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                elif self.path == "/laws/act-5.html":
+                    body = (
+                        "<html><body>"
+                        '<h1 class="doc-title">Cross-Border Payments Regulation 2026</h1>'
+                        '<div class="doc-meta"><span class="doc-no">Act No. 15 of 2026</span>'
+                        '<span class="pub-date">2026-07-20</span>'
+                        '<span class="eff-date">2026-08-01</span></div>'
+                        '<div class="law-body"><p>Section 1. Payment service providers shall disclose settlement fees, foreign exchange reference rates, and clearing timelines before executing transfers.</p></div>'
                         "</body></html>"
                     ).encode("utf-8")
                     ctype = "text/html; charset=utf-8"
@@ -151,6 +247,9 @@ processor:
         published_at:
           xpath: '//span[@class="pub-date"]'
           regex: '\\d{{4}}-\\d{{2}}-\\d{{2}}'
+        effective_at:
+          xpath: '//span[@class="eff-date"]'
+          regex: '\\d{{4}}-\\d{{2}}-\\d{{2}}'
 cleaners: {{}}
 storage:
   archive_approved: true
@@ -168,7 +267,37 @@ storage:
             c_run = prepare_run(source_yaml, "collect")
             c_res = execute_run(c_run)
             assert c_res["status"] == "complete", f"Initial collect failed: {c_res}"
-            assert verify_source_delivery("dd-905", require_multi_resource=True)["resource_count"] == 3
+            assert verify_source_delivery("dd-905", require_multi_resource=True)["resource_count"] == 5
+
+            # Attach a CAS result_ref with recommended_route='accept_with_warning' on act-4.html
+            objects = Objects()
+            warn_ref = objects.put_json(
+                {
+                    "deliverables": [
+                        {
+                            "quality_report": {
+                                "contract": "wlh.quality.v2",
+                                "recommended_route": "accept_with_warning",
+                            }
+                        }
+                    ]
+                }
+            )
+            with psycopg.connect(initialized_db["WLH_DATABASE_URL"], autocommit=True) as conn:
+                conn.execute("ALTER TABLE wlh.version DISABLE TRIGGER USER")
+                try:
+                    conn.execute(
+                        """
+                        UPDATE wlh.version v
+                        SET result_ref = %s
+                        FROM wlh.resource r
+                        WHERE r.current_version_id = v.id
+                          AND r.public_url LIKE '%%/laws/act-4.html'
+                        """,
+                        (warn_ref,),
+                    )
+                finally:
+                    conn.execute("ALTER TABLE wlh.version ENABLE TRIGGER USER")
 
             export_root = tmp_path / "exported_fixtures"
             export_dir = export_root / "dd-905"
@@ -179,21 +308,32 @@ storage:
                 "--output-dir",
                 str(export_dir),
                 "--max-resources",
-                "2",
+                "5",
                 env=initialized_db,
             )
             assert rc == 0, f"wlh fixture export failed: {out} {err}"
             direct_manifest = export_source_fixture(
-                "dd-905", export_dir, max_resources=2, source_yaml=source_yaml
+                "dd-905", export_dir, max_resources=5, source_yaml=source_yaml
             )
             assert direct_manifest["schema"] == "wlh.fixture.v1"
             assert (export_dir / "manifest.json").is_file()
             manifest = load_fixture_manifest(export_root, "dd-905")
             assert manifest["schema"] == "wlh.fixture.v1"
-            assert len(manifest["routes"]) >= 3
+            assert len(manifest["routes"]) >= 6
+            assert "sampling_strata" in manifest
+            strata_set = set(manifest["sampling_strata"])
+            assert {
+                "p5_shortest",
+                "p95_longest",
+                "accept_with_warning",
+                "missing_doc_number",
+                "missing_effective_at",
+                "baseline",
+            }.issubset(strata_set), f"Expected all 6 strata in manifest, got {strata_set}"
+            assert len(manifest.get("samples", [])) == 5
 
             html_files = list(export_dir.glob("*.html"))
-            assert len(html_files) >= 3
+            assert len(html_files) >= 6
             assert any("{host}" in f.read_text(encoding="utf-8") for f in html_files)
             assert all(
                 f"127.0.0.1:{origin_port}" not in f.read_text(encoding="utf-8")
@@ -212,7 +352,7 @@ storage:
 
             def do_GET(self) -> None:
                 rendered = replay_router.resolve_and_render(
-                    "dd-905",
+                    "",
                     self.path,
                     headers=dict(self.headers.items()),
                 )
@@ -233,11 +373,10 @@ storage:
         replay_thread.start()
 
         try:
-            with psycopg.connect(initialized_db["WLH_DATABASE_URL"], autocommit=True) as conn:
-                conn.execute("DROP SCHEMA IF EXISTS wlh CASCADE")
-            from wlh.storage.db import initialize
+            from .conftest import TRUNCATE_TABLES_SQL
 
-            initialize()
+            with psycopg.connect(initialized_db["WLH_DATABASE_URL"], autocommit=True) as conn:
+                conn.execute(TRUNCATE_TABLES_SQL)
 
             replay_yaml = tmp_path / "dd-905-replay.yaml"
             replay_yaml.write_text(
@@ -256,7 +395,7 @@ storage:
 
             verified = verify_source_delivery("dd-905", require_multi_resource=True)
             assert verified["passed"] is True
-            assert verified["resource_count"] == 2
+            assert verified["resource_count"] == 5
 
             rp_run = prepare_run(replay_yaml, "reparse")
             rp_res = execute_run(rp_run)
