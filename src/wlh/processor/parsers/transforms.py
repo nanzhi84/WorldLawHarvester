@@ -121,51 +121,12 @@ def restore_inline_script_cells(target: Any, context: Mapping[str, Any] | None =
 
 
 def gpo_xml_to_markdown(raw: bytes | str, context: Mapping[str, Any] | None = None) -> str:
-    """Convert GPO bulk printing XML (HD/SECTNO/GPOTABLE/EXTRACT) into structured Markdown."""
-    data = raw.encode("utf-8") if isinstance(raw, str) else raw
-    parser = etree.XMLParser(
-        resolve_entities=False, no_network=True, recover=False, huge_tree=False
+    """Convert GPO bulk printing XML (HD/SECTNO/GPOTABLE/EXTRACT) into structured Markdown via Stage 3b XML extractor."""
+    from wlh.processor.extractors.xml.markdown import (
+        gpo_xml_to_markdown as _extract_gpo_xml_to_markdown,
     )
-    try:
-        root: Any = etree.fromstring(data, parser=parser)
-    except etree.XMLSyntaxError:
-        raise WlhError("federal_register_xml_invalid") from None
-    blocks: list[str] = []
-    for elem in list(root.iter()):
-        if not isinstance(elem.tag, str):
-            continue
-        tag = elem.tag.upper()
-        if tag in ("HD", "HED", "SUBAGY", "AGY", "SUBJECT"):
-            text = compact("".join(cast(list[str], elem.itertext())))
-            if not text:
-                continue
-            source_attr = str(elem.get("SOURCE") or "").upper()
-            level = "##"
-            if source_attr.startswith("HD1") or tag in ("AGY", "SUBJECT"):
-                level = "#"
-            elif source_attr.startswith("HD2") or tag == "SUBAGY":
-                level = "##"
-            elif source_attr.startswith("HD3"):
-                level = "###"
-            blocks.append(f"{level} {text}")
-        elif tag in ("P", "FP", "EXTRACT"):
-            ancestors = {
-                a.tag.upper()
-                for a in list(elem.iterancestors())
-                if isinstance(a.tag, str)
-            }
-            if tag in ("P", "FP") and "EXTRACT" in ancestors:
-                continue
-            text = compact("".join(cast(list[str], elem.itertext())))
-            if text:
-                blocks.append(text)
-    if not blocks:
-        fallback = compact("".join(cast(list[str], root.itertext())))
-        if fallback:
-            blocks.append(fallback)
-    if not blocks:
-        raise WlhError("federal_register_xml_empty")
-    return "\n\n".join(blocks).strip() + "\n"
+
+    return _extract_gpo_xml_to_markdown(raw, context)
 
 
 def external_figure_sources(root: Any) -> list[str]:

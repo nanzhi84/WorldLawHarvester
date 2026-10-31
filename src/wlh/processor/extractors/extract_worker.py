@@ -19,13 +19,8 @@ from typing import Any, NoReturn, cast
 
 from wlh.cleaners.extraction_quality import text_check
 from wlh.core import WlhError
-from wlh.processor.extractors.html.html_to_md import (
-    html_to_markdown,
-    json_to_markdown,
-    text_to_markdown,
-)
-from wlh.processor.extractors.pdf.scan_detector import extract_pdf
-from wlh.processor.extractors.word.office import OFFICE_KINDS, extract_office, unpack_zip
+
+OFFICE_KINDS = {"docx", "doc", "xlsx", "xls", "rtf", "odt"}
 
 ROUTE_ORDER = (
     "accept",
@@ -46,18 +41,28 @@ def extract(
     parser_cfg = cast(dict[str, Any], job.get("parser")) if isinstance(job.get("parser"), dict) else {}
     raw_pats = cast(list[Any], parser_cfg.get("invalid_body_patterns")) if isinstance(parser_cfg.get("invalid_body_patterns"), list) else []
     invalid_pats: list[str] = [str(x) for x in raw_pats if x]
-    if kind in {"txt", "html", "json"}:
+    if kind in {"txt", "html", "json", "xml"}:
         try:
             text = path.read_text(encoding="utf-8-sig")
         except UnicodeError:
             raise WlhError("zip_text_encoding_invalid") from None
-        markdown = (
-            html_to_markdown(text, "")
-            if kind == "html"
-            else json_to_markdown(text)
-            if kind == "json"
-            else text_to_markdown(text)
-        )
+        if kind == "xml":
+            from wlh.processor.extractors.xml.markdown import xml_to_markdown
+
+            markdown = xml_to_markdown(text.encode("utf-8"))
+        else:
+            from wlh.processor.extractors.html.html_to_md import (
+                html_to_markdown,
+                json_to_markdown,
+                text_to_markdown,
+            )
+
+            if kind == "html":
+                markdown = html_to_markdown(text, "")
+            elif kind == "json":
+                markdown = json_to_markdown(text)
+            else:
+                markdown = text_to_markdown(text)
         return (
             markdown,
             {"kind": kind},
@@ -66,6 +71,8 @@ def extract(
             [],
         )
     if kind == "pdf":
+        from wlh.processor.extractors.pdf.scan_detector import extract_pdf
+
         markdown, info, report, parsers = extract_pdf(
             path,
             job["ocr"],
@@ -75,6 +82,8 @@ def extract(
         )
         return markdown, info, report, parsers, []
     if kind in OFFICE_KINDS:
+        from wlh.processor.extractors.word.office import extract_office
+
         markdown, info = extract_office(
             path,
             kind,
@@ -93,6 +102,8 @@ def extract(
             [],
         )
     if kind == "zip":
+        from wlh.processor.extractors.word.office import unpack_zip
+
         if depth >= 2:
             raise WlhError("zip_nesting_limit_exceeded")
         folder = Path(path).with_name(Path(path).name + "-members")

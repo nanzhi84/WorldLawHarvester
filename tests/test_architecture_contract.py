@@ -108,6 +108,51 @@ class TestArchitectureContract:
             f"{FORBIDDEN_OPERATOR_ERROR}"
         )
 
+        xml_parsers_dir = parsers_dir / "xml"
+        xml_parser_entries = {
+            entry.name
+            for entry in xml_parsers_dir.iterdir()
+            if entry.name != "__pycache__" and not entry.name.startswith(".")
+        }
+        assert xml_parser_entries == {"__init__.py", "parser.py", "discovery.py", "values.py"}, (
+            f"processor/parsers/xml/ must only contain navigation and metadata slicing modules, "
+            f"not Markdown converters: {xml_parser_entries}"
+        )
+
+        extractors_dir = SRC_WLH / "processor" / "extractors"
+        assert extractors_dir.is_dir()
+        extractor_entries = {
+            entry.name
+            for entry in extractors_dir.iterdir()
+            if entry.name != "__pycache__" and not entry.name.startswith(".")
+        }
+        expected_extractor_entries = {
+            "__init__.py",
+            "router.py",
+            "slots.py",
+            "extract_worker.py",
+            "pdf",
+            "word",
+            "ocr",
+            "html",
+            "xml",
+            "quirks",
+        }
+        assert extractor_entries == expected_extractor_entries, (
+            f"processor/extractors/ must contain all 5 format extractor packages (pdf, word, ocr, html, xml) + quirks: "
+            f"{extractor_entries ^ expected_extractor_entries}"
+        )
+
+        xml_extractors_dir = extractors_dir / "xml"
+        xml_extractor_entries = {
+            entry.name
+            for entry in xml_extractors_dir.iterdir()
+            if entry.name != "__pycache__" and not entry.name.startswith(".")
+        }
+        assert xml_extractor_entries == {"__init__.py", "markdown.py", "tables.py", "inline.py"}, (
+            f"processor/extractors/xml/ must contain XML->Markdown converter modules: {xml_extractor_entries}"
+        )
+
     def test_operator_registries_match_frozen_allowlists_and_atomic_signatures(self) -> None:
         from wlh import config
         from wlh.fetcher import challenges
@@ -165,6 +210,7 @@ class TestArchitectureContract:
             for py_file in (SRC_WLH / stage).rglob("*.py"):
                 source_text = py_file.read_text(encoding="utf-8")
                 tree = ast.parse(source_text, filename=str(py_file))
+                rel_parts = py_file.relative_to(SRC_WLH).parts
 
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -182,16 +228,100 @@ class TestArchitectureContract:
                                 r"\bSELECT\b.+\bFROM\s+wlh\.", val, re.IGNORECASE | re.DOTALL
                             ), f"Direct SQL query found in {stage} module {py_file}:{node.lineno}"
 
-                    if stage in ("processor", "cleaners"):
+                    if stage in ("processor", "cleaners") and isinstance(
+                        node, (ast.Import, ast.ImportFrom)
+                    ):
+                        imported_modules: list[str] = []
                         if isinstance(node, ast.Import):
-                            for alias in node.names:
-                                assert not alias.name.startswith(
-                                    ("psycopg", "wlh.storage.db", "wlh.db")
-                                ), f"Forbidden DB import '{alias.name}' in {py_file}:{node.lineno}"
-                        elif isinstance(node, ast.ImportFrom) and node.module:
-                            assert not node.module.startswith(
+                            imported_modules.extend(alias.name for alias in node.names)
+                        elif node.module:
+                            imported_modules.append(node.module)
+
+                        for mod_name in imported_modules:
+                            assert not mod_name.startswith(
                                 ("psycopg", "wlh.storage.db", "wlh.db")
-                            ), f"Forbidden DB import '{node.module}' in {py_file}:{node.lineno}"
+                            ), f"Forbidden DB import '{mod_name}' in {py_file}:{node.lineno}"
+                            if rel_parts[:2] == ("processor", "extractors"):
+                                assert not mod_name.startswith("wlh.processor.parsers"), (
+                                    f"processor/extractors/ must never reverse-import from processor/parsers/ "
+                                    f"('{mod_name}' in {py_file}:{node.lineno})"
+                                )
+                            if stage == "cleaners":
+                                assert not mod_name.startswith("wlh.processor"), (
+                                    f"cleaners/ must never reverse-import from processor/ "
+                                    f"('{mod_name}' in {py_file}:{node.lineno})"
+                                )
+
+                    if (
+                        isinstance(node, ast.FunctionDef)
+                        and node.name.endswith("_to_markdown")
+                        and rel_parts[:2] != ("processor", "extractors")
+                        and not (
+                            rel_parts == ("processor", "parsers", "transforms.py")
+                            and node.name == "gpo_xml_to_markdown"
+                        )
+                    ):
+                        raise AssertionError(
+                            f"Markdown conversion function '{node.name}' must live in "
+                            f"src/wlh/processor/extractors/, found in {py_file}:{node.lineno}"
+                        )
+
+    def test_xml_extractor_converts_legal_and_gpo_xml_to_standard_markdown(self) -> None:
+        import lxml.etree as _etree  # type: ignore[import-untyped]
+
+        from wlh.processor.extractors.xml import (
+            dokument_xml_to_markdown,
+            gazette_html_to_markdown,
+            gpo_xml_to_markdown,
+            inline_content,
+            markdown,
+            table_markdown,
+            xml_to_markdown,
+        )
+
+        etree: Any = _etree
+        law_root: Any = etree.fromstring(
+            b"<Law><LawBody><LawTitle>Environmental Act</LawTitle>"
+            b"<Article><ArticleCaption>Purpose</ArticleCaption><ArticleTitle>Article 1</ArticleTitle>"
+            b"<Paragraph><Sentence>This Act applies to <Ruby>law<Rt>hou</Rt></Ruby> and CO<Sub>2</Sub>.</Sentence></Paragraph>"
+            b"</Article>"
+            b"<TableStruct><Table><TableRow>"
+            b"<TableColumn BorderTop='solid' BorderBottom='none'>Category A</TableColumn>"
+            b"<TableColumn colspan='2'>Scope 1 &amp; 2</TableColumn>"
+            b"</TableRow></Table></TableStruct>"
+            b"</LawBody></Law>"
+        )
+        law_md = markdown(law_root)
+        assert "## Environmental Act" in law_md
+        assert "## Purpose" in law_md
+        assert "Article 1" in law_md
+        assert "<ruby>law<rt>hou</rt></ruby>" in law_md
+        assert "CO<sub>2</sub>" in law_md
+        assert 'colspan="2"' in law_md
+        assert "border-top:1px solid currentColor;border-bottom:none" in law_md
+
+        tbl_node: Any = law_root.find(".//Table")
+        assert tbl_node is not None
+        tbl_md = table_markdown(tbl_node)
+        assert tbl_md is not None and "<table" in tbl_md
+        sent_node: Any = law_root.find(".//Sentence")
+        assert sent_node is not None
+        assert "<sub>2</sub>" in inline_content(sent_node)
+
+        gpo_raw = (
+            b"<RULE><PREAMB><AGY>ENVIRONMENTAL PROTECTION AGENCY</AGY>"
+            b"<HD SOURCE='HD1'>Supplementary Information</HD>"
+            b"<P>This final rule establishes national emission standards for hazardous air pollutants.</P>"
+            b"</PREAMB></RULE>"
+        )
+        assert "## Supplementary Information" in xml_to_markdown(gpo_raw)
+        assert "# Supplementary Information" in gpo_xml_to_markdown(gpo_raw)
+
+        dok_root: Any = etree.fromstring(
+            b"<dokument><leitsatz>Guiding principle.</leitsatz><tenor>The appeal is dismissed.</tenor></dokument>"
+        )
+        assert dokument_xml_to_markdown(dok_root) == "Guiding principle.\n\nThe appeal is dismissed."
+        assert "Gazette body" in gazette_html_to_markdown("<p>Gazette body</p>", "https://example.gov")
 
 
 class TestSourceConfigContract:

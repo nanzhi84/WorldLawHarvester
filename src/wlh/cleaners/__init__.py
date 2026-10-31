@@ -41,9 +41,7 @@ from wlh.cleaners.text_cleaner import (
     clean_title,
     compact,
     enrich_bare_title,
-    html_fragment_to_markdown,
     normalized,
-    text_to_markdown,
 )
 
 __all__ = [
@@ -65,7 +63,6 @@ __all__ = [
     "enrich_bare_title",
     "era_date",
     "extract_taiwan_law_dates_and_meta",
-    "html_fragment_to_markdown",
     "infer_effective_date",
     "infer_missing_dates",
     "japanese_number",
@@ -80,6 +77,5 @@ __all__ = [
     "resolve_moj_law_dates_and_meta",
     "roc_date",
     "text_check",
-    "text_to_markdown",
     "verify_source_delivery",
 ]

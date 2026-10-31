@@ -10,7 +10,7 @@ import lxml.etree as _etree  # type: ignore[import-untyped]
 
 from wlh.core import WlhError
 from wlh.processor.extractors.html.tables_and_lists import expand_rows, span
-from wlh.processor.parsers.xml.inline import inline_content
+from wlh.processor.extractors.xml.inline import inline_content
 
 etree: Any = _etree
 TABLE_TAGS = {"table", "Table", "TABLE"}
@@ -159,3 +159,11 @@ def _semantic_table(rows: list[Any], caption: str) -> str:
         output.append(f"</{group}>")
     output.append("</table>")
     return "\n\n" + "".join(output) + "\n\n"
+
+
+__all__ = [
+    "CELL_TAGS",
+    "ROW_TAGS",
+    "TABLE_TAGS",
+    "table_markdown",
+]

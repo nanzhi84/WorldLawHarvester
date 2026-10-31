@@ -165,16 +165,6 @@ def enrich_bare_title(
     return cleaned_title
 
 
-def text_to_markdown(value: str) -> str:
-    return normalized(value)
-
-
-def html_fragment_to_markdown(fragment: str, base_url: str = "") -> str:
-    from wlh.processor.extractors.html.html_to_md import html_to_markdown
-
-    return html_to_markdown(fragment, None, base_url)
-
-
 def _blocked_patterns(config: Mapping[str, Any] | None) -> Sequence[str]:
     if not isinstance(config, Mapping):
         return ()

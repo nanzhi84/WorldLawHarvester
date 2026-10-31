@@ -12,10 +12,10 @@ from urllib.parse import urljoin
 
 import lxml.etree as _etree  # type: ignore[import-untyped]
 
-from wlh.cleaners.text_cleaner import apply_text_cleaners, clean_title, normalized
+from wlh.cleaners.text_cleaner import apply_text_cleaners, clean_title
 from wlh.core import WlhError, digest, guard, public_url
 from wlh.processor.extractors.html.dom_tree import parse_html
-from wlh.processor.extractors.html.html_to_md import html_to_markdown
+from wlh.processor.extractors.html.html_to_md import html_to_markdown, text_to_markdown
 from wlh.processor.extractors.word.office import detect_real_format
 from wlh.processor.parsers import Base
 from wlh.processor.records import RawRecord, RawUnitSource
@@ -392,7 +392,7 @@ class RecordAdapter(Base):
             markdown = (
                 html_to_markdown(record["html"], url, quirks=tuple(self.quirks))
                 if record.get("html")
-                else normalized(record.get("text") or "")
+                else text_to_markdown(record.get("text") or "")
             )
             if strip_pats:
                 markdown = apply_text_cleaners(markdown, strip_pats)
