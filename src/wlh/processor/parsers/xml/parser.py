@@ -20,7 +20,11 @@ from wlh.cleaners.dates import resolve_moj_law_dates_and_meta
 from wlh.cleaners.text_cleaner import normalized
 from wlh.config import MAX_ORIGINAL_BYTES
 from wlh.core import WlhError, guard, public_url
-from wlh.processor.extractors.html.html_to_md import html_to_markdown
+from wlh.processor.extractors.xml import (
+    dokument_xml_to_markdown,
+    gazette_html_to_markdown,
+    markdown,
+)
 from wlh.processor.parsers.record_base import (
     RecordAdapter,
     _budget_documents,
@@ -35,7 +39,6 @@ from wlh.processor.parsers.record_base import (
     first as _first_xpath,
 )
 from wlh.processor.parsers.xml.discovery import discover
-from wlh.processor.parsers.xml.markdown import markdown
 from wlh.processor.parsers.xml.values import select
 
 etree: Any = _etree
@@ -472,12 +475,7 @@ class XmlParser(RecordAdapter):
                     ),
                     "published_at": _record_day(published),
                     "doc_type": "案例",
-                    "text": "\n\n".join(
-                        " ".join(n.itertext())
-                        for n in root.xpath(
-                            ".//leitsatz|.//tenor|.//tatbestand|.//entscheidungsgruende|.//gruende|.//gründe"
-                        )
-                    ),
+                    "text": dokument_xml_to_markdown(root),
                     "original": (
                         {
                             "ref": acquisition["archive_ref"],
@@ -713,26 +711,11 @@ class XmlParser(RecordAdapter):
                     published = f"{published[:4]}-{published[4:6]}-{published[6:]}"
             html_content = select(node, "HTMLContent") if tag == "Gazette" else None
             if html_content:
-                cleaned_html = re.sub(r"<!--.*?-->", "", html_content, flags=re.S)
-                cleaned_html = re.sub(r"<\s*$", "", cleaned_html.strip())
-                cleaned_html = re.sub(
-                    r"</?(?:table|tbody|thead|tr|td|th)\b[^>]*>",
-                    "\n<p>",
-                    cleaned_html,
-                    flags=re.I,
-                )
-                body_md = html_to_markdown(
-                    b"<meta charset='utf-8'><div>" + cleaned_html.encode("utf-8") + b"</div>",
+                body_md = gazette_html_to_markdown(
+                    html_content,
                     key,
+                    fallback_parts=(select(node, "ThemeSubject"), select(node, "Explain")),
                 )
-                if not body_md.strip():
-                    body_md = normalized(
-                        "\n\n".join(
-                            part
-                            for part in (select(node, "ThemeSubject"), select(node, "Explain"))
-                            if part
-                        )
-                    )
                 text_body = "# " + title + "\n\n" + body_md
             else:
                 text_body = "# " + title + "\n\n" + markdown(node)

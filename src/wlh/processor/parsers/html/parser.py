@@ -412,7 +412,22 @@ class HtmlParser(WebDocumentBuilder, Base):
                     or "ja_inline_glyphs" in quirks
                     or "ja_kanpo_pua" in quirks
                 )
+                from wlh.processor.parsers.html.dom_cleanup import clean_site_dom
+
+                excl_xpath = docs.get("exclude_content_xpath")
+                if isinstance(excl_xpath, str):
+                    excl_list = [excl_xpath] if excl_xpath else []
+                elif isinstance(excl_xpath, Sequence):
+                    excl_list = [str(x) for x in cast(Sequence[Any], excl_xpath) if x]
+                else:
+                    excl_list = []
                 for r_node in region_nodes:
+                    clean_site_dom(
+                        r_node,
+                        exclude_xpaths=excl_list,
+                        dom_transforms=tuple(self.transforms) or ("inline_script_cell_restore",),
+                        include_defaults=True,
+                    )
                     clean_html_tree(r_node, quirks=tuple(quirks))
                     for img in r_node.xpath("descendant-or-self::img"):
                         if use_glyphs and inline_glyph_text(img) is not None:

@@ -91,3 +91,10 @@ def inline_content(node: Any, *, html_output: bool = False) -> str:
 
     value = marked(node)
     return re.sub(r"\s+", " ", value).strip()
+
+
+__all__ = [
+    "EMPHASIS_TAGS",
+    "INLINE_TAGS",
+    "inline_content",
+]

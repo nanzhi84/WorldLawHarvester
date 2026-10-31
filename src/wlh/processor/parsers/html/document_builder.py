@@ -297,8 +297,12 @@ class WebDocumentBuilder:
             docs.get("require_complete_text") or cleaners_map.get("require_complete_text")
         )
         for node in nodes:
-            if excl_list or dom_transforms:
-                clean_site_dom(node, exclude_xpaths=excl_list, dom_transforms=dom_transforms)
+            clean_site_dom(
+                node,
+                exclude_xpaths=excl_list,
+                dom_transforms=dom_transforms or ("inline_script_cell_restore",),
+                include_defaults=True,
+            )
             clean_html_tree(node, quirks=quirks)
             if req_complete:
                 require_textual_images(

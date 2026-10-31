@@ -13,10 +13,11 @@ from urllib.parse import unquote, urlencode, urljoin, urlsplit, urlunsplit
 
 import lxml.etree as _etree  # type: ignore[import-untyped]
 
-from wlh.cleaners.text_cleaner import normalized, text_to_markdown
 from wlh.core import WlhError, canonical, digest, guard, public_url
 from wlh.processor.extractors.html.dom_tree import parse_html
+from wlh.processor.extractors.html.html_to_md import text_to_markdown
 from wlh.processor.extractors.word.office import detect_real_format
+from wlh.processor.extractors.xml import dokument_xml_to_markdown, xml_to_markdown
 from wlh.processor.parsers.html.document_builder import WebDocumentBuilder
 from wlh.processor.parsers.html.document_builder import doc_rules as _doc_rules
 from wlh.processor.parsers.html.fields import clean_url, decode, file_name
@@ -57,14 +58,6 @@ TYPES: dict[str, str] = {
     "Notice": "通知公告",
     "Presidential Document": "政策文件",
 }
-HEADINGS: dict[str, str] = {
-    "HD1": "##",
-    "HD2": "###",
-    "HD3": "####",
-    "HD4": "#####",
-    "HD5": "#####",
-}
-SKIP: set[str] = {"PRTPAGE", "FRDOC", "BILCOD", "GPH", "GID", "STARS"}
 
 
 def pointer(value: Any, path: str) -> Any:
@@ -86,73 +79,6 @@ def pointer(value: Any, path: str) -> Any:
         else:
             raise WlhError("json_pointer_unresolved")
     return value
-
-
-def text_of(node: Any) -> str:
-    return re.sub(r"\s+", " ", "".join(node.itertext())).strip()
-
-
-def xml_to_markdown(data: bytes) -> str:
-    """Full-text GPO XML → Markdown: headings, paragraphs, tables, footnotes."""
-    try:
-        root: Any = etree.fromstring(
-            data, etree.XMLParser(resolve_entities=False, no_network=True)
-        )
-    except etree.XMLSyntaxError:
-        raise WlhError("full_text_xml_invalid") from None
-    blocks: list[str] = []
-
-    def walk(node: Any) -> None:
-        tag = node.tag if isinstance(node.tag, str) else ""
-        if tag in SKIP:
-            return
-        if tag == "HD":
-            level = HEADINGS.get(node.get("SOURCE", ""), "")
-            text = text_of(node)
-            if text:
-                blocks.append((level + " " if level else "**") + text + ("" if level else "**"))
-            return
-        if tag in {"SUBJECT", "SECTNO"}:
-            text = text_of(node)
-            if text:
-                blocks.append("## " + text if tag == "SUBJECT" else "### " + text)
-            return
-        if tag in {"P", "FP", "AMDPAR", "NOTE", "SIG", "NAME", "TITLE", "DATED", "FTNT"}:
-            if tag in {"NOTE", "SIG", "FTNT"} and len(node):
-                for child in node:
-                    walk(child)
-                return
-            text = text_of(node)
-            if text:
-                blocks.append(text_to_markdown(text).strip())
-            return
-        if tag == "GPOTABLE":
-            rows: list[list[str]] = []
-            heads = [text_of(c) for c in node.iter("CHED")]
-            if heads:
-                rows.append(heads)
-            for row in node.iter("ROW"):
-                rows.append([text_of(e) for e in row.iter("ENT")])
-            if rows:
-                width = max(len(r) for r in rows)
-                rows = [
-                    [c.replace("|", "\\|") for c in r] + [""] * (width - len(r)) for r in rows
-                ]
-                lines = ["| " + " | ".join(rows[0]) + " |", "|" + " --- |" * width]
-                lines.extend("| " + " | ".join(r) + " |" for r in rows[1:])
-                caption: Any = node.find("TTITLE")
-                if caption is not None and text_of(caption):
-                    blocks.append("**" + text_of(caption) + "**")
-                blocks.append("\n".join(lines))
-            return
-        for child in node:
-            walk(child)
-
-    walk(root)
-    markdown = normalized("\n\n".join(b for b in blocks if b))
-    if len(markdown.strip()) < 20:
-        raise WlhError("full_text_xml_empty")
-    return markdown
 
 
 def rii_xml(data: bytes, max_bytes: int) -> bytes:
@@ -981,12 +907,7 @@ class JsonParser(RecordAdapter):
                     ),
                     "published_at": day(published),
                     "doc_type": "案例",
-                    "text": "\n\n".join(
-                        " ".join(n.itertext())
-                        for n in tree.xpath(
-                            ".//leitsatz|.//tenor|.//tatbestand|.//entscheidungsgruende|.//gruende|.//gründe"
-                        )
-                    ),
+                    "text": dokument_xml_to_markdown(tree),
                     "original": (
                         {
                             "ref": acquisition["archive_ref"],
@@ -1462,12 +1383,8 @@ Adapter = JsonParser
 __all__ = [
     "Adapter",
     "FIELDS",
-    "HEADINGS",
     "JsonParser",
-    "SKIP",
     "TYPES",
     "pointer",
     "rii_xml",
-    "text_of",
-    "xml_to_markdown",
 ]
