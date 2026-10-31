@@ -387,3 +387,109 @@ class TestDeliverySemanticQualityContract:
             assert "boilerplate_or_garbage_title" in codes_title, (
                 f"Expected boilerplate_or_garbage_title for {polluted_title!r}, got {codes_title}"
             )
+
+    def test_multi_agency_joint_order_semicolon_doc_number_passes_while_long_polluted_doc_number_fails(
+        self, wlh_env: dict[str, str]
+    ) -> None:
+        """Taiwan multi-ministry joint order doc_numbers with semicolon-separated segments (each <= 120 chars, total <= 300 chars) pass semantic quality audit, while unsegmented >120 char or total >300 char doc_numbers fail."""
+        from wlh.storage.cas import Objects
+
+        objs = Objects()
+        md1_hash = objs.put(
+            (
+                "# 事業廢棄物再利用管理辦法修正條文\n\n"
+                "第一條 本辦法依廢棄物清理法第三十九條第二項規定訂定之。"
+                "為促進資源循環利用並落實跨部會共同管理機制，特會銜修正本辦法。"
+            ).encode("utf-8")
+        )
+        md2_hash = objs.put(
+            (
+                "# 共通性事業廢棄物再利用管理辦法\n\n"
+                "第一條 本辦法依廢棄物清理法第三十九條第二項規定訂定之。"
+                "共通性事業廢棄物之再利用種類及管理方式依附表規定辦理。"
+            ).encode("utf-8")
+        )
+        joint_order_doc_number = (
+            "環署廢字第1101119523C號;台內營字第1100809362號;國規委會字第1100128073號;"
+            "臺教資（六）字第1100024744A號;經工字第11004601330號;交總字第11000080671號;"
+            "衛部醫字第1101601340號;科部產字第1100022113B號;農牧字第1100710632A號;"
+            "台財庫字第11000048721號;通傳基礎字第11000294361號 令"
+        )
+        rows = [
+            {
+                "source_id": "dd-127",
+                "resource_id": "res-tw-joint-1",
+                "row_index": 1,
+                "role": "primary",
+                "title": "事業廢棄物再利用管理辦法修正條文",
+                "markdown_file": f"joint1_{'a' * 8}_{md1_hash[:8]}.md",
+                "doc_type": "法律法规",
+                "acquired_at": "2026-10-31 08:00:00",
+                "original_file": None,
+                "volume_order": None,
+                "doc_number": joint_order_doc_number,
+                "issuer": "行政院環境保護署",
+                "published_at": "2021-12-20",
+                "effective_at": "2021-12-20",
+                "expired_at": None,
+                "status": "有效",
+                "source_name": "行政院公報資訊網",
+                "detail_url": "https://gazette.nat.gov.tw/egFront/detail1.do",
+                "source_record_hash": "a" * 64,
+                "markdown_hash": md1_hash,
+                "original_hash": None,
+            },
+            {
+                "source_id": "dd-127",
+                "resource_id": "res-tw-joint-2",
+                "row_index": 1,
+                "role": "primary",
+                "title": "共通性事業廢棄物再利用管理辦法",
+                "markdown_file": f"joint2_{'b' * 8}_{md2_hash[:8]}.md",
+                "doc_type": "法律法规",
+                "acquired_at": "2026-10-31 08:01:00",
+                "original_file": None,
+                "volume_order": None,
+                "doc_number": "環署廢字第1101119523號",
+                "issuer": "行政院環境保護署",
+                "published_at": "2021-12-21",
+                "effective_at": "2021-12-21",
+                "expired_at": None,
+                "status": "有效",
+                "source_name": "行政院公報資訊網",
+                "detail_url": "https://gazette.nat.gov.tw/egFront/detail2.do",
+                "source_record_hash": "b" * 64,
+                "markdown_hash": md2_hash,
+                "original_hash": None,
+            },
+        ]
+        report = audit_delivery_rows(rows, objects=objs, require_multi_resource=True)
+        assert report["passed"] is True
+        assert report["violations"] == []
+
+        unsegmented_polluted_doc_number = (
+            "智著字第0916000641號附件：一、按著作權法(以下稱本法)第七條之一第一項規定："
+            "表演人對既有著作或民俗創作之表演，以獨立之著作保護之。表演之保護，對原著作之著作權不生影響。"
+            "準此，利用人如欲利用他人享有著作權之詞曲著作改作並錄製成錄音著作，應徵得詞曲著作財產權人之同意"
+        )
+        overlong_semicolon_doc_number = ";".join(
+            f"環署廢字第110111952{i:02d}號" for i in range(25)
+        )
+        for bad_doc_no in (unsegmented_polluted_doc_number, overlong_semicolon_doc_number):
+            bad_rows = [
+                {
+                    **rows[0],
+                    "doc_number": bad_doc_no,
+                },
+                rows[1],
+            ]
+            bad_report = audit_delivery_rows(
+                bad_rows, objects=objs, require_multi_resource=True
+            )
+            assert bad_report["passed"] is False
+            bad_codes = set(
+                bad_report.get("violation_codes")
+                or [v["code"] for v in bad_report["violations"]]
+            )
+            assert "polluted_or_malformed_doc_number" in bad_codes
+

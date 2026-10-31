@@ -61,6 +61,16 @@ GENERIC_ATTACHMENT_LABELS: set[str] = {
     "odf",
     "檔案下載",
     "轉存pdf",
+    "附件",
+    "附件下载",
+    "点击下载",
+    "下载附件",
+    "查看详情",
+    "详情",
+    "download pdf",
+    "download file",
+    "tải file",
+    "chi tiết",
 }
 
 

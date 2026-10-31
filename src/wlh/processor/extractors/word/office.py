@@ -201,8 +201,8 @@ def libreoffice_convert(
 
 def extract_libreoffice_text(path: str | Path, timeout: float, kind: str) -> str:
     raw = libreoffice_convert(path, "txt:Text (encoded):UTF8", "txt", timeout, kind)
-    text = compact(raw.decode("utf-8", errors="replace"))
-    if len(text) < 8:
+    text = compact(raw.decode("utf-8", errors="replace")).lstrip("\ufeff")
+    if len(re.sub(r"\s+", "", text)) < 15:
         raise WlhError("libreoffice_text_unusable")
     return text + "\n"
 

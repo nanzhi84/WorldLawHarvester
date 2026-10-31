@@ -280,11 +280,14 @@ def audit_delivery_rows(
                 _add("polluted_or_malformed_doc_number", "doc_number is not a string", row)
             else:
                 dn_stripped = doc_num.strip()
+                dn_segments = [seg.strip() for seg in re.split(r"[;；]", dn_stripped) if seg.strip()]
+                max_seg_len = max((len(seg) for seg in dn_segments), default=0)
                 if (
                     not dn_stripped
                     or "\n" in doc_num
                     or "\r" in doc_num
-                    or len(dn_stripped) > 120
+                    or max_seg_len > 120
+                    or len(dn_stripped) > 300
                     or (len(title_raw) > 30 and dn_stripped == title_raw)
                     or bool(_BARE_DOC_NUMBER_LABEL_RE.match(dn_stripped))
                 ):

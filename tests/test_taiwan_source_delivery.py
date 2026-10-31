@@ -397,3 +397,158 @@ storage:
             srv.shutdown()
             thread.join(timeout=2.0)
             srv.server_close()
+
+    def test_tipo_dd132_interpretation_table_and_split_span_doc_number_and_generic_chinese_attachment_label(
+        self,
+        initialized_db: dict[str, str],
+        tmp_path: Path,
+    ) -> None:
+        """TIPO (`dd-132`) copyright interpretation `<table>` (`令函案號：` / `令函要旨：`), split-`<span>` `發文字號：`, and generic `'附件'` PDF anchor labels extract clean `doc_number`, ISO-8601 `published_at`, and disambiguated attachment titles."""
+        import yaml
+
+        from wlh.cleaners.delivery_quality import audit_delivery_rows
+        from wlh.scheduler.runs import execute_run, prepare_run
+        from wlh.storage.cas import Objects
+        from wlh.storage.snapshots import project_canonical
+
+        pdf_att_bytes = make_native_pdf(
+            tmp_path / "f1763366586766.pdf",
+            ["經濟部智慧財產局 智著字第10116001271號函 著作權法解釋令函全文內容。"],
+        ).read_bytes()
+
+        port_holder: list[int] = []
+
+        class _TipoFixtureHandler(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def do_GET(self) -> None:
+                port = port_holder[0]
+                if self.path == "/tw/copyright/692.html":
+                    body = (
+                        "<html><body><ul>"
+                        f'<li><a href="http://127.0.0.1:{port}/tw/copyright/692-11877.html">智著字第0916000641號</a></li>'
+                        f'<li><a href="http://127.0.0.1:{port}/tw/tipo1/890-80878.html">修正「專利審查基準」部分章節</a></li>'
+                        "</ul></body></html>"
+                    ).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                elif self.path == "/tw/copyright/692-11877.html":
+                    body = (
+                        "<html><body>"
+                        '<h2 class="title">智著字第0916000641號</h2>'
+                        '<div class="bottomInfo"><ul><li>發布日期 : 091-09-05</li></ul></div>'
+                        '<section class="cp">'
+                        "<table>"
+                        '<tr><th scope="row">令函日期：</th><td>091-09-05</td></tr>'
+                        '<tr><th scope="row">令函案號：</th><td>智著字第0916000641號</td></tr>'
+                        '<tr><th scope="row">令函要旨：</th><td>經濟部智慧財產局 令發文日期：91.09.05發文字號：智著字第0916000641號附件：一、按著作權法(以下稱本法)第七條之一第一項規定：表演人對既有著作或民俗創作之表演，以獨立之著作保護之。表演之保護，對原著作之著作權不生影響。二、本案相關解釋函令請參見附件說明。</td></tr>'
+                        "</table>"
+                        '<a href="/wSite/public/Attachment/0/f1763366586766.pdf">附件</a>'
+                        "</section>"
+                        "</body></html>"
+                    ).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                elif self.path == "/wSite/public/Attachment/0/f1763366586766.pdf":
+                    body = pdf_att_bytes
+                    ctype = "application/pdf"
+                elif self.path == "/tw/tipo1/890-80878.html":
+                    body = (
+                        "<html><body>"
+                        '<h2 class="title">修正「專利審查基準」部分章節</h2>'
+                        '<div class="bottomInfo"><ul><li>發布日期 : 114-10-20</li></ul></div>'
+                        '<section class="cp">'
+                        '<p><span style="font-size:1.4em;"><span>發文字號：經授智字第</span><span lang="EN-US">11452800740</span><span>號</span></span></p>'
+                        "<p>修正「專利審查基準第一篇程序審查及專利權管理」第二章及第七章，自即日生效。</p>"
+                        "</section>"
+                        "</body></html>"
+                    ).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), _TipoFixtureHandler)
+        port = srv.server_address[1]
+        port_holder.append(port)
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+
+        try:
+            dd132_path = Path(__file__).resolve().parents[1] / "sources" / "dd-132.yaml"
+            cfg = yaml.safe_load(dd132_path.read_text(encoding="utf-8"))
+            cfg["id"] = "dd-960"
+            cfg["scheduler"]["entry_urls"] = [
+                f"http://127.0.0.1:{port}/tw/copyright/692.html"
+            ]
+            cfg["scheduler"]["allowed_hosts"] = ["127.0.0.1"]
+            cfg["fetcher"]["robots"] = False
+            cfg["fetcher"]["delay"] = 0.0
+            cfg["processor"]["parser"]["documents"]["detail_url_patterns"] = [
+                pat.replace(r"https://www\.tipo\.gov\.tw", rf"http://127\.0\.0\.1:{port}")
+                for pat in cfg["processor"]["parser"]["documents"]["detail_url_patterns"]
+            ]
+
+            tipo_yaml = tmp_path / "dd-960.yaml"
+            tipo_yaml.write_text(
+                yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+
+            run_id = prepare_run(tipo_yaml, "collect")
+            res = execute_run(run_id)
+            assert res["status"] == "complete", f"dd-960 collect failed: {res}"
+
+            with psycopg.connect(initialized_db["WLH_DATABASE_URL"]) as conn:
+                from psycopg.rows import dict_row
+
+                with conn.cursor(row_factory=dict_row) as cur:
+                    rows = cur.execute(
+                        """
+                        SELECT f.source_id, r.id AS resource_id, d.*
+                        FROM wlh.document_row d
+                        JOIN wlh.version v ON v.id = d.version_id
+                        JOIN wlh.resource r ON r.id = v.resource_id
+                        JOIN wlh.frontier f ON f.id = r.frontier_id
+                        WHERE f.source_id = 'dd-960'
+                        ORDER BY r.id, d.row_index
+                        """
+                    ).fetchall()
+
+            assert len(rows) == 3
+            distinct_resources = {r["resource_id"] for r in rows}
+            assert len(distinct_resources) == 2
+
+            rows_692 = [
+                r for r in rows if str(r["detail_url"]).endswith("/tw/copyright/692-11877.html")
+            ]
+            assert len(rows_692) == 2
+            primary_692 = next(r for r in rows_692 if r["role"] == "primary")
+            att_692 = next(r for r in rows_692 if r["role"] == "independent_attachment")
+            assert primary_692["doc_number"] == "智著字第0916000641號"
+            assert project_canonical(primary_692)["published_at"] == "2002-09-05"
+            assert att_692["title"] == "智著字第0916000641號 - f1763366586766"
+
+            rows_890 = [
+                r for r in rows if str(r["detail_url"]).endswith("/tw/tipo1/890-80878.html")
+            ]
+            assert len(rows_890) == 1
+            primary_890 = rows_890[0]
+            assert primary_890["doc_number"] == "經授智字第11452800740號"
+            assert project_canonical(primary_890)["published_at"] == "2025-10-20"
+
+            audit_report = audit_delivery_rows(
+                rows, objects=Objects(), require_multi_resource=True
+            )
+            assert audit_report["passed"] is True
+            assert audit_report["violations"] == []
+        finally:
+            srv.shutdown()
+            thread.join(timeout=2.0)
+            srv.server_close()
+
