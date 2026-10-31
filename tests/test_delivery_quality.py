@@ -567,4 +567,24 @@ class TestDeliverySemanticQualityContract:
         assert "boilerplate_or_garbage_title" in vn_codes
         assert "blocked_or_placeholder_markdown" in vn_codes
 
+        # Multi-language jurisdictions (HK: en+zh, CA: en+fr, CH: de+fr+it) merge all official language packs
+        hk_pack = load_delivery_quality_rules(language="en", jurisdiction="HK")
+        assert "contents" in hk_pack.boilerplate_titles
+        assert "目录" in hk_pack.boilerplate_titles
+
+        ca_pack = load_delivery_quality_rules(language="en", jurisdiction="CA")
+        assert "contents" in ca_pack.boilerplate_titles
+        assert "sommaire" in ca_pack.boilerplate_titles
+
+        ch_pack = load_delivery_quality_rules(language="de", jurisdiction="CH")
+        assert "inhalt" in ch_pack.boilerplate_titles
+        assert "sommaire" in ch_pack.boilerplate_titles
+        assert "indice" in ch_pack.boilerplate_titles
+
+        # Resolving from source_config={"id": "dd-495"} without inline storage.metadata
+        id_only_pack = load_delivery_quality_rules(source_config={"id": "dd-495"})
+        assert id_only_pack.language == "vi"
+        assert id_only_pack.jurisdiction == "VN"
+
+
 

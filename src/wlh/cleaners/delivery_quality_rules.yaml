@@ -96,6 +96,46 @@ languages:
           - "chứng thư"
           - "ngày ký"
 
+  de:
+    boilerplate_titles:
+      - inhalt
+      - inhaltsverzeichnis
+      - startseite
+      - herunterladen
+      - anhang
+    bare_doc_number_labels:
+      - 'nr\.?'
+      - aktenzeichen
+
+  fr:
+    boilerplate_titles:
+      - sommaire
+      - table des matières
+      - accueil
+      - télécharger
+      - annexe
+    bare_doc_number_labels:
+      - 'n[o°]\.?'
+
+  it:
+    boilerplate_titles:
+      - indice
+      - sommario
+      - scarica
+      - allegato
+    bare_doc_number_labels:
+      - 'n\.?'
+
+  ko:
+    boilerplate_titles:
+      - 목차
+      - 홈
+      - 다운로드
+      - 첨부파일
+    bare_doc_number_labels:
+      - 문서번호
+      - 사건번호
+
 jurisdictions:
   VN:
     languages:
@@ -121,12 +161,24 @@ jurisdictions:
       - 附則
       - 附 則
 
+  HK:
+    languages:
+      - en
+      - zh
+    supplementary_heading_prefixes:
+      - 附則
+      - 附 則
+
   JP:
     languages:
       - ja
     supplementary_heading_prefixes:
       - 附則
       - 附 則
+
+  KR:
+    languages:
+      - ko
 
   US:
     languages:
@@ -139,6 +191,7 @@ jurisdictions:
   CA:
     languages:
       - en
+      - fr
 
   SG:
     languages:
@@ -159,3 +212,6 @@ jurisdictions:
   CH:
     languages:
       - de
+      - fr
+      - it
+
