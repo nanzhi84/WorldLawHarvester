@@ -224,7 +224,7 @@ def _normalize_item(item: Mapping[str, Any]) -> dict[str, Any]:
         original_file = original_file or attachments[0]["name"]
         original_media_type = original_media_type or attachments[0]["media_type"]
 
-    return {
+    out: dict[str, Any] = {
         "detail_url": str(item.get("detail_url") or "").strip(),
         "attachment_url": attachment_url,
         "original_file": original_file,
@@ -237,6 +237,188 @@ def _normalize_item(item: Mapping[str, Any]) -> dict[str, Any]:
         "issuer": item.get("issuer"),
         "published_at": published_at,
     }
+    if "effective_at" in item:
+        eff_raw = item.get("effective_at")
+        if isinstance(eff_raw, (date, datetime)):
+            out["effective_at"] = eff_raw.isoformat()[:10]
+        elif eff_raw is not None and str(eff_raw).strip():
+            out["effective_at"] = str(eff_raw).strip()
+        else:
+            out["effective_at"] = None
+    if "quality_route" in item and item.get("quality_route") is not None:
+        out["quality_route"] = str(item.get("quality_route")).strip()
+    if "sampling_strata" in item and isinstance(
+        item.get("sampling_strata"), Sequence
+    ):
+        out["sampling_strata"] = [
+            str(s)
+            for s in cast(Sequence[Any], item["sampling_strata"])
+            if str(s).strip()
+        ]
+    return out
+
+
+def _resolve_candidate_quality_route(
+    cand: Mapping[str, Any], md_text: str
+) -> str:
+    for key in ("quality_route", "recommended_route"):
+        val = cand.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    for nested_key in ("quality_report", "quality"):
+        nested = cand.get(nested_key)
+        if isinstance(nested, Mapping):
+            n_map = cast(Mapping[str, Any], nested)
+            for r_key in ("recommended_route", "route"):
+                r_val = n_map.get(r_key)
+                if isinstance(r_val, str) and r_val.strip():
+                    return r_val.strip()
+    if md_text:
+        from wlh.cleaners.extraction_quality import text_check
+
+        return str(text_check(md_text).get("recommended_route") or "accept")
+    return "accept"
+
+
+def stratify_verification_samples(
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    max_items: int = 10,
+) -> list[dict[str, Any]]:
+    """Select up to `max_items` verification samples using Anomaly-First Stratified Sampling.
+
+    Prioritizes:
+    1. `p5_shortest`: shortest / 5th-percentile substantive Markdown body length
+    2. `p95_longest`: longest / 95th-percentile substantive Markdown body length
+    3. `accept_with_warning`: samples routed as `accept_with_warning`
+    4. `missing_doc_number`: boundary samples missing `doc_number`
+    5. `missing_effective_at`: boundary samples missing `effective_at`
+    6. `baseline`: remaining representative samples in canonical order
+    """
+    if max_items <= 0 or not candidates:
+        return []
+
+    total = len(candidates)
+    md_lengths: list[int] = []
+    routes: list[str] = []
+    missing_doc_nums: list[bool] = []
+    missing_eff_dates: list[bool] = []
+
+    for cand in candidates:
+        md_text = str(cand.get("markdown") or "")
+        md_lengths.append(len(_visible_chars_only(md_text)))
+        routes.append(_resolve_candidate_quality_route(cand, md_text))
+        missing_doc_nums.append(not bool(str(cand.get("doc_number") or "").strip()))
+        eff_raw = cand.get("effective_at")
+        eff_str = (
+            eff_raw.isoformat()[:10]
+            if isinstance(eff_raw, (date, datetime))
+            else str(eff_raw or "").strip()
+        )
+        missing_eff_dates.append(not bool(eff_str))
+
+    sorted_by_len = sorted(range(total), key=lambda idx: (md_lengths[idx], idx))
+    p5_idx = int(0.05 * (total - 1))
+    p95_idx = int(0.95 * (total - 1))
+
+    p5_bucket: list[int] = []
+    for candidate_idx in (
+        sorted_by_len[0],
+        sorted_by_len[p5_idx],
+        *sorted_by_len[: p5_idx + 1],
+    ):
+        if candidate_idx not in p5_bucket:
+            p5_bucket.append(candidate_idx)
+
+    p95_bucket: list[int] = []
+    for candidate_idx in (
+        sorted_by_len[-1],
+        sorted_by_len[p95_idx],
+        *reversed(sorted_by_len[p95_idx:]),
+    ):
+        if candidate_idx not in p95_bucket:
+            p95_bucket.append(candidate_idx)
+
+    warning_bucket = [
+        idx for idx in range(total) if routes[idx] == "accept_with_warning"
+    ]
+    missing_doc_number_bucket = sorted(
+        (idx for idx in range(total) if missing_doc_nums[idx]),
+        key=lambda idx: (0 if missing_eff_dates[idx] else 1, idx),
+    )
+    missing_effective_at_bucket = sorted(
+        (idx for idx in range(total) if missing_eff_dates[idx]),
+        key=lambda idx: (0 if missing_doc_nums[idx] else 1, idx),
+    )
+
+    p5_set = set(p5_bucket)
+    p95_set = set(p95_bucket)
+    warning_set = set(warning_bucket)
+
+    strata_by_idx: dict[int, list[str]] = {}
+    for idx in range(total):
+        tags: list[str] = []
+        if idx in p5_set:
+            tags.append("p5_shortest")
+        if idx in p95_set:
+            tags.append("p95_longest")
+        if idx in warning_set:
+            tags.append("accept_with_warning")
+        if missing_doc_nums[idx]:
+            tags.append("missing_doc_number")
+        if missing_eff_dates[idx]:
+            tags.append("missing_effective_at")
+        if not tags:
+            tags.append("baseline")
+        strata_by_idx[idx] = tags
+
+    selected_indices: list[int] = []
+    selected_set: set[int] = set()
+
+    def _try_pick(bucket: Sequence[int]) -> bool:
+        for idx in bucket:
+            if idx not in selected_set:
+                selected_set.add(idx)
+                selected_indices.append(idx)
+                return True
+        return False
+
+    strata_quota = max(1, max_items // 5)
+    warning_quota = max(1, max_items // 3)
+    priority_buckets: tuple[Sequence[int], ...] = (
+        p5_bucket[:strata_quota],
+        p95_bucket[:strata_quota],
+        warning_bucket[:warning_quota],
+        missing_doc_number_bucket[:strata_quota],
+        missing_effective_at_bucket[:strata_quota],
+    )
+    while len(selected_indices) < min(max_items, total):
+        progressed = False
+        for bucket in priority_buckets:
+            if len(selected_indices) >= max_items:
+                break
+            if _try_pick(bucket):
+                progressed = True
+        if not progressed:
+            break
+
+    baseline_bucket = [
+        idx for idx in range(total) if strata_by_idx[idx] == ["baseline"]
+    ]
+    for idx in (*baseline_bucket, *range(total)):
+        if len(selected_indices) >= max_items:
+            break
+        if idx not in selected_set:
+            selected_set.add(idx)
+            selected_indices.append(idx)
+
+    result: list[dict[str, Any]] = []
+    for idx in selected_indices[:max_items]:
+        item_copy = dict(candidates[idx])
+        item_copy["quality_route"] = routes[idx]
+        item_copy["sampling_strata"] = list(strata_by_idx[idx])
+        result.append(item_copy)
+    return result
 
 
 def render_source_verification_html(
@@ -274,11 +456,17 @@ def render_source_verification_html(
             if isinstance(raw_items, Sequence)
             else []
         )
-        normalized_items = [
-            _normalize_item(it) for it in list(items_seq)[:max_items_per_source]
-        ]
+        selected_items = (
+            stratify_verification_samples(
+                items_seq, max_items=max_items_per_source
+            )
+            if len(items_seq) > max_items_per_source
+            else list(items_seq)[:max_items_per_source]
+        )
+        normalized_items = [_normalize_item(it) for it in selected_items]
         cache_map[source_id] = normalized_items
         total_samples += len(normalized_items)
+
 
         if continent and continent != current_continent:
             toc_blocks.append(
@@ -1068,7 +1256,7 @@ def _extract_source_items_from_store(
     db_rows: list[dict[str, Any]] = conn.execute(
         f"""
         WITH top_res AS (
-            SELECT r.id, v.id AS version_id, v.inputs_ref
+            SELECT r.id, v.id AS version_id, v.inputs_ref, v.result_ref
             FROM {schema_name}.resource r
             JOIN {schema_name}.frontier f ON f.id = r.frontier_id
             JOIN {schema_name}.version v ON v.id = r.current_version_id
@@ -1076,7 +1264,7 @@ def _extract_source_items_from_store(
             ORDER BY r.id
             LIMIT %s
         )
-        SELECT tr.id AS resource_id, tr.inputs_ref, d.*
+        SELECT tr.id AS resource_id, tr.inputs_ref, tr.result_ref, d.*
         FROM top_res tr
         JOIN {schema_name}.document_row d ON d.version_id = tr.version_id
         ORDER BY tr.id, d.row_index
@@ -1099,9 +1287,10 @@ def _extract_source_items_from_store(
         )
     }
 
+    candidate_pool: list[dict[str, Any]] = []
+    local_seen_keys: set[tuple[str, str, str]] = set(seen_resource_keys)
+
     for res_rows in selected_res.values():
-        if len(items) >= max_items_per_source:
-            break
         non_att = [
             r for r in res_rows if r.get("role") != "independent_attachment"
         ]
@@ -1112,7 +1301,7 @@ def _extract_source_items_from_store(
             str(primary.get("title") or "").strip(),
             str(primary.get("markdown_hash") or "").strip(),
         )
-        if resource_dedup_key in seen_resource_keys:
+        if resource_dedup_key in local_seen_keys:
             continue
 
         try:
@@ -1137,6 +1326,68 @@ def _extract_source_items_from_store(
 
         if any(bad in md_text for bad in FORBIDDEN_PLACEHOLDERS):
             continue
+
+        quality_route = _resolve_candidate_quality_route(primary, md_text)
+        result_ref = primary.get("result_ref")
+        if (
+            quality_route != "accept_with_warning"
+            and isinstance(result_ref, str)
+            and result_ref
+        ):
+            try:
+                doc_obj: Any = json.loads(
+                    objs.get(result_ref).decode("utf-8", errors="replace")
+                )
+                if isinstance(doc_obj, Mapping):
+                    doc_map = cast(Mapping[str, Any], doc_obj)
+                    for d_entry in cast(
+                        Sequence[Any], doc_map.get("deliverables") or ()
+                    ):
+                        if isinstance(d_entry, Mapping):
+                            d_map = cast(Mapping[str, Any], d_entry)
+                            q_rep = d_map.get("quality_report")
+                            if isinstance(q_rep, Mapping):
+                                q_map = cast(Mapping[str, Any], q_rep)
+                                if (
+                                    q_map.get("recommended_route")
+                                    == "accept_with_warning"
+                                ):
+                                    quality_route = "accept_with_warning"
+                                    break
+            except Exception:
+                pass
+
+        local_seen_keys.add(resource_dedup_key)
+        candidate_pool.append(
+            {
+                "_res_rows": res_rows,
+                "_primary": primary,
+                "_resource_dedup_key": resource_dedup_key,
+                "detail_url": detail_url_val,
+                "markdown": md_text,
+                "title": primary.get("title"),
+                "doc_number": primary.get("doc_number"),
+                "issuer": primary.get("issuer"),
+                "published_at": primary.get("published_at"),
+                "effective_at": primary.get("effective_at"),
+                "quality_route": quality_route,
+            }
+        )
+
+    stratified_candidates = stratify_verification_samples(
+        candidate_pool, max_items=len(candidate_pool)
+    )
+
+    for cand_entry in stratified_candidates:
+        if len(items) >= max_items_per_source:
+            break
+        res_rows = cast(list[dict[str, Any]], cand_entry["_res_rows"])
+        primary = cast(dict[str, Any], cand_entry["_primary"])
+        resource_dedup_key = cast(
+            tuple[str, str, str], cand_entry["_resource_dedup_key"]
+        )
+        detail_url_val = str(cand_entry["detail_url"])
+        md_text = str(cand_entry["markdown"])
 
         att_rows = [
             r for r in res_rows if r.get("original_hash") is not None
@@ -1309,8 +1560,12 @@ def _extract_source_items_from_store(
                 "doc_number": primary.get("doc_number"),
                 "issuer": primary.get("issuer"),
                 "published_at": primary.get("published_at"),
+                "effective_at": primary.get("effective_at"),
+                "quality_route": cand_entry.get("quality_route"),
+                "sampling_strata": cand_entry.get("sampling_strata"),
             }
         )
+
 
 
 def generate_verification_samples_from_db(

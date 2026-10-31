@@ -1,0 +1,161 @@
+# Declarative delivery semantic quality rule packs (wlh.delivery_quality.v1)
+# Loaded by jurisdiction / language via wlh.cleaners.delivery_quality.load_delivery_quality_rules
+
+common:
+  boilerplate_titles:
+    - contents
+    - table of contents
+    - index
+    - home
+    - untitled
+    - document
+    - download
+    - download pdf
+    - download file
+    - attachment
+  bare_doc_number_labels:
+    - 'no\.?'
+  placeholder_patterns: []
+  running_header_regexes: []
+  salutation_prefix_regexes: []
+  signature_stub_rules:
+    - primary: "signer:"
+      secondary:
+        - "certificate id:"
+        - "signed at:"
+  supplementary_heading_prefixes: []
+
+languages:
+  en:
+    boilerplate_titles:
+      - contents
+      - table of contents
+      - index
+      - home
+      - untitled
+      - document
+      - download
+      - download pdf
+      - download file
+      - attachment
+    bare_doc_number_labels:
+      - 'no\.?'
+    signature_stub_rules:
+      - primary: "signer:"
+        secondary:
+          - "certificate id:"
+          - "signed at:"
+
+  zh:
+    boilerplate_titles:
+      - 目录
+      - 首页
+      - 网站首页
+      - 附件
+      - 附件下载
+      - 点击下载
+      - 下载附件
+      - 查看详情
+      - 详情
+    bare_doc_number_labels:
+      - 文号
+      - 发文字号
+      - 案号
+    supplementary_heading_prefixes:
+      - 附則
+      - 附 則
+
+  ja:
+    supplementary_heading_prefixes:
+      - 附則
+      - 附 則
+
+  vi:
+    boilerplate_titles:
+      - tải file
+      - tải file đính kèm
+      - file đính kèm
+      - tải về
+      - xem chi tiết
+      - chi tiết
+    bare_doc_number_labels:
+      - số
+      - 'số\s+ký\s+hiệu'
+    placeholder_patterns:
+      - bạn chưa đăng nhập thành viên
+      - văn bản này đang cập nhật nội dung
+      - đây là tiện ích dành cho tài khoản tiêu chuẩn hoặc nâng cao
+      - vui lòng xem nội dung chi tiết trong file đính kèm
+    running_header_regexes:
+      - '(?im)^\s*công\s+báo\s*/\s*số\s+\d+.*$'
+    salutation_prefix_regexes:
+      - '^bộ\s+tài\s+chính\s*[.:,-]\s*'
+    signature_stub_rules:
+      - primary: "ký bởi"
+        secondary:
+          - "chứng thư"
+          - "ngày ký"
+
+jurisdictions:
+  VN:
+    languages:
+      - vi
+    placeholder_patterns:
+      - bạn chưa đăng nhập thành viên
+      - văn bản này đang cập nhật nội dung
+      - đây là tiện ích dành cho tài khoản tiêu chuẩn hoặc nâng cao
+      - vui lòng xem nội dung chi tiết trong file đính kèm
+    running_header_regexes:
+      - '(?im)^\s*công\s+báo\s*/\s*số\s+\d+.*$'
+    salutation_prefix_regexes:
+      - '^bộ\s+tài\s+chính\s*[.:,-]\s*'
+
+  CN:
+    languages:
+      - zh
+
+  TW:
+    languages:
+      - zh
+    supplementary_heading_prefixes:
+      - 附則
+      - 附 則
+
+  JP:
+    languages:
+      - ja
+    supplementary_heading_prefixes:
+      - 附則
+      - 附 則
+
+  US:
+    languages:
+      - en
+
+  GB:
+    languages:
+      - en
+
+  CA:
+    languages:
+      - en
+
+  SG:
+    languages:
+      - en
+
+  NZ:
+    languages:
+      - en
+
+  ZA:
+    languages:
+      - en
+
+  DE:
+    languages:
+      - de
+
+  CH:
+    languages:
+      - de

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 from wlh.core import WlhError, digest, request_key, uid
 from wlh.fetcher.session import CasSessionProxy
 from wlh.fetcher.transport import Budget, Recorder, Transport
-from wlh.processor.extractors.router import run_extraction
+from wlh.processor.extractors.router import prewarm_workers, run_extraction
 from wlh.processor.extractors.word.office import detect_real_format
 from wlh.processor.parsers import Base, RawRecord, load, normalize_parser_config
 from wlh.scheduler.context import Context, adapter_error
@@ -69,6 +69,7 @@ class Runtime:
         self.extract_cache: dict[tuple[str, str], dict[str, Any] | WlhError] = {}
         self._inflight: dict[str, tuple[dict[str, Any], asyncio.Task[Mapping[str, Any]]]] = {}
         self._extract_pool = concurrent.futures.ThreadPoolExecutor(max_workers=12)
+        prewarm_workers(6)
         self._extract_futures: dict[
             tuple[str, str],
             asyncio.Future[tuple[tuple[str, str], dict[str, Any] | WlhError]],

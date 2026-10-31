@@ -262,6 +262,45 @@ class TestArchitectureContract:
                             f"src/wlh/processor/extractors/, found in {py_file}:{node.lineno}"
                         )
 
+        dq_path = SRC_WLH / "cleaners" / "delivery_quality.py"
+        dq_rules_yaml = SRC_WLH / "cleaners" / "delivery_quality_rules.yaml"
+        assert dq_rules_yaml.is_file(), (
+            "Declarative rule pack src/wlh/cleaners/delivery_quality_rules.yaml must exist"
+        )
+        dq_tree = ast.parse(dq_path.read_text(encoding="utf-8"), filename=str(dq_path))
+        forbidden_dq_globals = {
+            "_VI_PLACEHOLDER_PATTERNS",
+            "_SALUTATION_PREFIX_RE",
+            "_GAZETTE_RUNNING_HEADER_RE",
+        }
+        forbidden_dq_literals = (
+            "bạn chưa đăng nhập",
+            "văn bản này đang cập nhật",
+            "bộ tài chính",
+            "bộ\\s+tài\\s+chính",
+            "công\\s+báo",
+            "tải file đính kèm",
+            "ký bởi",
+            "附則",
+            "发文字号",
+        )
+        for node in ast.walk(dq_tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        assert target.id not in forbidden_dq_globals, (
+                            f"Language/agency-specific rule constant '{target.id}' must not be "
+                            f"hardcoded in {dq_path}:{node.lineno}; move to delivery_quality_rules.yaml"
+                        )
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                lit_lower = node.value.lower()
+                for bad_lit in forbidden_dq_literals:
+                    assert bad_lit not in lit_lower, (
+                        f"Language/jurisdiction literal {bad_lit!r} hardcoded in "
+                        f"{dq_path}:{node.lineno}; must be loaded from delivery_quality_rules.yaml"
+                    )
+
+
     def test_xml_extractor_converts_legal_and_gpo_xml_to_standard_markdown(self) -> None:
         import lxml.etree as _etree  # type: ignore[import-untyped]
 

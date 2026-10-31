@@ -84,6 +84,43 @@ def _checkin_worker(proc: subprocess.Popen[bytes]) -> None:
         pass
 
 
+def prewarm_workers(count: int = 4) -> None:
+    """Spawn up to `count` warm daemon extraction workers in the background."""
+    target = max(0, min(count, MAX_WARM_WORKERS))
+
+    def _spawn_needed() -> None:
+        while True:
+            with _POOL_LOCK:
+                alive = [p for p in _IDLE_WORKERS if p.poll() is None]
+                _IDLE_WORKERS[:] = alive
+                if len(_IDLE_WORKERS) >= target:
+                    return
+            try:
+                proc = subprocess.Popen(
+                    [sys.executable, "-m", "wlh.processor.extractors.extract_worker", "--daemon"],
+                    cwd=work_directory(),
+                    env=_worker_env(),
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except Exception:
+                return
+            with _POOL_LOCK:
+                if len(_IDLE_WORKERS) < MAX_WARM_WORKERS and proc.poll() is None:
+                    _IDLE_WORKERS.append(proc)
+                else:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                        proc.wait(timeout=0.2)
+                    except Exception:
+                        pass
+                    return
+
+    threading.Thread(target=_spawn_needed, daemon=True).start()
+
+
 @atexit.register
 def _shutdown_warm_workers() -> None:
     with _POOL_LOCK:
@@ -91,7 +128,17 @@ def _shutdown_warm_workers() -> None:
         _IDLE_WORKERS.clear()
     for proc in workers:
         try:
-            stop_group(proc)
+            if proc.stdin is not None:
+                proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    for proc in workers:
+        try:
+            proc.wait(timeout=0.5)
         except Exception:
             pass
 
