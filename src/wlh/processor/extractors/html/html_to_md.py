@@ -85,8 +85,11 @@ def clean_html_tree(node: Any, *, quirks: Sequence[str] | None = None) -> None:
                     parent.remove(img_el)
 
 
-def text_to_markdown(value: str) -> str:
-    return normalized(value)
+def text_to_markdown(value: str, *, title: str | None = None) -> str:
+    body = normalized(value)
+    if not body.strip():
+        return body
+    return normalized(f"# {title}\n\n{body}") if title else body
 
 
 def json_to_markdown(value: str) -> str:

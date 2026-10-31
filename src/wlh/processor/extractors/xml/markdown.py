@@ -157,7 +157,14 @@ def text_of(node: Any) -> str:
     return re.sub(r"\s+", " ", "".join(node.itertext())).strip()
 
 
-def markdown(root: Any) -> str:
+def _normalize_attachment_src(raw_src: str) -> str:
+    cleaned = raw_src.strip().replace("\\", "/")
+    while cleaned.startswith("./") or cleaned.startswith("/"):
+        cleaned = cleaned[2:] if cleaned.startswith("./") else cleaned[1:]
+    return cleaned
+
+
+def markdown(root: Any, *, title: str | None = None) -> str:
     if root.xpath(
         './/*[local-name()="img" or local-name()="image" or local-name()="Image" '
         'or local-name()="graphic" or local-name()="Graphic" '
@@ -199,14 +206,70 @@ def markdown(root: Any) -> str:
         return value
 
     rendered = re.sub(r"[ \t]*\n[ \t]*", "\n", render(root))
-    return normalized(rendered)
+    body_md = normalized(rendered)
+    return "# " + title + "\n\n" + body_md if title else body_md
+
+
+def egov_law_xml_to_markdown(
+    root: Any,
+    *,
+    title: str,
+    number: str | None = None,
+    enforcement_comment: str | None = None,
+    scheduled_enforcement_date: str | None = None,
+    att_srcs: Sequence[str] = (),
+) -> str:
+    """Render an e-Gov `<Law>` XML tree into structured Markdown with verified attachment placeholders."""
+    fig_srcs: list[str] = []
+    fig_placeholders: list[tuple[str, str]] = []
+    for fig in root.xpath(".//Fig[normalize-space(@src)!='']"):
+        norm_fig_src = _normalize_attachment_src(str(fig.get("src") or ""))
+        if norm_fig_src:
+            token = f"@@WLHFIG{len(fig_placeholders)}@@"
+            fig_srcs.append(norm_fig_src)
+            fig_placeholders.append((token, f"[添付ファイル: {norm_fig_src}]"))
+            fig.text = token
+            fig.attrib.pop("src", None)
+    body = root.find("LawBody")
+    target = body if body is not None else root
+    for heading in list(target.findall("LawTitle")):
+        target.remove(heading)
+    text = markdown(target)
+    for token, label in fig_placeholders:
+        text = text.replace(token, label)
+    extra_att_notes = [
+        f"[添付ファイル: {_normalize_attachment_src(src)}]"
+        for src in att_srcs
+        if _normalize_attachment_src(src) and _normalize_attachment_src(src) not in set(fig_srcs)
+    ]
+    if extra_att_notes:
+        text = text.rstrip() + "\n\n" + "\n\n".join(extra_att_notes)
+    if not text.strip():
+        raise WlhError("egov_law_text_missing")
+    date_notes: list[str] = []
+    if enforcement_comment:
+        date_notes.append("施行期日参考情報：" + enforcement_comment)
+    if scheduled_enforcement_date:
+        date_notes.append("施行期日参考情報（予定）：" + scheduled_enforcement_date)
+    return normalized(
+        "\n\n".join(
+            [
+                "# " + title,
+                *([number] if number else []),
+                *date_notes,
+                text,
+            ]
+        )
+    )
 
 
 def xml_to_markdown(data: bytes) -> str:
-    """Full-text GPO XML → Markdown: headings, paragraphs, tables, footnotes."""
+    """Convert full-text GPO XML or standard Legal/Judicial XML bytes into Markdown."""
+    if b"<!DOCTYPE" in data.upper() or b"<!ENTITY" in data.upper():
+        raise WlhError("legal_xml_doctype_rejected")
     try:
         root: Any = etree.fromstring(
-            data, etree.XMLParser(resolve_entities=False, no_network=True)
+            data, etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
         )
     except etree.XMLSyntaxError:
         raise WlhError("full_text_xml_invalid") from None
@@ -259,7 +322,14 @@ def xml_to_markdown(data: bytes) -> str:
             walk(child)
 
     walk(root)
-    rendered = normalized("\n\n".join(b for b in blocks if b))
+    if blocks:
+        rendered = normalized("\n\n".join(b for b in blocks if b))
+    else:
+        root_tag = etree.QName(root).localname if isinstance(root.tag, str) else ""
+        if root_tag == "dokument":
+            rendered = normalized(dokument_xml_to_markdown(root))
+        else:
+            rendered = markdown(root)
     if len(rendered.strip()) < 20:
         raise WlhError("full_text_xml_empty")
     return rendered
@@ -327,6 +397,8 @@ def gazette_html_to_markdown(
     html_content: str,
     base_url: str,
     fallback_parts: Sequence[str | None] = (),
+    *,
+    title: str | None = None,
 ) -> str:
     """Convert embedded HTML inside a Gazette XML node to Markdown with fallback sections."""
     cleaned_html = re.sub(r"<!--.*?-->", "", html_content, flags=re.S)
@@ -343,7 +415,7 @@ def gazette_html_to_markdown(
     )
     if not body_md.strip():
         body_md = normalized("\n\n".join(part for part in fallback_parts if part))
-    return body_md
+    return "# " + title + "\n\n" + body_md if title else body_md
 
 
 __all__ = [
@@ -354,6 +426,7 @@ __all__ = [
     "SKIP",
     "SKIP_TAGS",
     "dokument_xml_to_markdown",
+    "egov_law_xml_to_markdown",
     "gazette_html_to_markdown",
     "gpo_xml_to_markdown",
     "markdown",
