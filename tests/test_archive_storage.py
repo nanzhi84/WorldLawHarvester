@@ -90,6 +90,110 @@ class TestDatabaseInitialization:
             Objects()
         assert exc_obj.value.code == "test_object_storage_isolation_violation"
 
+    def test_stray_test_databases_and_buckets_are_rejected_and_pruned_to_whitelist(
+        self, wlh_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the 4 whitelisted databases and 2 whitelisted S3 buckets are allowed; stray stores are rejected and pruned."""
+        from typing import Any
+        from urllib.parse import urlsplit, urlunsplit
+
+        import boto3  # type: ignore[import-untyped]
+        from psycopg import sql
+
+        from tests.conftest import ensure_test_db_and_bucket
+        from wlh.core import WlhError
+        from wlh.storage.cas import Objects
+        from wlh.storage.db import dsn
+
+        allowed_dbs = {"postgres", "wlh", "wlh_samples", "wlh_test"}
+        allowed_buckets = {"wlh-archive", "wlh-archive-test"}
+
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.setenv(
+            "WLH_DATABASE_URL",
+            "postgresql://wlh:wlh@127.0.0.1:15432/wlh_rogue_test",
+        )
+        with pytest.raises(WlhError) as exc_dsn:
+            dsn()
+        assert exc_dsn.value.code == "test_database_isolation_violation"
+        monkeypatch.setenv("WLH_DATABASE_URL", wlh_env["WLH_DATABASE_URL"])
+
+        monkeypatch.setenv("WLH_S3_BUCKET", "wlh-rogue-test")
+        with pytest.raises(WlhError) as exc_obj:
+            Objects()
+        assert exc_obj.value.code == "test_object_storage_isolation_violation"
+        monkeypatch.setenv("WLH_S3_BUCKET", wlh_env["WLH_S3_BUCKET"])
+
+        parsed = urlsplit(wlh_env["WLH_DATABASE_URL"])
+        admin_dsn = urlunsplit((parsed.scheme, parsed.netloc, "/postgres", "", ""))
+        stray_db = "wlh_stray_gc_test"
+        stray_bucket = "wlh-stray-gc-test"
+
+        boto3_mod: Any = boto3
+        s3_client: Any = boto3_mod.client(
+            "s3",
+            endpoint_url=wlh_env["WLH_S3_ENDPOINT"],
+            aws_access_key_id=wlh_env["WLH_S3_ACCESS_KEY"],
+            aws_secret_access_key=wlh_env["WLH_S3_SECRET_KEY"],
+            region_name=wlh_env["WLH_S3_REGION"],
+        )
+
+        try:
+            with psycopg.connect(admin_dsn, autocommit=True) as conn:
+                conn.execute(
+                    sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                        sql.Identifier(stray_db)
+                    )
+                )
+                conn.execute(
+                    sql.SQL("CREATE DATABASE {}").format(sql.Identifier(stray_db))
+                )
+
+            existing_buckets = {
+                str(b.get("Name", ""))
+                for b in s3_client.list_buckets().get("Buckets", [])
+            }
+            if stray_bucket not in existing_buckets:
+                s3_client.create_bucket(Bucket=stray_bucket)
+            s3_client.put_object(
+                Bucket=stray_bucket, Key="stray.txt", Body=b"stray-payload"
+            )
+
+            ensure_test_db_and_bucket(wlh_env)
+
+            with psycopg.connect(admin_dsn, autocommit=True) as conn:
+                db_rows = conn.execute(
+                    "SELECT datname FROM pg_database WHERE datistemplate = false"
+                ).fetchall()
+                found_dbs = {str(r[0]) for r in db_rows}
+            assert stray_db not in found_dbs
+            assert found_dbs.issubset(allowed_dbs)
+
+            remaining_buckets = {
+                str(b.get("Name", ""))
+                for b in s3_client.list_buckets().get("Buckets", [])
+            }
+            assert stray_bucket not in remaining_buckets
+            assert remaining_buckets.issubset(allowed_buckets)
+        finally:
+            with psycopg.connect(admin_dsn, autocommit=True) as conn:
+                conn.execute(
+                    sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                        sql.Identifier(stray_db)
+                    )
+                )
+            try:
+                objs = s3_client.list_objects_v2(Bucket=stray_bucket).get(
+                    "Contents", []
+                )
+                for obj in objs:
+                    s3_client.delete_object(
+                        Bucket=stray_bucket, Key=str(obj["Key"])
+                    )
+                s3_client.delete_bucket(Bucket=stray_bucket)
+            except Exception:
+                pass
+
 
 class TestContentAddressableStorage:
     def test_valid_payload_returns_sha256_and_reads_back_identical_bytes(

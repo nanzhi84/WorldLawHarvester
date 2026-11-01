@@ -25,8 +25,12 @@ def _close_pooled_connections() -> None:
         pass
 
 
-def _ensure_test_db_and_bucket(env: dict[str, str]) -> None:
-    """Verify isolated test DB/bucket names and create them if missing."""
+ALLOWED_POSTGRES_DATABASES = frozenset({"postgres", "wlh", "wlh_samples", "wlh_test"})
+ALLOWED_S3_BUCKETS = frozenset({"wlh-archive", "wlh-archive-test"})
+
+
+def ensure_test_db_and_bucket(env: dict[str, str]) -> None:
+    """Verify isolated test DB/bucket names, create them if missing, and prune stray stores."""
     from typing import Any
     from urllib.parse import urlsplit, urlunsplit
 
@@ -36,25 +40,32 @@ def _ensure_test_db_and_bucket(env: dict[str, str]) -> None:
 
     parsed = urlsplit(env["WLH_DATABASE_URL"])
     db_name = parsed.path.lstrip("/")
-    if not (db_name.endswith("_test") or db_name.startswith("test_")):
+    if db_name != "wlh_test":
         raise RuntimeError(
-            f"Refusing to run tests against non-test PostgreSQL database: {db_name!r}"
+            f"Refusing to run tests against non-whitelisted PostgreSQL database: {db_name!r}"
         )
     bucket_name = env["WLH_S3_BUCKET"]
-    if not (
-        bucket_name.endswith(("-test", "_test"))
-        or bucket_name.startswith(("test-", "test_"))
-    ):
+    if bucket_name != "wlh-archive-test":
         raise RuntimeError(
-            f"Refusing to run tests against non-test S3 bucket: {bucket_name!r}"
+            f"Refusing to run tests against non-whitelisted S3 bucket: {bucket_name!r}"
         )
 
     admin_dsn = urlunsplit((parsed.scheme, parsed.netloc, "/postgres", "", ""))
     with psycopg.connect(admin_dsn, autocommit=True) as conn:
-        exists = conn.execute(
-            "SELECT 1 FROM pg_database WHERE datname = %s", (db_name,)
-        ).fetchone()
-        if not exists:
+        all_dbs = [
+            str(r[0])
+            for r in conn.execute(
+                "SELECT datname FROM pg_database WHERE datistemplate = false"
+            ).fetchall()
+        ]
+        for existing_db in all_dbs:
+            if existing_db not in ALLOWED_POSTGRES_DATABASES:
+                conn.execute(
+                    sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                        sql.Identifier(existing_db)
+                    )
+                )
+        if db_name not in all_dbs:
             conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
 
     boto3_mod: Any = boto3
@@ -69,6 +80,20 @@ def _ensure_test_db_and_bucket(env: dict[str, str]) -> None:
         str(b.get("Name", ""))
         for b in s3_client.list_buckets().get("Buckets", [])
     }
+    for existing_bucket in sorted(existing_buckets):
+        if existing_bucket and existing_bucket not in ALLOWED_S3_BUCKETS:
+            paginator = s3_client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=existing_bucket):
+                contents = page.get("Contents", [])
+                if contents:
+                    s3_client.delete_objects(
+                        Bucket=existing_bucket,
+                        Delete={
+                            "Objects": [{"Key": str(o["Key"])} for o in contents],
+                            "Quiet": True,
+                        },
+                    )
+            s3_client.delete_bucket(Bucket=existing_bucket)
     if bucket_name not in existing_buckets:
         s3_client.create_bucket(Bucket=bucket_name)
 
@@ -89,7 +114,7 @@ def _ensure_dev_env() -> dict[str, str]:
         "WLH_ALLOW_LOOPBACK": "1",
         "WLH_BR_OCR_URL": os.environ.get("WLH_BR_OCR_URL", "http://127.0.0.1:59999/api/v1"),
     }
-    _ensure_test_db_and_bucket(env)
+    ensure_test_db_and_bucket(env)
     for k, v in env.items():
         os.environ[k] = v
     return env

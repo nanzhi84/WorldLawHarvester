@@ -24,6 +24,7 @@ _verified_cache_bytes: int = 0
 _MAX_CACHE_ITEM_BYTES: int = 67108864
 _MAX_CACHE_TOTAL_BYTES: int = 536870912
 _MAX_CACHE_ENTRIES: int = 512
+ALLOWED_BUCKETS = frozenset({"wlh-archive", "wlh-archive-test"})
 
 
 def _cache_verified(bucket: str, key: str, body: bytes) -> None:
@@ -98,12 +99,10 @@ class Objects:
         except ValueError:
             raise WlhError("invalid_object_storage_endpoint") from None
         self.bucket: str = settings["BUCKET"]
-        if "PYTEST_CURRENT_TEST" in os.environ:
-            if not (
-                self.bucket.endswith(("-test", "_test"))
-                or self.bucket.startswith(("test-", "test_"))
-            ):
-                raise WlhError("test_object_storage_isolation_violation")
+        if self.bucket not in ALLOWED_BUCKETS:
+            raise WlhError("test_object_storage_isolation_violation")
+        if "PYTEST_CURRENT_TEST" in os.environ and self.bucket != "wlh-archive-test":
+            raise WlhError("test_object_storage_isolation_violation")
         self.client: Any = client(
             settings["ENDPOINT"],
             settings["ACCESS_KEY"],

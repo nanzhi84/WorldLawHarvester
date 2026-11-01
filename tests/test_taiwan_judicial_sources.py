@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
+from wlh.cleaners.delivery_quality import assert_delivery_quality
 from wlh.cleaners.extraction_quality import text_check
 from wlh.config import SourceConfig
 from wlh.core import digest
@@ -773,5 +774,330 @@ class TestTaiwanJudicialOpenDataApiAndZipExtraction:
         repaired_path.write_bytes(repaired)
         members = unpack_zip(repaired_path, tmp_path / "out", max_bytes=10 * 1024 * 1024)
         assert [m["path"] for m in members] == ["大法官解釋-釋字第793號.json"]
+
+
+class TestTaiwanJudicialSources:
+    def test_moj_precedent_list_paginates_at_same_depth_and_extracts_historical_precedents(
+        self, tmp_path: Path
+    ) -> None:
+        """dd-591 MOJ precedent list paginates at depth 0 under max_depth=1 up to max_pages=3 and extracts active and historical abolished precedents."""
+        _ = tmp_path
+        config = SourceConfig.model_validate(
+            {
+                "id": "dd-591",
+                "scheduler": {
+                    "scope": "中国台湾全国法规资料库（law.moj.gov.tw）司法解释之最高法院与最高行政法院判例列表分页发现与详情采集",
+                    "entry_urls": [
+                        "https://law.moj.gov.tw/Law/LawSearchJudge.aspx?ty=B2"
+                    ],
+                    "allowed_hosts": ["law.moj.gov.tw"],
+                    "allowed_path_prefixes": ["/Law/", "/LawClass/"],
+                    "max_depth": 1,
+                },
+                "fetcher": {
+                    "mode": "http",
+                    "robots": False,
+                    "delay": 1.0,
+                    "retries": 3,
+                    "page_timeout_ms": 60000,
+                },
+                "processor": {
+                    "parser": {
+                        "type": "html",
+                        "options": {"max_pages": 3},
+                        "documents": {
+                            "detail_url_patterns": [
+                                r"^https://law\.moj\.gov\.tw/LawClass/ExContent\.aspx\?ty=J&"
+                            ],
+                            "detail_body": "always",
+                            "attachment_url_pattern": r"^(?!)$",
+                            "content_xpath": '//div[contains(@class, "jud-extent")][normalize-space(.) != ""]',
+                            "link_scope_xpath": "//table//a[contains(@href, 'ExContent.aspx')]",
+                            "next_page_xpath": "//a[@id='hlPage' and contains(., '下一頁') and @href]",
+                            "fields": {
+                                "title": {
+                                    "xpath": '//div[contains(@class, "jud-extent")]//div[contains(@class, "row")][div[contains(@class, "col-th") and contains(., "裁判字號")]]/div[contains(@class, "col-td")]',
+                                    "regex": r"(\d+\s*年(?:度)?\s*[^\s]+?字\s*第\s*[^\s]+?\s*號.*)",
+                                },
+                                "document_number": {
+                                    "xpath": '//div[contains(@class, "jud-extent")]//div[contains(@class, "row")][div[contains(@class, "col-th") and contains(., "裁判字號")]]/div[contains(@class, "col-td")]',
+                                    "regex": r"(\d+\s*年(?:度)?\s*[^\s]+?字\s*第\s*[^\s]+?\s*號)",
+                                },
+                                "published_at": {
+                                    "xpath": '//div[contains(@class, "jud-extent")]//div[contains(@class, "row")][div[contains(@class, "col-th") and contains(., "裁判日期")]]/div[contains(@class, "col-td")]',
+                                    "regex": r"((?:中華民國|民國)\s*\d+\s*年\s*(?:0?[1-9]|1[0-2])\s*月\s*(?:0?[1-9]|[12]\d|3[01])\s*日)",
+                                },
+                                "issuer": {
+                                    "xpath": '//div[contains(@class, "text-title")]/h2',
+                                    "regex": r"^(最高法院|最高行政法院)",
+                                },
+                            },
+                        },
+                    }
+                },
+                "cleaners": {"infer_effective_date": False},
+                "storage": {
+                    "archive_approved": True,
+                    "metadata": {
+                        "source_name": "全国法规资料库（司法解释：最高法院与最高行政法院判例）",
+                        "document_type": "案例",
+                        "language": "zh",
+                        "jurisdiction": "TW",
+                    },
+                },
+            }
+        ).model_dump()
+        adapter: Any = load_adapter("html")(config)
+
+        page1_url = "https://law.moj.gov.tw/Law/LawSearchJudge.aspx?ty=B2"
+        page2_url = "https://law.moj.gov.tw/Law/LawSearchJudge.aspx?ty=B2&set=0&page=2"
+        page3_url = "https://law.moj.gov.tw/Law/LawSearchJudge.aspx?ty=B2&set=0&page=3"
+        page4_url = "https://law.moj.gov.tw/Law/LawSearchJudge.aspx?ty=B2&set=0&page=4"
+
+        detail1_url = "https://law.moj.gov.tw/LawClass/ExContent.aspx?ty=J&CC=A&CNO=94%2c%e5%8f%b0%e4%b8%8a%2c2327%2c001"
+        detail2_url = "https://law.moj.gov.tw/LawClass/ExContent.aspx?ty=J&CC=A&CNO=17%2c%e4%b8%8a%2c35%2c001"
+        detail3_url = "https://law.moj.gov.tw/LawClass/ExContent.aspx?ty=J&CC=A&CNO=95%2c%e5%8f%b0%e4%b8%8a%2c100%2c001"
+
+        page1_html = (
+            "<html><head><meta charset='utf-8'><title>司法解釋查詢結果</title></head><body>"
+            '<table class="table table-hover tab-list"><tbody><tr><td>'
+            '<a href="/LawClass/ExContent.aspx?ty=J&amp;CC=A&amp;CNO=94%2c%e5%8f%b0%e4%b8%8a%2c2327%2c001">94 年台上字第 2327 號</a>'
+            "</td></tr></tbody></table>"
+            '<div class="pager"><a id="hlPage" href="/Law/LawSearchJudge.aspx?ty=B2&amp;set=0&amp;page=2">下一頁</a></div>'
+            "</body></html>"
+        ).encode("utf-8")
+
+        page2_html = (
+            "<html><head><meta charset='utf-8'><title>司法解釋查詢結果</title></head><body>"
+            '<table class="table table-hover tab-list"><tbody><tr><td>'
+            '<a href="/LawClass/ExContent.aspx?ty=J&amp;CC=A&amp;CNO=17%2c%e4%b8%8a%2c35%2c001"><span>廢</span> 17 年上字第 35 號</a>'
+            "</td></tr></tbody></table>"
+            '<div class="pager"><a id="hlPage" href="/Law/LawSearchJudge.aspx?ty=B2&amp;set=0&amp;page=3">下一頁</a></div>'
+            "</body></html>"
+        ).encode("utf-8")
+
+        page3_html = (
+            "<html><head><meta charset='utf-8'><title>司法解釋查詢結果</title></head><body>"
+            '<table class="table table-hover tab-list"><tbody><tr><td>'
+            '<a href="/LawClass/ExContent.aspx?ty=J&amp;CC=A&amp;CNO=95%2c%e5%8f%b0%e4%b8%8a%2c100%2c001">95 年台上字第 100 號</a>'
+            "</td></tr></tbody></table>"
+            '<div class="pager"><a id="hlPage" href="/Law/LawSearchJudge.aspx?ty=B2&amp;set=0&amp;page=4">下一頁</a></div>'
+            "</body></html>"
+        ).encode("utf-8")
+
+        detail1_html = (
+            "<html><head><meta charset='utf-8'><title>最高法院民事判例 94 年台上字第 2327 號</title></head><body>"
+            '<div class="text-title"><h2>最高法院民事判例</h2></div>'
+            '<div class="jud-extent">'
+            '<div class="row"><div class="col-th">裁判字號：</div><div class="col-td">94 年台上字第 2327 號</div></div>'
+            '<div class="row"><div class="col-th">裁判日期：</div><div class="col-td">民國 94 年 12 月 22 日</div></div>'
+            '<div class="row"><div class="col-th">要旨：</div><div class="col-td">'
+            "按民法第一百八十四條第一項前段規定，因故意或過失，不法侵害他人之權利者，負損害賠償責任。"
+            "當事人主張權利受侵害時，應就侵權行為之成立要件負舉證責任。"
+            "</div></div>"
+            '<div class="row"><div class="col-th">編註：</div><div class="col-td">'
+            "1.本則判例，依據民國 108 年 1 月 4 日修正，108 年 7 月 4 日施行之法院組織法第 57 條之 1 規定，應停止適用。"
+            "</div></div>"
+            "</div>"
+            "</body></html>"
+        ).encode("utf-8")
+
+        detail2_html = (
+            "<html><head><meta charset='utf-8'><title>最高法院民事判例 17 年上字第 35 號</title></head><body>"
+            '<div class="text-title"><h2>最高法院民事判例</h2></div>'
+            '<div class="jud-extent">'
+            '<div class="row"><div class="col-th">裁判字號：</div><div class="col-td"><span>廢</span> 17 年上字第 35 號</div></div>'
+            '<div class="row"><div class="col-th">裁判日期：</div><div class="col-td">民國 17 年 0 月 0 日（主管機關查無資料）</div></div>'
+            '<div class="row"><div class="col-th">要旨：</div><div class="col-td">'
+            "契約當事人約定之違約金過高者，法院得依職權減至相當之數額，為民法上之重要原則。"
+            "</div></div>"
+            '<div class="row"><div class="col-th">編註：</div><div class="col-td">'
+            "1.本則判例經最高法院決議不再援用。"
+            "</div></div>"
+            "</div>"
+            "</body></html>"
+        ).encode("utf-8")
+
+        ctx = _InMemoryAdapterContext(
+            config,
+            {
+                page1_url: page1_html,
+                page2_url: page2_html,
+                page3_url: page3_html,
+                detail1_url: detail1_html,
+                detail2_url: detail2_html,
+            },
+        )
+
+        # Page 1 (depth=0): discovers detail1 at depth=1 AND next list page=2 at depth=0 with meta={"page": 2}
+        parsed_p1: dict[str, Any] = adapter.parse(
+            ctx,
+            {"depth": 0, "payload": {"url": page1_url, "role": "page"}},
+            _acquisition(page1_url, page1_html, acq_id=1),
+        )
+        assert parsed_p1.get("truncated") is None
+        assert {
+            "url": detail1_url,
+            "role": "page",
+            "depth": 1,
+        } in parsed_p1["requests"]
+        assert {
+            "url": page2_url,
+            "role": "page",
+            "depth": 0,
+            "meta": {"page": 2},
+        } in parsed_p1["requests"]
+
+        # Page 2 (depth=0, meta={"page": 2}): discovers detail2 at depth=1 AND next list page=3 at depth=0 with meta={"page": 3}
+        parsed_p2: dict[str, Any] = adapter.parse(
+            ctx,
+            {
+                "depth": 0,
+                "payload": {"url": page2_url, "role": "page", "meta": {"page": 2}},
+            },
+            _acquisition(page2_url, page2_html, acq_id=2),
+        )
+        assert parsed_p2.get("truncated") is None
+        assert {
+            "url": detail2_url,
+            "role": "page",
+            "depth": 1,
+        } in parsed_p2["requests"]
+        assert {
+            "url": page3_url,
+            "role": "page",
+            "depth": 0,
+            "meta": {"page": 3},
+        } in parsed_p2["requests"]
+
+        # Page 3 (depth=0, meta={"page": 3}): reaches max_pages=3, does NOT enqueue page=4, returns truncated="page_limit_exceeded"
+        parsed_p3: dict[str, Any] = adapter.parse(
+            ctx,
+            {
+                "depth": 0,
+                "payload": {"url": page3_url, "role": "page", "meta": {"page": 3}},
+            },
+            _acquisition(page3_url, page3_html, acq_id=3),
+        )
+        assert parsed_p3.get("truncated") == "page_limit_exceeded"
+        p3_urls = [str(req["url"]) for req in parsed_p3["requests"]]
+        assert detail3_url in p3_urls
+        assert page4_url not in p3_urls
+
+        # Detail 1: 94 年台上字第 2327 號
+        parsed_d1: dict[str, Any] = adapter.parse(
+            ctx,
+            {"depth": 1, "payload": {"url": detail1_url, "role": "page", "depth": 1}},
+            _acquisition(detail1_url, detail1_html, acq_id=4),
+        )
+        assert len(parsed_d1["targets"]) == 1
+        target1: dict[str, Any] = parsed_d1["targets"][0]
+        assert len(target1["inputs"]) == 1
+        built_d1: list[dict[str, Any]] = adapter.build(
+            ctx,
+            target1,
+            [
+                {
+                    **target1["inputs"][0],
+                    "acquisition": _acquisition(detail1_url, detail1_html, acq_id=4),
+                }
+            ],
+        )
+        assert len(built_d1) == 1
+        cand1: dict[str, Any] = built_d1[0]
+        assert cand1["metadata"]["title"] == "94 年台上字第 2327 號"
+        assert cand1["metadata"]["document_number"] == "94 年台上字第 2327 號"
+        assert cand1["dates"]["published_at"] == "2005-12-22"
+        assert cand1["dates"].get("effective_at") is None
+        assert cand1["metadata"]["issuer"] == "最高法院"
+        assert len(cand1["deliverables"]) == 1
+        assert cand1["deliverables"][0]["role"] == "primary"
+
+        # Detail 2: historical abolished precedent 廢 17 年上字第 35 號 with 民國 17 年 0 月 0 日（主管機關查無資料）
+        parsed_d2: dict[str, Any] = adapter.parse(
+            ctx,
+            {"depth": 1, "payload": {"url": detail2_url, "role": "page", "depth": 1}},
+            _acquisition(detail2_url, detail2_html, acq_id=5),
+        )
+        assert len(parsed_d2["targets"]) == 1
+        target2: dict[str, Any] = parsed_d2["targets"][0]
+        assert len(target2["inputs"]) == 1
+        built_d2: list[dict[str, Any]] = adapter.build(
+            ctx,
+            target2,
+            [
+                {
+                    **target2["inputs"][0],
+                    "acquisition": _acquisition(detail2_url, detail2_html, acq_id=5),
+                }
+            ],
+        )
+        assert len(built_d2) == 1
+        cand2: dict[str, Any] = built_d2[0]
+        assert cand2["metadata"]["title"] == "17 年上字第 35 號"
+        assert cand2["metadata"]["document_number"] == "17 年上字第 35 號"
+        assert cand2["dates"].get("published_at") is None
+        assert cand2["dates"].get("effective_at") is None
+        assert cand2["metadata"]["issuer"] == "最高法院"
+        assert len(cand2["deliverables"]) == 1
+        assert cand2["deliverables"][0]["role"] == "primary"
+
+        delivery_rows = [
+            {
+                "source_id": "dd-591",
+                "resource_id": "res-dd591-1",
+                "row_index": 1,
+                "role": "primary",
+                "title": cand1["metadata"]["title"],
+                "markdown_file": "94_2327_aaaaaaaa_bbbbbbbb.md",
+                "doc_type": "案例",
+                "acquired_at": "2026-10-31 16:40:00",
+                "original_file": None,
+                "volume_order": None,
+                "doc_number": cand1["metadata"]["document_number"],
+                "issuer": cand1["metadata"]["issuer"],
+                "published_at": cand1["dates"].get("published_at"),
+                "effective_at": cand1["dates"].get("effective_at"),
+                "expired_at": None,
+                "status": None,
+                "source_name": config["storage"]["metadata"]["source_name"],
+                "detail_url": detail1_url,
+                "source_record_hash": "a" * 64,
+                "markdown_hash": "b" * 64,
+                "original_hash": None,
+                "markdown_text": cand1["deliverables"][0]["markdown"],
+            },
+            {
+                "source_id": "dd-591",
+                "resource_id": "res-dd591-2",
+                "row_index": 1,
+                "role": "primary",
+                "title": cand2["metadata"]["title"],
+                "markdown_file": "17_35_cccccccc_dddddddd.md",
+                "doc_type": "案例",
+                "acquired_at": "2026-10-31 16:40:00",
+                "original_file": None,
+                "volume_order": None,
+                "doc_number": cand2["metadata"]["document_number"],
+                "issuer": cand2["metadata"]["issuer"],
+                "published_at": cand2["dates"].get("published_at"),
+                "effective_at": cand2["dates"].get("effective_at"),
+                "expired_at": None,
+                "status": None,
+                "source_name": config["storage"]["metadata"]["source_name"],
+                "detail_url": detail2_url,
+                "source_record_hash": "c" * 64,
+                "markdown_hash": "d" * 64,
+                "original_hash": None,
+                "markdown_text": cand2["deliverables"][0]["markdown"],
+            },
+        ]
+        quality_report = assert_delivery_quality(
+            delivery_rows,
+            source_config=config,
+            require_multi_resource=True,
+        )
+        assert quality_report["passed"] is True
+
 
 

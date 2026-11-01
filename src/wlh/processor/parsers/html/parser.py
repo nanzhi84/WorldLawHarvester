@@ -257,6 +257,12 @@ class HtmlParser(WebDocumentBuilder, Base):
             unexpanded_paths: set[str] = set()
             link_scope = docs.get("link_scope_xpath")
             next_page_xp = docs.get("next_page_xpath")
+            page = int(cast(Mapping[str, Any], request.get("meta") or {}).get("page", 1))
+            next_page_nodes: set[Any] = (
+                set(tree.xpath(str(next_page_xp)))
+                if not detail and next_page_xp
+                else set()
+            )
             anchors: list[Any] = []
             if not detail and link_scope:
                 scoped_expr = str(link_scope)
@@ -318,6 +324,27 @@ class HtmlParser(WebDocumentBuilder, Base):
                 seen.add(link)
                 if self.is_detail(link):
                     detail_paths.add(urlsplit(link).path)
+                elif anchor in next_page_nodes:
+                    if ctx.follow_links(task):
+                        if page < self.max_pages:
+                            requests.insert(
+                                0,
+                                {
+                                    "url": link,
+                                    "role": "page",
+                                    "depth": task["depth"],
+                                    "meta": {"page": page + 1},
+                                },
+                            )
+                        else:
+                            truncated = truncated or "page_limit_exceeded"
+                    elif ctx.runtime.mode == "collect":
+                        truncated = truncated or (
+                            "page_limit_exceeded"
+                            if page >= self.max_pages
+                            else "max_depth_exceeded"
+                        )
+                    continue
                 if self.attachment.search(unquote(link)) or self.attachment.search(file_name(link)):
                     if self.details and detail:
                         if any(anchor.xpath(xp) for xp in att_excl_xpaths):

@@ -21,14 +21,16 @@ j = Jsonb
 DbConn = psycopg.Connection[dict[str, Any]]
 _POOL_LOCK = threading.Lock()
 _CONN_POOL: dict[tuple[int, str], list[DbConn]] = {}
+ALLOWED_DATABASES = frozenset({"wlh", "wlh_samples", "wlh_test"})
 
 
 def dsn() -> str:
     url = os.environ.get("WLH_DATABASE_URL", "postgresql://wlh:wlh@127.0.0.1:15432/wlh")
-    if "PYTEST_CURRENT_TEST" in os.environ:
-        db_name = urlsplit(url).path.lstrip("/")
-        if not (db_name.endswith("_test") or db_name.startswith("test_")):
-            raise WlhError("test_database_isolation_violation")
+    db_name = urlsplit(url).path.lstrip("/")
+    if db_name not in ALLOWED_DATABASES:
+        raise WlhError("test_database_isolation_violation")
+    if "PYTEST_CURRENT_TEST" in os.environ and db_name != "wlh_test":
+        raise WlhError("test_database_isolation_violation")
     return url
 
 
