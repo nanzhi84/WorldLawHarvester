@@ -12,11 +12,13 @@ class TestRunbookVerificationSamples:
         """Published `[x]`/`[~]` sections show real samples or explicit, unverified zero-sample states."""
         import csv
         import importlib
+        import json
         import re
         from typing import Any
 
         import wlh.runbook_samples as runbook_samples
         from wlh.runbook_samples import (
+            hydrate_samples_from_store,
             render_html_from_csv,
         )
 
@@ -51,10 +53,40 @@ class TestRunbookVerificationSamples:
             "Obsolete docs/runbooks/source-verification-samples.md must not exist on disk"
         )
 
+        html_byte_size = samples_html.stat().st_size
+        assert html_byte_size < 600_000, (
+            f"docs/runbooks/source-verification-samples.html must remain lightweight (< 600 KB) "
+            f"without hardcoded payloads/markdown, got {html_byte_size:,} bytes"
+        )
+
         content = samples_html.read_text(encoding="utf-8")
         assert render_html_from_csv(matrix_csv, samples_html) == content, (
             "source-verification-samples.html is out of sync with source-adaptation-matrix.csv"
         )
+        assert "/api/samples" in content, (
+            "source-verification-samples.html must contain the real-time /api/samples loader script"
+        )
+
+        cache_match = re.search(
+            r'<script\s+id="wlh-samples-cache"\s+type="application/json">\s*(.*?)\s*</script>',
+            content,
+            re.S,
+        )
+        assert cache_match is not None, (
+            "Missing #wlh-samples-cache metadata script in source-verification-samples.html"
+        )
+        cached_sources_map: dict[str, list[dict[str, Any]]] = json.loads(cache_match.group(1))
+        for src_id in active_ids:
+            assert src_id in cached_sources_map, (
+                f"Active source {src_id} missing from #wlh-samples-cache"
+            )
+            for item_idx, cached_item in enumerate(cached_sources_map[src_id], start=1):
+                assert "raw_payload" not in cached_item, (
+                    f"{src_id} item #{item_idx} in #wlh-samples-cache must not hardcode raw_payload"
+                )
+                assert "markdown" not in cached_item, (
+                    f"{src_id} item #{item_idx} in #wlh-samples-cache must not hardcode markdown"
+                )
 
         tree: Any = lxml_html.fromstring(content)
 
@@ -134,29 +166,18 @@ class TestRunbookVerificationSamples:
                 assert len(tds) == 2, f"{source_id} row #{row_idx} must have exactly 2 <td> cells"
                 left_td, right_td = tds[0], tds[1]
                 left_codes: list[Any] = left_td.xpath(".//pre/code")
-                for code_el in left_codes:
-                    code_text = str(code_el.text_content() or "").strip()
-                    assert len(code_text) >= 20, (
-                        f"{source_id} sample row #{row_idx} has empty/stub left-column "
-                        f"<pre><code> payload ({len(code_text)} chars)"
-                    )
                 att_links: list[Any] = left_td.xpath(
                     './/a[contains(@href, ".pdf") or contains(@href, ".docx") or contains(@href, ".doc") or contains(@href, "/UCMServer/TAND") or contains(@class, "attachment")]'
                 )
                 if not att_links:
                     assert len(left_codes) >= 1, (
-                        f"{source_id} sample row #{row_idx} left <td> has no attachment link and no <pre><code> payload"
+                        f"{source_id} sample row #{row_idx} left <td> has no attachment link and no <pre><code> payload container"
                     )
                 right_codes: list[Any] = right_td.xpath(
                     ".//pre/code | .//pre | .//*[contains(@class, 'markdown')]"
                 )
-                right_text = (
-                    str(right_codes[0].text_content() or "").strip()
-                    if right_codes
-                    else str(right_td.text_content() or "").strip()
-                )
-                assert len(right_text) >= 20, (
-                    f"{source_id} sample row #{row_idx} right <td> Markdown content too short ({len(right_text)} chars)"
+                assert len(right_codes) >= 1, (
+                    f"{source_id} sample row #{row_idx} right <td> missing markdown container"
                 )
 
         assert "<code></code>" not in content, (
@@ -188,6 +209,20 @@ class TestRunbookVerificationSamples:
                 f"{vn_att_id} section must contain clickable .pdf, .docx, or UCM download <a href='https://...'> links"
             )
 
+        dd375_rows = source_rows_map.get("dd-375", [])
+        assert len(dd375_rows) == 1
+        dd375_left_td = dd375_rows[0].xpath("./td")[0]
+        dd375_hrefs = " ".join(str(h) for h in dd375_left_td.xpath(".//a/@href"))
+        assert "P020200612583036030033.DOCX" in dd375_hrefs, (
+            "dd-375 sample row #1 left-column <td> must include attachment link P020200612583036030033.DOCX"
+        )
+        assert "P020210608556900301740.docx" in dd375_hrefs, (
+            "dd-375 sample row #1 left-column <td> must include attachment link P020210608556900301740.docx"
+        )
+
+        # Hydrate live payload and markdown from DB + S3 CAS for all active sources
+        hydrated_map = hydrate_samples_from_store(cached_sources_map, full=False)
+
         forbidden_placeholders = (
             "Bạn chưa Đăng nhập thành viên",
             "Văn bản này đang cập nhật nội dung",
@@ -203,70 +238,6 @@ class TestRunbookVerificationSamples:
             "各省、自治区、直辖市人民政府，国务院各部委、各直属机构：现将有关事项通知如下。",
             "指导性案例221号：丙公司诉丁公司算法商业秘密纠纷案",
         )
-        for bad_str in forbidden_placeholders:
-            assert bad_str not in content, (
-                f"Reward-hacked placeholder {bad_str!r} must not appear in source-verification-samples.html"
-            )
-
-        def _right_cell_markdown(row_el: Any) -> str:
-            tds_local: list[Any] = row_el.xpath("./td")
-            right_td_local = tds_local[1]
-            codes_local: list[Any] = right_td_local.xpath(
-                ".//pre/code | .//pre | .//*[contains(@class, 'markdown')]"
-            )
-            return (
-                str(codes_local[0].text_content() or "").strip()
-                if codes_local
-                else str(right_td_local.text_content() or "").strip()
-            )
-
-        for src_id in ("dd-040", "dd-041"):
-            for r_idx, r_el in enumerate(source_rows_map.get(src_id, []), start=1):
-                md_cell = _right_cell_markdown(r_el)
-                assert "【字体：大 中 小】" not in md_cell, (
-                    f"{src_id} row #{r_idx} right-column Markdown contains font widget noise"
-                )
-                assert "### 相关新闻" not in md_cell, (
-                    f"{src_id} row #{r_idx} right-column Markdown contains hidden related news heading"
-                )
-
-        for r_idx, r_el in enumerate(source_rows_map.get("dd-102", []), start=1):
-            md_cell = _right_cell_markdown(r_el)
-            assert "【打印】" not in md_cell and "【返回】" not in md_cell, (
-                f"dd-102 row #{r_idx} right-column Markdown contains print/back button noise"
-            )
-
-        dd375_rows = source_rows_map.get("dd-375", [])
-        assert len(dd375_rows) == 1
-        dd375_left_td = dd375_rows[0].xpath("./td")[0]
-        dd375_hrefs = " ".join(str(h) for h in dd375_left_td.xpath(".//a/@href"))
-        assert "P020200612583036030033.DOCX" in dd375_hrefs, (
-            "dd-375 sample row #1 left-column <td> must include attachment link P020200612583036030033.DOCX"
-        )
-        assert "P020210608556900301740.docx" in dd375_hrefs, (
-            "dd-375 sample row #1 left-column <td> must include attachment link P020210608556900301740.docx"
-        )
-
-        for r_idx, r_el in enumerate(source_rows_map.get("dd-527", []), start=1):
-            md_cell = _right_cell_markdown(r_el)
-            assert "Share:" not in md_cell, (
-                f"dd-527 row #{r_idx} right-column Markdown contains Share bar noise"
-            )
-            assert "- [](https://www.iras.gov.sg/" not in md_cell, (
-                f"dd-527 row #{r_idx} right-column Markdown contains empty social share link"
-            )
-
-        for r_idx, r_el in enumerate(source_rows_map.get("dd-563", []), start=1):
-            md_cell = _right_cell_markdown(r_el)
-            for toc_noise in (
-                "- [HIGHLIGHTS OF THIS ISSUE](",
-                "- [INCOME TAX](",
-                "[](https://www.irs.gov/irb/",
-            ):
-                assert toc_noise not in md_cell, (
-                    f"dd-563 row #{r_idx} right-column Markdown contains TOC/anchor noise {toc_noise!r}"
-                )
-
         global_forbidden_md_tokens = (
             "[](https://",
             "[](http://",
@@ -276,10 +247,71 @@ class TestRunbookVerificationSamples:
             "[【返回】]",
             "Đang theo dõi",
         )
-        for src_id, s_rows in source_rows_map.items():
-            for r_idx, r_el in enumerate(s_rows, start=1):
-                md_cell = _right_cell_markdown(r_el)
+
+        for source_id in active_ids:
+            live_items = hydrated_map.get(source_id, [])
+            expected_count = 1 if source_id == "dd-375" else 10
+            assert len(live_items) == expected_count, (
+                f"Expected {expected_count} hydrated live items for {source_id}, got {len(live_items)}"
+            )
+            for row_idx, item in enumerate(live_items, start=1):
+                raw_payload = str(item.get("raw_payload") or "").strip()
+                md_cell = str(item.get("markdown") or "").strip()
+                att_url = str(item.get("attachment_url") or "").strip()
+                raw_atts: Any = item.get("attachments")
+                has_atts = bool(raw_atts)
+                if not att_url and not has_atts:
+                    assert len(raw_payload) >= 20, (
+                        f"{source_id} live sample #{row_idx} has empty/stub raw_payload ({len(raw_payload)} chars)"
+                    )
+                if raw_payload:
+                    assert "\n" in raw_payload, (
+                        f"{source_id} live sample #{row_idx} raw_payload is compressed into a single line"
+                    )
+                assert len(md_cell) >= 20, (
+                    f"{source_id} live sample #{row_idx} Markdown content too short ({len(md_cell)} chars)"
+                )
+                for bad_str in forbidden_placeholders:
+                    assert bad_str not in raw_payload and bad_str not in md_cell, (
+                        f"Reward-hacked placeholder {bad_str!r} found in live sample {source_id} #{row_idx}"
+                    )
                 for bad_tok in global_forbidden_md_tokens:
                     assert bad_tok not in md_cell, (
-                        f"{src_id} row #{r_idx} right-column Markdown contains forbidden UI noise {bad_tok!r}"
+                        f"{source_id} row #{row_idx} live Markdown contains forbidden UI noise {bad_tok!r}"
                     )
+
+        for src_id in ("dd-040", "dd-041"):
+            for r_idx, item in enumerate(hydrated_map.get(src_id, []), start=1):
+                md_cell = str(item.get("markdown") or "")
+                assert "【字体：大 中 小】" not in md_cell, (
+                    f"{src_id} row #{r_idx} live Markdown contains font widget noise"
+                )
+                assert "### 相关新闻" not in md_cell, (
+                    f"{src_id} row #{r_idx} live Markdown contains hidden related news heading"
+                )
+
+        for r_idx, item in enumerate(hydrated_map.get("dd-102", []), start=1):
+            md_cell = str(item.get("markdown") or "")
+            assert "【打印】" not in md_cell and "【返回】" not in md_cell, (
+                f"dd-102 row #{r_idx} live Markdown contains print/back button noise"
+            )
+
+        for r_idx, item in enumerate(hydrated_map.get("dd-527", []), start=1):
+            md_cell = str(item.get("markdown") or "")
+            assert "Share:" not in md_cell, (
+                f"dd-527 row #{r_idx} live Markdown contains Share bar noise"
+            )
+            assert "- [](https://www.iras.gov.sg/" not in md_cell, (
+                f"dd-527 row #{r_idx} live Markdown contains empty social share link"
+            )
+
+        for r_idx, item in enumerate(hydrated_map.get("dd-563", []), start=1):
+            md_cell = str(item.get("markdown") or "")
+            for toc_noise in (
+                "- [HIGHLIGHTS OF THIS ISSUE](",
+                "- [INCOME TAX](",
+                "[](https://www.irs.gov/irb/",
+            ):
+                assert toc_noise not in md_cell, (
+                    f"dd-563 row #{r_idx} live Markdown contains TOC/anchor noise {toc_noise!r}"
+                )

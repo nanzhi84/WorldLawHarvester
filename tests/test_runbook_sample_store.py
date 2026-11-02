@@ -294,7 +294,10 @@ class TestRunbookVerificationSamples:
         from typing import Any
 
         import wlh.runbook_samples as runbook_samples
-        from wlh.runbook_samples import generate_verification_samples_from_db
+        from wlh.runbook_samples import (
+            fetch_live_source_samples,
+            generate_verification_samples_from_db,
+        )
 
         lxml_html: Any = importlib.import_module("lxml.html")
 
@@ -403,6 +406,12 @@ class TestRunbookVerificationSamples:
         assert "<!doctype html>" in rendered_html.lower()
         assert "127.0.0.1" not in rendered_html
         assert "localhost" not in rendered_html
+        assert "第一条 为推进全国一体化政务大数据体系建设与跨部门协同监管" not in rendered_html, (
+            "Generated HTML must not hardcode raw_payload or markdown bodies"
+        )
+        assert "行政機關為行政行為時，應遵循公正、公開與民主之程序規定" not in rendered_html, (
+            "Generated HTML must not hardcode raw_payload or markdown bodies"
+        )
 
         tree: Any = lxml_html.fromstring(rendered_html)
         for expected_id in ("dd-501", "dd-578"):
@@ -412,110 +421,44 @@ class TestRunbookVerificationSamples:
             assert len(sample_rows) == 5, (
                 f"Expected 5 two-column sample rows for {expected_id}, got {len(sample_rows)}"
             )
-            for row_idx, row_el in enumerate(sample_rows, start=1):
-                tds: list[Any] = row_el.xpath("./td")
-                assert len(tds) == 2
-                left_text = str(tds[0].text_content() or "").strip()
-                right_text = str(tds[1].text_content() or "").strip()
-                assert len(left_text) >= 20, (
-                    f"{expected_id} row #{row_idx} left cell too short"
+            live_items = fetch_live_source_samples(
+                expected_id,
+                html_path=output_path,
+                max_items=5,
+                database_url=initialized_db["WLH_DATABASE_URL"],
+                s3_bucket=initialized_db["WLH_S3_BUCKET"],
+                fallback_database_url="",
+            )
+            assert len(live_items) == 5
+            for row_idx, item in enumerate(live_items, start=1):
+                assert len(str(item.get("raw_payload") or "").strip()) >= 20, (
+                    f"{expected_id} live item #{row_idx} raw_payload too short"
                 )
-                assert len(right_text) >= 20, (
-                    f"{expected_id} row #{row_idx} right cell too short"
+                assert len(str(item.get("markdown") or "").strip()) >= 20, (
+                    f"{expected_id} live item #{row_idx} markdown too short"
                 )
 
     def test_generate_samples_falls_back_to_production_store_when_test_store_lacks_source_samples(
-        self, initialized_db: dict[str, str], tmp_path: Path, monkeypatch: object
+        self, initialized_db: dict[str, str], tmp_path: Path
     ) -> None:
-        """When a source has 0 document rows in the primary sample store (`dd-582`) or uses zipped CSV archives (`dd-580`), `generate_verification_samples_from_db` automatically falls back to the fallback store and renders unzipped interpretation bodies."""
+        """When a source has 0 document rows in the primary sample store (`dd-582`) or uses zipped CSV archives (`dd-580`), `generate_verification_samples_from_db` and `fetch_live_source_samples` automatically fall back to the fallback store and hydrate unzipped interpretation bodies."""
         import csv
         import importlib
-        import io
-        import zipfile
         from typing import Any
 
-        from tests.conftest import TRUNCATE_TABLES_SQL
-        from wlh.runbook_samples import generate_verification_samples_from_db
-        from wlh.storage.db import close_pool, initialize
+        from wlh.runbook_samples import (
+            DEFAULT_SAMPLES_DATABASE_URL,
+            DEFAULT_SAMPLES_S3_BUCKET,
+            fetch_live_source_samples,
+            generate_verification_samples_from_db,
+        )
 
         lxml_html: Any = importlib.import_module("lxml.html")
-        mp: Any = monkeypatch
 
         primary_db_url = initialized_db["WLH_DATABASE_URL"]
         s3_bucket = initialized_db["WLH_S3_BUCKET"]
-        fallback_db_url = "postgresql://wlh:wlh@127.0.0.1:15432/wlh_suite_reconcile_test"
-
-        close_pool()
-        with psycopg.connect(
-            "postgresql://wlh:wlh@127.0.0.1:15432/postgres", autocommit=True
-        ) as admin_conn:
-            exists = admin_conn.execute(
-                "SELECT 1 FROM pg_database WHERE datname = 'wlh_suite_reconcile_test'"
-            ).fetchone()
-            if not exists:
-                admin_conn.execute("CREATE DATABASE wlh_suite_reconcile_test")
-
-        mp.setenv("WLH_DATABASE_URL", fallback_db_url)
-        close_pool()
-        initialize()
-        with psycopg.connect(fallback_db_url, autocommit=True) as fb_conn:
-            fb_conn.execute(TRUNCATE_TABLES_SQL)
-        mp.setenv("WLH_DATABASE_URL", primary_db_url)
-        close_pool()
-
-        _seed_source_samples(
-            fallback_db_url,
-            s3_bucket,
-            "dd-582",
-            [
-                {
-                    "detail_url": f"https://www.fsc.gov.tw/ch/home.jsp?id=96&dataserno=202603{i:02d}",
-                    "title": f"金融監督管理委員會令第1150{i:03d}號",
-                    "doc_number": f"金管銀法字第1150{i:03d}號",
-                    "raw_bytes": (
-                        f"<html><body><div class='main-a_03'>"
-                        f"<h1>金融監督管理委員會令第1150{i:03d}號</h1>"
-                        f"<p>核釋銀行法第五十條有關法定盈餘公積提列與資本適足率監理規定（第{i}號）。</p>"
-                        f"</div></body></html>"
-                    ).encode("utf-8"),
-                    "markdown": (
-                        f"# 金融監督管理委員會令第1150{i:03d}號\n\n"
-                        f"核釋銀行法第五十條有關法定盈餘公積提列與資本適足率監理規定（第{i}號）。"
-                    ),
-                }
-                for i in range(1, 11)
-            ],
-        )
-
-        zip_samples: list[dict[str, object]] = []
-        for i in range(1, 6):
-            buf = io.BytesIO()
-            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                zf.writestr(
-                    f"interpretation_{i}.json",
-                    (
-                        f'{{"inte_no": "釋字第{800 + i}號", '
-                        f'"inte_issue": "憲法法庭審理案件程序爭點第{i}號", '
-                        f'"inte_desc": "大法官解釋主文與理由書全文第{i}號"}}'
-                    ),
-                )
-            zip_samples.append(
-                {
-                    "detail_url": f"https://cons.judicial.gov.tw/docdata.aspx?fid=38&id=3100{i}",
-                    "title": f"司法院大法官解釋與憲法法庭115年憲判字第{i}號",
-                    "doc_number": f"115年憲判字第{i}號",
-                    "doc_type": "案例",
-                    "mime_type": "application/zip",
-                    "raw_bytes": buf.getvalue(),
-                    "markdown": f"# 司法院大法官解釋與憲法法庭115年憲判字第{i}號\n\n資料集摘要說明第{i}號。",
-                    "zip_markdown": (
-                        f"| inte_no | inte_issue | inte_desc |\n"
-                        f"| --- | --- | --- |\n"
-                        f"| 釋字第{800 + i}號 | 憲法法庭審理案件程序爭點第{i}號 | 主文：本件合憲。理由：比例原則審查通過。 |"
-                    ),
-                }
-            )
-        _seed_source_samples(fallback_db_url, s3_bucket, "dd-580", zip_samples)
+        fallback_db_url = DEFAULT_SAMPLES_DATABASE_URL
+        fallback_s3_bucket = DEFAULT_SAMPLES_S3_BUCKET
 
         repo_root = Path(__file__).resolve().parents[1]
         matrix_csv = repo_root / "docs" / "runbooks" / "source-adaptation-matrix.csv"
@@ -577,12 +520,14 @@ class TestRunbookVerificationSamples:
             database_url=primary_db_url,
             s3_bucket=s3_bucket,
             fallback_database_url=fallback_db_url,
-            fallback_s3_bucket=s3_bucket,
+            fallback_s3_bucket=fallback_s3_bucket,
         )
         assert returned_path == output_path
         assert output_path.is_file()
 
         rendered_html = output_path.read_text(encoding="utf-8")
+        assert '"raw_payload"' not in rendered_html
+        assert '"markdown"' not in rendered_html
         tree: Any = lxml_html.fromstring(rendered_html)
 
         for expected_id in ("dd-582", "dd-580"):
@@ -593,21 +538,148 @@ class TestRunbookVerificationSamples:
                 f"Expected 5 two-column sample rows for {expected_id}, got {len(sample_rows)}"
             )
 
-        dd580_rows: list[Any] = tree.xpath('//section[@id="dd-580"]//tr[count(td)=2]')
-        for row_idx, row_el in enumerate(dd580_rows, start=1):
-            tds: list[Any] = row_el.xpath("./td")
-            right_text = str(tds[1].text_content() or "").strip()
+        dd580_live = fetch_live_source_samples(
+            "dd-580",
+            html_path=output_path,
+            max_items=5,
+            database_url=primary_db_url,
+            s3_bucket=s3_bucket,
+            fallback_database_url=fallback_db_url,
+            fallback_s3_bucket=fallback_s3_bucket,
+        )
+        assert len(dd580_live) == 5
+        for row_idx, item in enumerate(dd580_live, start=1):
+            right_text = str(item.get("markdown") or "").strip()
             assert any(
                 tok in right_text for tok in ("大法官解釋", "憲法法庭", "憲判字")
             ), (
-                f"dd-580 row #{row_idx} right cell missing constitutional court header"
+                f"dd-580 live item #{row_idx} markdown missing constitutional court header"
             )
             assert any(
                 field_tok in right_text
                 for field_tok in ("inte_no", "inte_issue", "inte_desc", "判字第", "主文", "理由")
             ), (
-                f"dd-580 row #{row_idx} right cell missing constitutional court interpretation/judgment fields"
+                f"dd-580 live item #{row_idx} markdown missing constitutional court interpretation/judgment fields"
             )
+
+    def test_samples_http_server_serves_live_payload_and_markdown_on_demand_from_db_and_cas(
+        self, initialized_db: dict[str, str], tmp_path: Path
+    ) -> None:
+        """`start_samples_http_server` serves `/api/healthz` and `/api/samples/<source_id>` (plus `?full=1`) with CORS headers by reading live payloads and markdowns from PostgreSQL + S3 CAS on demand."""
+        import csv
+        import json
+        import urllib.request
+
+        from wlh.runbook_samples import (
+            generate_verification_samples_from_db,
+            start_samples_http_server,
+        )
+
+        long_paragraphs = [
+            f"第{i}条 纳税人应当依照税收法律、行政法规的规定履行纳税义务，按期如实办理纳税申报（段落编号 H-{i:02d}）。"
+            for i in range(1, 45)
+        ]
+        long_md = "# 国家税务总局税收征管若干规定\n\n" + "\n\n".join(long_paragraphs)
+        long_html = (
+            "<html><body><div class='law-body'>\n"
+            + "\n".join(f"  <p>{p}</p>" for p in long_paragraphs)
+            + "\n</div></body></html>"
+        ).encode("utf-8")
+
+        _seed_source_samples(
+            initialized_db["WLH_DATABASE_URL"],
+            initialized_db["WLH_S3_BUCKET"],
+            "dd-501",
+            [
+                {
+                    "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/c100012/c5299001/content.html",
+                    "title": "国家税务总局税收征管若干规定",
+                    "doc_number": "税总发〔2026〕99号",
+                    "raw_bytes": long_html,
+                    "markdown": long_md,
+                }
+            ],
+        )
+
+        csv_path = tmp_path / "matrix.csv"
+        html_path = tmp_path / "samples.html"
+        fieldnames = [
+            "Source ID",
+            "大洲/区域",
+            "法域/国家",
+            "业务子分类",
+            "资料类型",
+            "来源名称",
+            "官方入口 URL",
+            "优先级",
+            "推荐适配器",
+            "状态",
+            "备注与实测结论",
+        ]
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "Source ID": "dd-501",
+                    "大洲/区域": "1. 亚洲法域 (Asia)",
+                    "法域/国家": "1.1 中国大陆 (China Mainland)",
+                    "业务子分类": "1.1.1 核心官方法律法规",
+                    "资料类型": "法律法规",
+                    "来源名称": "国家税务总局法规库",
+                    "官方入口 URL": "https://fgk.chinatax.gov.cn/",
+                    "优先级": "P0",
+                    "推荐适配器": "web",
+                    "状态": "[x] 已实网跑通",
+                    "备注与实测结论": "已跑通",
+                }
+            )
+
+        generate_verification_samples_from_db(
+            csv_path,
+            html_path,
+            max_items_per_source=5,
+            database_url=initialized_db["WLH_DATABASE_URL"],
+            s3_bucket=initialized_db["WLH_S3_BUCKET"],
+            fallback_database_url="",
+        )
+
+        with start_samples_http_server(
+            host="127.0.0.1",
+            port=0,
+            html_path=html_path,
+            database_url=initialized_db["WLH_DATABASE_URL"],
+            s3_bucket=initialized_db["WLH_S3_BUCKET"],
+            fallback_database_url="",
+        ) as srv:
+            base_url = f"http://127.0.0.1:{srv.server_port}"
+            with urllib.request.urlopen(f"{base_url}/api/healthz", timeout=5) as resp:
+                assert resp.status == 200
+                assert resp.headers.get("Access-Control-Allow-Origin") == "*"
+                health = json.loads(resp.read().decode("utf-8"))
+                assert health["status"] == "ok"
+
+            with urllib.request.urlopen(f"{base_url}/api/samples/dd-501", timeout=5) as resp:
+                assert resp.status == 200
+                assert resp.headers.get("Access-Control-Allow-Origin") == "*"
+                body = json.loads(resp.read().decode("utf-8"))
+                assert body["source_id"] == "dd-501"
+                assert len(body["items"]) == 1
+                preview_item = body["items"][0]
+                assert preview_item["raw_payload"].endswith("…(truncated)")
+                assert preview_item["markdown"].endswith("…(truncated)")
+                assert "段落编号 H-01" in preview_item["markdown"]
+
+            with urllib.request.urlopen(
+                f"{base_url}/api/samples?source_id=dd-501&full=1", timeout=5
+            ) as resp:
+                assert resp.status == 200
+                full_body = json.loads(resp.read().decode("utf-8"))
+                full_item = full_body["items"][0]
+                assert not full_item["raw_payload"].endswith("…(truncated)")
+                assert not full_item["markdown"].endswith("…(truncated)")
+                assert "段落编号 H-44" in full_item["markdown"]
+                assert "段落编号 H-44" in full_item["raw_payload"]
 
     def test_isolated_db_sample_generation_renders_anomaly_first_sampling_strata_badges(
         self, initialized_db: dict[str, str], tmp_path: Path

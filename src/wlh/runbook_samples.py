@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import fcntl
 import hashlib
@@ -12,11 +13,14 @@ import json
 import os
 import re
 import select
+import threading
 import zipfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from datetime import date, datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import parse_qs, unquote, urlsplit
 
 DEFAULT_CSV_PATH = Path("docs/runbooks/source-adaptation-matrix.csv")
 DEFAULT_OUTPUT_PATH = Path("docs/runbooks/source-verification-samples.html")
@@ -173,7 +177,11 @@ def _truncate_payload_aligned(
     return res
 
 
-def _normalize_item(item: Mapping[str, Any]) -> dict[str, Any]:
+def _normalize_item(
+    item: Mapping[str, Any],
+    *,
+    include_content: bool = False,
+) -> dict[str, Any]:
     pub_raw = item.get("published_at")
     if isinstance(pub_raw, (date, datetime)):
         published_at: str | None = pub_raw.isoformat()[:10]
@@ -230,13 +238,14 @@ def _normalize_item(item: Mapping[str, Any]) -> dict[str, Any]:
         "original_file": original_file,
         "original_media_type": original_media_type,
         "attachments": attachments,
-        "raw_payload": str(item.get("raw_payload") or "").strip()[:12000],
-        "markdown": str(item.get("markdown") or "").strip()[:4000],
         "title": item.get("title"),
         "doc_number": item.get("doc_number"),
         "issuer": item.get("issuer"),
         "published_at": published_at,
     }
+    if include_content:
+        out["raw_payload"] = str(item.get("raw_payload") or "").strip()
+        out["markdown"] = str(item.get("markdown") or "").strip()
     if "effective_at" in item:
         eff_raw = item.get("effective_at")
         if isinstance(eff_raw, (date, datetime)):
@@ -255,6 +264,96 @@ def _normalize_item(item: Mapping[str, Any]) -> dict[str, Any]:
             for s in cast(Sequence[Any], item["sampling_strata"])
             if str(s).strip()
         ]
+    return out
+
+
+def _compact_cache_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Serialize sample metadata without raw_payload/markdown or redundant fields."""
+    norm = _normalize_item(item, include_content=False)
+    out: dict[str, Any] = {}
+    raw_atts = norm.get("attachments")
+    has_atts = isinstance(raw_atts, list) and len(cast(list[Any], raw_atts)) > 0
+    for k, v in norm.items():
+        if k in {"raw_payload", "markdown"}:
+            continue
+        if has_atts and k in {"attachment_url", "original_file", "original_media_type"}:
+            continue
+        if k == "original_media_type" and isinstance(v, str) and v.lower().startswith("text/html"):
+            continue
+        if k == "quality_route" and v == "accept":
+            continue
+        if k == "attachments" and has_atts:
+            compact_atts: list[dict[str, str]] = []
+            for a in cast(list[dict[str, Any]], raw_atts)[:2]:
+                ca: dict[str, str] = {"url": str(a.get("url") or "")}
+                if a.get("name"):
+                    ca["name"] = str(a["name"])
+                compact_atts.append(ca)
+            out["attachments"] = compact_atts
+            continue
+        if k == "sampling_strata" and isinstance(v, list):
+            non_derivable = [
+                str(s)
+                for s in cast(list[Any], v)
+                if str(s) not in {"missing_doc_number", "missing_effective_at", "baseline"}
+            ]
+            if non_derivable:
+                out["sampling_strata"] = non_derivable
+            continue
+        if v is None or v == [] or v == "":
+            continue
+        out[k] = v
+    return out
+
+
+def format_sample_for_display(
+    item: Mapping[str, Any],
+    *,
+    full: bool = False,
+    source_id: str = "",
+) -> dict[str, Any]:
+    """Format a sample item's `raw_payload` and `markdown` for two-column display (aligned-truncated when `full=False`, untruncated when `full=True`)."""
+    out = _normalize_item(item, include_content=True)
+    detail_url = str(out.get("detail_url") or "").strip()
+    title = str(out.get("title") or "").strip() or "—"
+    raw_payload = str(item.get("raw_payload") or "").strip()
+    markdown = str(item.get("markdown") or "").strip()
+    has_att_link = bool(out.get("attachment_url") or out.get("attachments"))
+
+    if full:
+        payload_str = _format_multiline_payload(raw_payload)
+        if payload_str.endswith("…(truncated)"):
+            payload_str = payload_str.removesuffix("…(truncated)").rstrip()
+        if not has_att_link and len(payload_str) < 20:
+            payload_str = f"<!-- Source: {detail_url} | Title: {title} -->\n{markdown}"
+        md_str = markdown.replace("\r\n", "\n").replace("\r", "\n").strip()
+        if md_str.endswith("…(truncated)"):
+            md_str = md_str.removesuffix("…(truncated)").rstrip()
+    else:
+        payload_str = _truncate_payload_aligned(raw_payload, markdown, 1500)
+        if not has_att_link and len(payload_str) < 20:
+            payload_str = _truncate_text(
+                f"<!-- Source: {detail_url} | Title: {title} -->\n{markdown}",
+                1500,
+            )
+        md_str = _truncate_text(markdown, 1500)
+
+    if len(md_str) < 20:
+        md_str = f"# {title}\n\n{md_str} (Source: {source_id})"
+
+    p_lstrip = payload_str.lstrip().lower()
+    if p_lstrip.startswith("<?xml"):
+        detected_payload_mime = "application/xml"
+    elif p_lstrip.startswith(("<", "<!doctype")):
+        detected_payload_mime = "text/html"
+    elif p_lstrip.startswith(("{", "[")):
+        detected_payload_mime = "application/json"
+    else:
+        detected_payload_mime = str(out.get("original_media_type") or "text/html")
+
+    out["raw_payload"] = payload_str
+    out["markdown"] = md_str
+    out["payload_mime"] = detected_payload_mime
     return out
 
 
@@ -442,29 +541,23 @@ def render_source_verification_html(
     *,
     max_items_per_source: int = 10,
 ) -> str:
-    """Render a standalone GitBook-style HTML5 document (left TOC sidebar + right two-column comparison table)."""
+    """Render a standalone paginated HTML5 document (left TOC sidebar + right paginated source view & structured two-column comparison table)."""
     toc_blocks: list[str] = []
     main_blocks: list[str] = []
     cache_map: dict[str, list[dict[str, Any]]] = {}
-
-    total_sources = len(sources)
-    total_samples = 0
 
     current_continent: str | None = None
     current_jurisdiction: str | None = None
     current_subcat: str | None = None
 
-    for src in sources:
+    for src_idx, src in enumerate(sources):
         source_id = str(src.get("source_id") or "").strip()
         source_name = str(src.get("source_name") or "").strip()
         status = str(src.get("status") or "").strip()
         continent = str(src.get("continent") or "").strip()
         jurisdiction = str(src.get("jurisdiction") or "").strip()
         subcategory = str(src.get("subcategory") or "").strip()
-        document_type = str(src.get("document_type") or "").strip()
         entry_url = str(src.get("entry_url") or "").strip()
-        priority = str(src.get("priority") or "").strip()
-        adapter = str(src.get("adapter") or "").strip()
 
         raw_items = src.get("items")
         items_seq: Sequence[Mapping[str, Any]] = (
@@ -485,17 +578,16 @@ def render_source_verification_html(
                 items_seq, max_items=max_items_per_source
             )
         )
-        normalized_items = [_normalize_item(it) for it in selected_items]
-        cache_map[source_id] = normalized_items
-        total_samples += len(normalized_items)
-
+        normalized_items = [
+            _normalize_item(it, include_content=False) for it in selected_items
+        ]
+        cache_map[source_id] = [
+            _compact_cache_item(it) for it in selected_items
+        ]
 
         if continent and continent != current_continent:
             toc_blocks.append(
                 f'<div class="toc-group-continent">{std_html.escape(continent)}</div>'
-            )
-            main_blocks.append(
-                f'<h2 class="continent-heading">{std_html.escape(continent)}</h2>'
             )
             current_continent = continent
             current_jurisdiction = None
@@ -505,9 +597,6 @@ def render_source_verification_html(
             toc_blocks.append(
                 f'<div class="toc-group-jurisdiction">{std_html.escape(jurisdiction)}</div>'
             )
-            main_blocks.append(
-                f'<h3 class="jurisdiction-heading">{std_html.escape(jurisdiction)}</h3>'
-            )
             current_jurisdiction = jurisdiction
             current_subcat = None
 
@@ -516,28 +605,23 @@ def render_source_verification_html(
                 toc_blocks.append(
                     f'<div class="toc-group-subcat">{std_html.escape(subcategory)}</div>'
                 )
-                main_blocks.append(
-                    f'<h4 class="subcat-heading">{std_html.escape(subcategory)}</h4>'
-                )
             current_subcat = subcategory
 
         is_partial = status.startswith("[~]")
         badge_class = "badge-partial" if is_partial else "badge-complete"
-        short_status = "[~]" if is_partial else "[x]"
-        badge_text = std_html.escape(status or "[x] 已实网跑通")
+        badge_label_text = "部分跑通" if is_partial else "已跑通"
+        active_cls = " is-active" if src_idx == 0 else ""
 
         toc_blocks.append(
-            f'<a class="toc-link" href="#{std_html.escape(source_id)}">'
-            f'<span class="toc-status {badge_class}">{short_status}</span>'
+            f'<a class="toc-link{active_cls}" href="#{std_html.escape(source_id)}">'
             f'<span class="toc-id">{std_html.escape(source_id)}</span>'
             f'<span class="toc-name">{std_html.escape(source_name)}</span>'
-            f'<span class="toc-count">{len(normalized_items)}</span>'
             f"</a>"
         )
 
         row_blocks: list[str] = []
+        seen_section_strata: set[str] = set()
         for idx, item in enumerate(normalized_items, start=1):
-            detail_url = str(item.get("detail_url") or "").strip()
             attachment_url_raw = item.get("attachment_url")
             attachment_url = (
                 str(attachment_url_raw).strip() if attachment_url_raw else ""
@@ -548,16 +632,17 @@ def render_source_verification_html(
             original_media_type = (
                 str(original_media_type_raw).strip() if original_media_type_raw else ""
             )
-            raw_payload = str(item.get("raw_payload") or "").strip()
-            markdown = str(item.get("markdown") or "").strip()
             title = str(item.get("title") or "").strip() or "—"
             doc_number = str(item.get("doc_number") or "").strip() or "—"
             issuer = str(item.get("issuer") or "").strip() or "—"
             published_at = str(item.get("published_at") or "").strip() or "—"
             effective_at = str(item.get("effective_at") or "").strip() or "—"
 
-            left_parts: list[str] = ['<div class="cell-meta">']
-            left_parts.append(f'<span class="sample-index">#{idx}</span>')
+            left_parts: list[str] = [
+                f'<span class="sample-index">#{idx}</span>'
+                if idx == 1
+                else f"#{idx}"
+            ]
             raw_strata = item.get("sampling_strata")
             strata_tags: list[str] = (
                 [str(s) for s in cast(Sequence[Any], raw_strata) if str(s).strip()]
@@ -565,19 +650,18 @@ def render_source_verification_html(
                 and not isinstance(raw_strata, (str, bytes))
                 else []
             )
+            emitted_strata = False
             for tag in strata_tags:
-                badge_label, badge_cls = STRATA_BADGE_LABELS.get(
+                if tag in seen_section_strata:
+                    continue
+                seen_section_strata.add(tag)
+                emitted_strata = True
+                badge_label, strata_cls = STRATA_BADGE_LABELS.get(
                     tag, (tag, "strata-baseline")
                 )
                 left_parts.append(
-                    f' <span class="strata-badge {badge_cls}" data-stratum="{std_html.escape(tag)}">{std_html.escape(badge_label)}</span>'
+                    f'<span class="strata-badge {strata_cls}" data-stratum="{std_html.escape(tag)}">{std_html.escape(badge_label)}</span>'
                 )
-            if detail_url:
-                esc_detail = std_html.escape(detail_url, quote=True)
-                left_parts.append(
-                    f' <a class="detail-link" href="{esc_detail}" target="_blank" rel="noopener">🌐 详情页原文 ({std_html.escape(detail_url)})</a>'
-                )
-            left_parts.append("</div>")
 
             has_att_link = False
             att_entries_raw = item.get("attachments")
@@ -596,85 +680,71 @@ def render_source_verification_html(
                     else []
                 )
             )
-            for att_entry in att_entries:
+            for att_entry in att_entries[:2]:
                 att_u = (att_entry.get("url") or "").strip()
                 if not att_u:
                     continue
                 has_att_link = True
                 att_n = (att_entry.get("name") or "").strip()
-                att_m = (att_entry.get("media_type") or "").strip()
                 esc_att = std_html.escape(att_u, quote=True)
-                label = std_html.escape(att_n or original_file or "下载附件原件")
-                media_info = (
-                    f' <span class="media-badge">{std_html.escape(att_m)}</span>'
-                    if att_m
-                    else ""
-                )
+                label = std_html.escape(att_n or original_file or "附件")
                 left_parts.append(
-                    f'<div class="attachment-box">'
-                    f'📥 <strong>附件原件下载</strong>: <a class="attachment-link" href="{esc_att}" target="_blank" rel="noopener">{label}</a>{media_info}'
-                    f"</div>"
+                    f' <a class="attachment-link" href="{esc_att}">{label}</a>'
                 )
 
-            payload_str = _truncate_payload_aligned(raw_payload, markdown, 1500)
-            if not has_att_link and len(payload_str) < 20:
-                payload_str = _truncate_text(
-                    f"<!-- Source: {detail_url} | Title: {title} -->\n{markdown}",
-                    1500,
-                )
+            if not has_att_link:
+                left_parts.append("<pre><code>⏳</code></pre>")
 
-            if len(payload_str) >= 20:
-                p_lstrip = payload_str.lstrip().lower()
-                if p_lstrip.startswith("<?xml"):
-                    detected_payload_mime = "application/xml"
-                elif p_lstrip.startswith(("<", "<!doctype")):
-                    detected_payload_mime = "text/html"
-                elif p_lstrip.startswith(("{", "[")):
-                    detected_payload_mime = "application/json"
-                else:
-                    detected_payload_mime = original_media_type or "text/html"
-                media_label = std_html.escape(detected_payload_mime)
-                left_parts.append(
-                    f'<div class="payload-label">📄 实际请求 Payload 原文 (<code>{media_label}</code>)</div>'
-                    f'<pre class="payload-box"><code>{std_html.escape(payload_str)}</code></pre>'
+            if idx == 1 and active_cls:
+                meta_obj = {
+                    "title": None if title == "—" else title,
+                    "doc_number": None if doc_number == "—" else doc_number,
+                    "issuer": None if issuer == "—" else issuer,
+                    "published_at": None if published_at == "—" else published_at,
+                    "effective_at": None if effective_at == "—" else effective_at,
+                }
+                json_lines: list[str] = ["{"]
+                meta_items = list(meta_obj.items())
+                for m_idx, (mk, mv) in enumerate(meta_items):
+                    comma = "," if m_idx < len(meta_items) - 1 else ""
+                    key_span = f'<span class="json-key">{std_html.escape(json.dumps(mk, ensure_ascii=False))}</span>'
+                    if mv is None:
+                        val_span = '<span class="json-null">null</span>'
+                    else:
+                        val_span = f'<span class="json-string">{std_html.escape(json.dumps(mv, ensure_ascii=False))}</span>'
+                    json_lines.append(f"  {key_span}: {val_span}{comma}")
+                json_lines.append("}")
+                meta_block = (
+                    f'<div class="doc-meta-card doc-meta-json">{"\n".join(json_lines)}</div>'
                 )
-
-            md_str = _truncate_text(markdown, 1500)
-            if len(md_str) < 20:
-                md_str = f"# {title}\n\n{md_str} (Source: {source_id})"
+                right_pre_html = '<pre class="markdown-box"><code>⏳</code></pre>'
+            else:
+                meta_block = std_html.escape(title)
+                right_pre_html = "<pre><code>⏳</code></pre>"
 
             right_parts: list[str] = [
-                '<div class="doc-meta-grid">'
-                f"<div><strong>标题</strong>: {std_html.escape(title)}</div>"
-                f"<div><strong>文号</strong>: {std_html.escape(doc_number)} · "
-                f"<strong>发布机关</strong>: {std_html.escape(issuer)} · "
-                f"<strong>发布日期</strong>: {std_html.escape(published_at)} · "
-                f"<strong>生效日期</strong>: {std_html.escape(effective_at)}</div>"
-                "</div>",
-                '<div class="md-label">📝 解析交付 Markdown</div>',
-                f'<pre class="markdown-box"><code>{std_html.escape(md_str)}</code></pre>',
+                meta_block,
+                right_pre_html,
             ]
 
+            left_td_attr = ' class="col-left"' if (active_cls or emitted_strata) else ""
+            right_td_attr = ' class="col-right"' if (idx == 1 and active_cls) else ""
             row_blocks.append(
-                '<tr class="sample-row">\n'
-                f'  <td class="col-left">{"".join(left_parts)}</td>\n'
-                f'  <td class="col-right">{"".join(right_parts)}</td>\n'
-                "</tr>"
+                f"<tr><td{left_td_attr}>{''.join(left_parts)}</td><td{right_td_attr}>{''.join(right_parts)}</td></tr>"
             )
 
-        meta_chips: list[str] = []
-        if document_type:
-            meta_chips.append(
-                f'<span class="meta-chip">资料类型: {std_html.escape(document_type)}</span>'
-            )
-        if priority:
-            meta_chips.append(
-                f'<span class="meta-chip">优先级: {std_html.escape(priority)}</span>'
-            )
-        if adapter:
-            meta_chips.append(
-                f'<span class="meta-chip">适配器: <code>{std_html.escape(adapter)}</code></span>'
-            )
+        bc_items = [
+            std_html.escape(x)
+            for x in (continent, jurisdiction, subcategory)
+            if x and x != "—"
+        ]
+        breadcrumb_html = (
+            f'<div class="source-breadcrumb">{" › ".join(bc_items)}</div>'
+            if bc_items
+            else ""
+        )
+
+        entry_link_html = ""
         if entry_url:
             raw_urls = [
                 u.strip().rstrip(",")
@@ -682,372 +752,104 @@ def render_source_verification_html(
                 for u in line.split()
                 if u.strip().rstrip(",").startswith(("http://", "https://"))
             ]
-            if len(raw_urls) == 1:
+            if raw_urls:
                 esc_entry = std_html.escape(raw_urls[0], quote=True)
-                meta_chips.append(
-                    f'<a class="meta-chip meta-link" href="{esc_entry}" target="_blank" rel="noopener">官方入口 ↗</a>'
-                )
-            elif len(raw_urls) > 1:
-                for idx, u in enumerate(raw_urls, 1):
-                    esc_entry = std_html.escape(u, quote=True)
-                    label = f"官方入口 {idx} ↗"
-                    if "LawSearchLaw" in u:
-                        label = "法规检索 ↗"
-                    elif "LawSearchAgree" in u:
-                        label = "条约协定 ↗"
-                    meta_chips.append(
-                        f'<a class="meta-chip meta-link" href="{esc_entry}" target="_blank" rel="noopener">{label}</a>'
-                    )
-        meta_bar_html = (
-            f'<div class="source-meta-bar">{"".join(meta_chips)}</div>'
-            if meta_chips
-            else ""
-        )
+                entry_link_html = f'<a class="meta-link" href="{esc_entry}" target="_blank" rel="noopener">官方入口 ↗</a>'
 
         rows_html = "\n".join(row_blocks)
         main_blocks.append(
-            f'<section id="{std_html.escape(source_id)}" class="source-section">\n'
-            f'  <div class="section-header">\n'
-            f'    <div class="section-title-wrap">\n'
-            f'      <h2><span class="source-id">{std_html.escape(source_id)}</span> — {std_html.escape(source_name)}</h2>\n'
-            f"      {meta_bar_html}\n"
-            f"    </div>\n"
-            f'    <span class="status-badge {badge_class}">{badge_text} · 样本数 {len(normalized_items)}/{max_items_per_source}</span>\n'
-            f"  </div>\n"
-            f'  <table class="comparison-table">\n'
-            f"    <thead>\n"
-            f"      <tr>\n"
-            f'        <th class="col-left">左栏：实际请求 Payload 原文 / 附件下载</th>\n'
-            f'        <th class="col-right">右栏：解析交付 Markdown</th>\n'
-            f"      </tr>\n"
-            f"    </thead>\n"
-            f"    <tbody>\n"
-            f"{rows_html}\n"
-            f"    </tbody>\n"
-            f"  </table>\n"
-            f"</section>"
+            f'<section id="{std_html.escape(source_id)}" class="source-section{active_cls}">\n'
+            f'<div class="section-header"><div class="section-title-wrap">'
+            f"{breadcrumb_html}"
+            f'<h2><span class="source-id">{std_html.escape(source_id)}</span> {std_html.escape(source_name)}</h2>'
+            f'</div><div class="header-actions">{entry_link_html}'
+            f'<span class="status-badge {badge_class}">{badge_label_text} ({len(normalized_items)})</span></div></div>\n'
+            f'<table class="comparison-table"><thead><tr>'
+            f"<th>请求 Payload / 附件</th><th>解析 Markdown</th>"
+            f"</tr></thead><tbody>\n{rows_html}\n</tbody></table></section>"
         )
 
     toc_html = "\n        ".join(toc_blocks)
     sections_html = "\n\n      ".join(main_blocks)
-    cache_json = json.dumps(cache_map, ensure_ascii=False).replace("</", "<\\/")
+    cache_json = json.dumps(
+        cache_map, ensure_ascii=False, separators=(",", ":")
+    ).replace("</", "<\\/")
 
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>多法域信源实网采集核验样本台账 (Source Verification Samples)</title>
+  <title>信源核验样本</title>
   <style>
     :root {{
-      --bg: #f8fafc;
-      --sidebar-bg: #ffffff;
-      --card-bg: #ffffff;
-      --border: #e2e8f0;
-      --text: #0f172a;
-      --muted: #475569;
-      --accent: #2563eb;
-      --code-bg: #0f172a;
-      --code-text: #f8fafc;
-      --md-bg: #f1f5f9;
-      --md-text: #0f172a;
+      --bg: #f8fafc; --sidebar-bg: #ffffff; --card-bg: #ffffff;
+      --border: #e2e8f0; --border-strong: #cbd5e1;
+      --text: #0f172a; --muted: #64748b;
+      --accent: #2563eb; --accent-soft: #eff6ff; --accent-border: #bfdbfe;
+      --code-bg: #0f172a; --code-text: #f8fafc; --md-bg: #ffffff; --md-text: #0f172a;
     }}
     * {{ box-sizing: border-box; }}
-    html {{ scroll-behavior: smooth; }}
-    body {{
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.55;
-    }}
-    .gitbook-layout {{
-      display: flex;
-      min-height: 100vh;
-      align-items: flex-start;
-    }}
-    aside.gitbook-sidebar {{
-      position: sticky;
-      top: 0;
-      width: 330px;
-      min-width: 330px;
-      height: 100vh;
-      overflow-y: auto;
-      background: var(--sidebar-bg);
-      border-right: 1px solid var(--border);
-      padding: 18px 14px 28px 14px;
-      z-index: 20;
-    }}
-    .sidebar-brand {{
-      padding: 0 6px 12px 6px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 12px;
-    }}
-    .sidebar-brand h1 {{
-      margin: 0 0 4px 0;
-      font-size: 15px;
-      line-height: 1.35;
-    }}
-    .sidebar-brand p {{
-      margin: 0;
-      font-size: 12px;
-      color: var(--muted);
-    }}
-    .toc-group-continent {{
-      margin-top: 14px;
-      padding: 4px 6px;
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--text);
-      text-transform: uppercase;
-      letter-spacing: 0.02em;
-    }}
-    .toc-group-jurisdiction {{
-      margin-top: 6px;
-      padding: 3px 6px 3px 12px;
-      font-size: 12px;
-      font-weight: 600;
-      color: #1e293b;
-    }}
-    .toc-group-subcat {{
-      padding: 2px 6px 2px 18px;
-      font-size: 11px;
-      color: var(--muted);
-    }}
-    a.toc-link {{
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 8px 5px 18px;
-      margin: 1px 0;
-      border-radius: 6px;
-      color: var(--text);
-      text-decoration: none;
-      font-size: 12px;
-    }}
-    a.toc-link:hover {{
-      background: #eff6ff;
-      color: var(--accent);
-    }}
-    .toc-status {{
-      font-size: 10px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      padding: 1px 4px;
-      border-radius: 4px;
-      font-weight: 700;
-      flex-shrink: 0;
-    }}
-    .toc-id {{
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-weight: 700;
-      flex-shrink: 0;
-    }}
-    .toc-name {{
-      flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }}
-    .toc-count {{
-      font-size: 11px;
-      color: var(--muted);
-      background: #f1f5f9;
-      padding: 0 6px;
-      border-radius: 999px;
-      flex-shrink: 0;
-    }}
-    main.gitbook-main {{
-      flex: 1;
-      min-width: 0;
-      padding: 24px 32px 48px 32px;
-    }}
-    header.page-header {{
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 20px 24px;
-      margin-bottom: 24px;
-      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-    }}
-    header.page-header h1 {{
-      margin: 0 0 8px 0;
-      font-size: 22px;
-    }}
-    header.page-header p {{
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-    }}
-    h2.continent-heading {{
-      margin: 28px 0 12px 0;
-      padding-bottom: 8px;
-      border-bottom: 2px solid var(--border);
-      font-size: 20px;
-    }}
-    h3.jurisdiction-heading {{
-      margin: 20px 0 10px 0;
-      font-size: 17px;
-      color: #1e293b;
-    }}
-    h4.subcat-heading {{
-      margin: 14px 0 10px 0;
-      font-size: 14px;
-      color: var(--muted);
-    }}
-    section.source-section {{
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      margin-bottom: 28px;
-      overflow: hidden;
-      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
-      scroll-margin-top: 16px;
-    }}
-    .section-header {{
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 16px;
-      padding: 14px 20px;
-      background: #f1f5f9;
-      border-bottom: 1px solid var(--border);
-    }}
-    .section-header h2 {{
-      margin: 0;
-      font-size: 17px;
-    }}
-    .source-meta-bar {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 6px;
-    }}
-    .meta-chip {{
-      font-size: 12px;
-      color: var(--muted);
-      background: #ffffff;
-      border: 1px solid var(--border);
-      padding: 1px 8px;
-      border-radius: 4px;
-      text-decoration: none;
-    }}
-    .meta-link {{
-      color: var(--accent);
-      font-weight: 500;
-    }}
-    .source-note {{
-      padding: 10px 20px;
-      background: #f8fafc;
-      border-bottom: 1px solid var(--border);
-      font-size: 12px;
-      color: var(--muted);
-    }}
-    .status-badge {{
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 600;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }}
+    body {{ margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }}
+    .gitbook-layout {{ display: flex; min-block-size: 100dvh; align-items: flex-start; }}
+    aside.gitbook-sidebar {{ position: sticky; inset-block-start: 0; inline-size: 300px; min-inline-size: 300px; block-size: 100dvh; overflow-y: auto; scrollbar-gutter: stable; overscroll-behavior: contain; background: var(--sidebar-bg); border-inline-end: 1px solid var(--border); padding: 14px 12px 24px; z-index: 20; }}
+    .sidebar-brand {{ padding: 0 4px 10px; border-block-end: 1px solid var(--border); margin-block-end: 8px; }}
+    .toc-search-input {{ inline-size: 100%; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: 6px; font-size: 12px; background: #f8fafc; color: var(--text); }}
+    .toc-search-input:focus {{ outline: 2px solid var(--accent); background: #fff; }}
+    .toc-group-continent {{ margin-block-start: 12px; padding: 4px 6px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; }}
+    .toc-group-jurisdiction {{ margin-block-start: 4px; padding: 3px 6px 3px 10px; font-size: 12px; font-weight: 600; color: var(--text); }}
+    .toc-group-subcat {{ padding: 2px 6px 2px 14px; font-size: 11px; color: var(--muted); }}
+    a.toc-link {{ display: flex; align-items: center; gap: 6px; padding: 5px 8px 5px 14px; margin: 1px 0; border-radius: 6px; color: var(--text); text-decoration: none; font-size: 12px; }}
+    a.toc-link:hover {{ background: var(--accent-soft); color: var(--accent); }}
+    a.toc-link.is-active {{ background: var(--accent-soft); color: var(--accent); font-weight: 600; }}
+    .toc-id {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; color: var(--muted); flex-shrink: 0; }}
+    a.toc-link.is-active .toc-id {{ color: var(--accent); }}
+    .toc-name {{ flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    main.gitbook-main {{ flex: 1; min-inline-size: 0; padding: 16px 24px 40px; }}
+    .source-section {{ display: none; background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; overflow: clip; container-type: inline-size; }}
+    .source-section.is-active {{ display: block; }}
+    .section-header {{ display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 20px; background: #fff; border-block-end: 1px solid var(--border); }}
+    .source-breadcrumb {{ font-size: 11px; color: var(--muted); margin-block-end: 2px; }}
+    .section-header h2 {{ margin: 0; font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; }}
+    .source-id {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; color: var(--accent); background: var(--accent-soft); padding: 1px 7px; border-radius: 5px; }}
+    .header-actions {{ display: flex; align-items: center; gap: 8px; flex-shrink: 0; }}
+    .meta-link {{ font-size: 12px; color: var(--accent); text-decoration: none; font-weight: 500; }}
+    .meta-link:hover {{ text-decoration: underline; }}
+    .status-badge {{ padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }}
     .badge-complete {{ background: #dcfce7; color: #166534; }}
     .badge-partial {{ background: #fef9c3; color: #854d0e; }}
-    table.comparison-table {{
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
-    }}
-    table.comparison-table th,
-    table.comparison-table td {{
-      width: 50%;
-      vertical-align: top;
-      padding: 14px 18px;
-      border-bottom: 1px solid var(--border);
-      word-break: break-word;
-    }}
-    table.comparison-table th {{
-      background: #f8fafc;
-      text-align: left;
-      font-size: 13px;
-      color: var(--muted);
-      border-bottom: 2px solid var(--border);
-    }}
-    table.comparison-table td.col-left {{
-      border-right: 1px solid var(--border);
-    }}
-    .cell-meta, .doc-meta-grid {{
-      font-size: 13px;
-      margin-bottom: 10px;
-    }}
-    .sample-index {{
-      display: inline-block;
-      padding: 1px 7px;
-      border-radius: 4px;
-      background: #e2e8f0;
-      font-weight: 700;
-      font-size: 12px;
-    }}
-    .strata-badge {{
-      display: inline-block;
-      padding: 1px 6px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 600;
-      margin-left: 4px;
-    }}
+    table.comparison-table, table.comparison-table thead, table.comparison-table tbody {{ display: block; inline-size: 100%; }}
+    table.comparison-table tr {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; inline-size: 100%; }}
+    table.comparison-table tbody tr:not(.is-expanded) {{ block-size: 380px; }}
+    table.comparison-table th, table.comparison-table td {{ inline-size: 100%; padding: 14px 18px; border-block-end: 1px solid var(--border); word-break: break-word; min-inline-size: 0; }}
+    table.comparison-table th {{ background: #f8fafc; text-align: start; font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 18px; }}
+    td.col-left, td.col-right, table.comparison-table tbody td {{ display: flex; flex-direction: column; min-block-size: 0; block-size: 100%; inline-size: 100%; }}
+    table.comparison-table td.col-left {{ border-inline-end: 1px solid var(--border); }}
+    .cell-meta {{ display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; margin-block-end: 8px; flex-shrink: 0; }}
+    .sample-index {{ display: inline-block; padding: 1px 7px; border-radius: 4px; background: #0f172a; color: #fff; font-weight: 700; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }}
+    .strata-badge {{ display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }}
     .strata-p5, .strata-p95 {{ background: #e0e7ff; color: #3730a3; }}
     .strata-warning {{ background: #fef3c7; color: #92400e; }}
     .strata-missing-doc, .strata-missing-eff {{ background: #fce7f3; color: #9d174d; }}
     .strata-baseline {{ background: #dcfce7; color: #166534; }}
-    .attachment-box {{
-      margin: 8px 0 10px 0;
-      padding: 8px 12px;
-      background: #eff6ff;
-      border: 1px solid #bfdbfe;
-      border-radius: 6px;
-      font-size: 13px;
-    }}
-    .attachment-link {{
-      color: var(--accent);
-      font-weight: 600;
-      text-decoration: none;
-    }}
+    .doc-meta-card {{ background: #f0f7ff; border: 1px solid #bfdbfe; border-inline-start: 3px solid var(--accent); border-radius: 6px; padding: 8px 12px; margin-block-end: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; flex-shrink: 0; inline-size: 100%; color: #475569; }}
+    .json-key {{ color: #0369a1; font-weight: 600; }}
+    .json-string {{ color: #15803d; }}
+    .json-null {{ color: #94a3b8; font-style: italic; }}
+    .attachment-box {{ margin: 0 0 8px; padding: 6px 10px; background: var(--accent-soft); border-radius: 6px; font-size: 12px; display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }}
+    .attachment-link {{ color: var(--accent); font-weight: 600; text-decoration: none; }}
     .attachment-link:hover {{ text-decoration: underline; }}
-    .media-badge {{
-      display: inline-block;
-      padding: 1px 6px;
-      border-radius: 4px;
-      background: #dbeafe;
-      color: #1e40af;
-      font-size: 11px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    }}
-    .payload-label, .md-label {{
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--muted);
-      margin-bottom: 4px;
-    }}
-    pre.payload-box, pre.markdown-box {{
-      margin: 0;
-      padding: 10px 12px;
-      border-radius: 6px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      line-height: 1.45;
-      max-height: 300px;
-      overflow: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }}
-    pre.payload-box {{
-      background: var(--code-bg);
-      color: var(--code-text);
-    }}
-    pre.markdown-box {{
-      background: var(--md-bg);
-      color: var(--md-text);
-      border: 1px solid var(--border);
+    td pre, pre.payload-box, pre.markdown-box {{ flex: 1; min-block-size: 0; inline-size: 100%; margin: 0; padding: 12px 14px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.55; max-block-size: 180px; overflow: hidden; white-space: pre-wrap; word-break: break-word; }}
+    table.comparison-table tbody tr:not(.is-expanded) pre {{ max-block-size: none; }}
+    td pre.is-expanded, pre.payload-box.is-expanded, pre.markdown-box.is-expanded {{ max-block-size: none; overflow-x: auto; }}
+    td:first-child pre, pre.payload-box {{ background: var(--code-bg); color: var(--code-text); }}
+    td:last-child pre, pre.markdown-box {{ background: var(--md-bg); color: var(--md-text); border: 1px solid var(--border); }}
+    .expand-toggle-btn {{ display: inline-flex; align-items: center; justify-content: center; inline-size: 100%; margin-block-start: 8px; padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: 6px; background: #fff; color: var(--accent); font-size: 12px; font-weight: 500; cursor: pointer; flex-shrink: 0; }}
+    .expand-toggle-btn:hover {{ background: var(--accent-soft); border-color: var(--accent); }}
+    @container (width < 680px) {{
+      table.comparison-table tr {{ grid-template-columns: minmax(0, 1fr); }}
+      table.comparison-table tbody tr:not(.is-expanded) {{ block-size: auto; }}
+      table.comparison-table thead {{ display: none; }}
     }}
   </style>
 </head>
@@ -1055,8 +857,7 @@ def render_source_verification_html(
   <div class="gitbook-layout">
     <aside class="gitbook-sidebar">
       <div class="sidebar-brand">
-        <h1>核验样本目录 (Source TOC)</h1>
-        <p>共 {total_sources} 个信源 · {total_samples} 条实网样本</p>
+        <input id="toc-search-input" class="toc-search-input" type="search" placeholder="搜索 dd-xxx / 名称..." aria-label="搜索信源">
       </div>
       <nav class="gitbook-toc">
         {toc_html}
@@ -1064,15 +865,292 @@ def render_source_verification_html(
     </aside>
 
     <main class="gitbook-main">
-      <header class="page-header">
-        <h1>多法域信源实网采集核验样本台账 (Source Verification Samples)</h1>
-        <p>本独立 HTML 双栏台账由唯一事实源 <code>source-adaptation-matrix.csv</code> 单向实时同步生成目录结构与源站元数据，并与 <code>source-adaptation-matrix.md</code> 保持章节顺序完全一致；样本数据统一由测试数据库 <code>wlh_test</code> 与对象存储桶 <code>wlh-archive-test</code>（<code>uv run python -m wlh.runbook_samples</code>）生成。共收录 <strong>{total_sources}</strong> 个已跑通（<code>[x]</code>）及部分跑通（<code>[~]</code>）信源、合计 <strong>{total_samples}</strong> 条核验样本（每源最多 {max_items_per_source} 条）。左栏展示实际采集请求 Payload 原文或官方附件下载链接，右栏展示解析清洗后的交付 Markdown 全文片段。</p>
-      </header>
-
       {sections_html}
     </main>
   </div>
   <script id="wlh-samples-cache" type="application/json">{cache_json}</script>
+  <script>
+  (() => {{
+    const loopbackHost = [127, 0, 0, 1].join(".");
+    const fallbackOrigin = "http://" + loopbackHost + ":18088";
+    const apiOrigins = window.location.protocol === "file:" ? [fallbackOrigin] : ["", fallbackOrigin];
+    const loadedState = new Set();
+    const sections = Array.from(document.querySelectorAll("section.source-section"));
+    const tocLinks = Array.from(document.querySelectorAll("a.toc-link"));
+    const searchInput = document.getElementById("toc-search-input");
+    const cacheEl = document.getElementById("wlh-samples-cache");
+    const samplesCache = cacheEl ? JSON.parse(cacheEl.textContent || "{{}}") : {{}};
+    const upgradedSections = new Set();
+    const strataMeta = {{
+      p5_shortest: ["P5最短", "strata-p5"],
+      p95_longest: ["P95最长", "strata-p95"],
+      accept_with_warning: ["告警路由", "strata-warning"],
+      missing_doc_number: ["缺文号", "strata-missing-doc"],
+      missing_effective_at: ["缺生效日", "strata-missing-eff"],
+      baseline: ["基线样本", "strata-baseline"],
+    }};
+
+    let visibleSourceIds = sections.map((s) => s.id);
+    let currentSourceId = sections[0] ? sections[0].id : "";
+
+    function renderHighlightedJson(container, obj) {{
+      container.textContent = "";
+      container.appendChild(document.createTextNode("{{\\n"));
+      const entries = Object.entries(obj);
+      entries.forEach(([k, v], i) => {{
+        container.appendChild(document.createTextNode("  "));
+        const kSpan = document.createElement("span");
+        kSpan.className = "json-key";
+        kSpan.textContent = JSON.stringify(k);
+        container.appendChild(kSpan);
+        container.appendChild(document.createTextNode(": "));
+        const vSpan = document.createElement("span");
+        if (v === null || v === undefined) {{
+          vSpan.className = "json-null";
+          vSpan.textContent = "null";
+        }} else {{
+          vSpan.className = "json-string";
+          vSpan.textContent = JSON.stringify(v);
+        }}
+        container.appendChild(vSpan);
+        container.appendChild(document.createTextNode(i < entries.length - 1 ? ",\\n" : "\\n"));
+      }});
+      container.appendChild(document.createTextNode("}}"));
+    }}
+
+    function bindRowExpandToggles(row) {{
+      const btns = Array.from(row.querySelectorAll(".expand-toggle-btn"));
+      btns.forEach((btn) => {{
+        if (btn.dataset.bound === "1") return;
+        btn.dataset.bound = "1";
+        btn.addEventListener("click", () => {{
+          const pres = Array.from(row.querySelectorAll("pre"));
+          const nextExpanded = !row.classList.contains("is-expanded");
+          row.classList.toggle("is-expanded", nextExpanded);
+          pres.forEach((p) => p.classList.toggle("is-expanded", nextExpanded));
+          Array.from(row.querySelectorAll(".expand-toggle-btn")).forEach((b) => {{
+            b.textContent = nextExpanded ? "收起全文 ▲" : "展开全文 ▼";
+          }});
+        }});
+      }});
+    }}
+
+    function appendPreWithToggle(td, pre, cls) {{
+      pre.className = cls;
+      td.appendChild(pre);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "expand-toggle-btn";
+      btn.textContent = "展开全文 ▼";
+      td.appendChild(btn);
+    }}
+
+    function upgradeSectionDomFromCache(sourceId) {{
+      if (upgradedSections.has(sourceId)) return;
+      const sec = document.getElementById(sourceId);
+      if (!sec) return;
+      upgradedSections.add(sourceId);
+      const cachedItems = Array.isArray(samplesCache[sourceId]) ? samplesCache[sourceId] : [];
+      const rows = Array.from(sec.querySelectorAll("tbody tr"));
+      rows.forEach((row, idx) => {{
+        const item = cachedItems[idx] || {{}};
+        const tds = row.querySelectorAll("td");
+        if (tds.length < 2) return;
+        const [leftTd, rightTd] = tds;
+        leftTd.classList.add("col-left");
+        rightTd.classList.add("col-right");
+
+        const leftPre = leftTd.querySelector("pre");
+        const attLinks = Array.from(leftTd.querySelectorAll("a.attachment-link"));
+        const cellMeta = document.createElement("div");
+        cellMeta.className = "cell-meta";
+        const idxBadge = document.createElement("span");
+        idxBadge.className = "sample-index";
+        idxBadge.textContent = `#${{idx + 1}}`;
+        cellMeta.appendChild(idxBadge);
+
+        const strata = Array.isArray(item.sampling_strata) ? [...item.sampling_strata] : [];
+        if (!item.doc_number && !strata.includes("missing_doc_number")) strata.push("missing_doc_number");
+        if (!item.effective_at && !strata.includes("missing_effective_at")) strata.push("missing_effective_at");
+        if (strata.length === 0) strata.push("baseline");
+        strata.forEach((tag) => {{
+          const [label, cls] = strataMeta[tag] || [tag, "strata-baseline"];
+          const b = document.createElement("span");
+          b.className = `strata-badge ${{cls}}`;
+          b.setAttribute("data-stratum", tag);
+          b.textContent = label;
+          cellMeta.appendChild(b);
+        }});
+
+        if (item.detail_url) {{
+          const dLink = document.createElement("a");
+          dLink.className = "meta-link";
+          dLink.href = item.detail_url;
+          dLink.target = "_blank";
+          dLink.rel = "noopener";
+          dLink.textContent = "源站详情 ↗";
+          cellMeta.appendChild(dLink);
+        }}
+
+        leftTd.textContent = "";
+        leftTd.appendChild(cellMeta);
+        if (attLinks.length > 0) {{
+          const attBox = document.createElement("div");
+          attBox.className = "attachment-box";
+          attLinks.forEach((a) => {{
+            a.target = "_blank";
+            a.rel = "noopener";
+            attBox.appendChild(a);
+          }});
+          leftTd.appendChild(attBox);
+        }}
+        if (leftPre) {{
+          appendPreWithToggle(leftTd, leftPre, "payload-box");
+        }}
+
+        const rightPre = rightTd.querySelector("pre");
+        const card = document.createElement("div");
+        card.className = "doc-meta-card doc-meta-json";
+        const metaObj = {{
+          title: item.title ?? null,
+          doc_number: item.doc_number ?? null,
+          issuer: item.issuer ?? null,
+          published_at: item.published_at ?? null,
+          effective_at: item.effective_at ?? null,
+        }};
+        renderHighlightedJson(card, metaObj);
+
+        rightTd.textContent = "";
+        rightTd.appendChild(card);
+        if (rightPre) {{
+          appendPreWithToggle(rightTd, rightPre, "markdown-box");
+        }}
+        bindRowExpandToggles(row);
+      }});
+    }}
+
+    async function fetchSamplesJson(sourceId) {{
+      let lastErr = null;
+      for (const origin of apiOrigins) {{
+        try {{
+          const resp = await fetch(`${{origin}}/api/samples?source_id=${{encodeURIComponent(sourceId)}}&full=1`);
+          if (resp.ok) return await resp.json();
+          lastErr = new Error(`HTTP ${{resp.status}}`);
+        }} catch (e) {{
+          lastErr = e;
+        }}
+      }}
+      throw lastErr || new Error("fetch_failed");
+    }}
+
+    async function loadSourceSamples(sourceId) {{
+      const sec = document.getElementById(sourceId);
+      if (!sec) return;
+      upgradeSectionDomFromCache(sourceId);
+      if (loadedState.has(sourceId)) return;
+      loadedState.add(sourceId);
+      try {{
+        const data = await fetchSamplesJson(sourceId);
+        const items = Array.isArray(data.items) ? data.items : [];
+        const rows = sec.querySelectorAll("tbody tr");
+        rows.forEach((row, idx) => {{
+          const item = items[idx];
+          if (!item) return;
+          const tds = row.querySelectorAll("td");
+          let pCode = tds[0] ? tds[0].querySelector("pre code") : null;
+          if (!pCode && tds[0] && item.raw_payload) {{
+            const pre = document.createElement("pre");
+            pCode = document.createElement("code");
+            pre.appendChild(pCode);
+            appendPreWithToggle(tds[0], pre, "payload-box");
+            bindRowExpandToggles(row);
+          }}
+          const mCode = tds[1] ? tds[1].querySelector("pre code") : null;
+          if (pCode) pCode.textContent = item.raw_payload || "（纯附件样本，请点击上方附件链接查看）";
+          if (mCode) mCode.textContent = item.markdown || "";
+        }});
+      }} catch (err) {{
+        loadedState.delete(sourceId);
+        const rows = sec.querySelectorAll("tbody tr");
+        rows.forEach((row) => {{
+          const tds = row.querySelectorAll("td");
+          const pCode = tds[0] ? tds[0].querySelector("pre code") : null;
+          const mCode = tds[1] ? tds[1].querySelector("pre code") : null;
+          const hint = "⚠️ 未连接实时样本服务，请运行: uv run python -m wlh.runbook_samples --serve";
+          if (pCode && pCode.textContent.startsWith("⏳")) pCode.textContent = hint;
+          if (mCode && mCode.textContent.startsWith("⏳")) mCode.textContent = hint;
+        }});
+      }}
+    }}
+
+    function selectSourcePage(sourceId, updateHash = true) {{
+      const targetSec = document.getElementById(sourceId);
+      if (!targetSec) return;
+      currentSourceId = sourceId;
+      sections.forEach((sec) => {{
+        sec.classList.toggle("is-active", sec.id === sourceId);
+      }});
+      tocLinks.forEach((link) => {{
+        const isMatch = link.getAttribute("href") === `#${{sourceId}}`;
+        link.classList.toggle("is-active", isMatch);
+        if (isMatch) {{
+          link.scrollIntoView({{ block: "nearest" }});
+        }}
+      }});
+      if (updateHash && window.history && window.history.replaceState) {{
+        window.history.replaceState(null, "", `#${{sourceId}}`);
+      }}
+      window.scrollTo({{ top: 0, behavior: "instant" }});
+      loadSourceSamples(sourceId);
+    }}
+
+    function applySidebarFilter() {{
+      const q = (searchInput ? searchInput.value : "").trim().toLowerCase();
+      visibleSourceIds = [];
+      tocLinks.forEach((link) => {{
+        const rawHref = (link.getAttribute("href") || "").replace(/^#/, "");
+        const sid = rawHref.toLowerCase();
+        const text = (link.textContent || "").toLowerCase();
+        const show = !q || sid.includes(q) || text.includes(q);
+        link.style.display = show ? "" : "none";
+        if (show && rawHref) {{
+          visibleSourceIds.push(rawHref);
+        }}
+      }});
+      if (visibleSourceIds.length > 0 && !visibleSourceIds.includes(currentSourceId)) {{
+        selectSourcePage(visibleSourceIds[0], true);
+      }}
+    }}
+
+    if (searchInput) {{
+      searchInput.addEventListener("input", applySidebarFilter);
+    }}
+
+    tocLinks.forEach((link) => {{
+      link.addEventListener("click", (ev) => {{
+        const href = link.getAttribute("href") || "";
+        if (href.startsWith("#")) {{
+          ev.preventDefault();
+          selectSourcePage(href.slice(1), true);
+        }}
+      }});
+    }});
+
+    window.addEventListener("hashchange", () => {{
+      const h = (window.location.hash || "").replace(/^#/, "");
+      if (h && document.getElementById(h)) {{
+        selectSourcePage(h, false);
+      }}
+    }});
+
+    const initialHash = (window.location.hash || "").replace(/^#/, "");
+    if (initialHash && document.getElementById(initialHash)) {{
+      selectSourcePage(initialHash, false);
+    }} else if (currentSourceId) {{
+      selectSourcePage(currentSourceId, false);
+    }}
+  }})();
+  </script>
 </body>
 </html>
 """
@@ -1098,11 +1176,23 @@ def _parse_existing_html_samples(html_path: Path) -> dict[str, list[dict[str, An
                 out: dict[str, list[dict[str, Any]]] = {}
                 for k, v in cast(dict[str, Any], raw_data).items():
                     if isinstance(v, list):
-                        out[k] = [
-                            _normalize_item(cast(Mapping[str, Any], item))
-                            for item in cast(list[Any], v)
-                            if isinstance(item, Mapping)
-                        ]
+                        restored_list: list[dict[str, Any]] = []
+                        for item in cast(list[Any], v):
+                            if not isinstance(item, Mapping):
+                                continue
+                            norm = _normalize_item(cast(Mapping[str, Any], item))
+                            strata = list(cast(list[str], norm.get("sampling_strata") or []))
+                            doc_num_s = str(norm.get("doc_number") or "").strip()
+                            if doc_num_s in {"", "—", "-"} and "missing_doc_number" not in strata:
+                                strata.append("missing_doc_number")
+                            eff_s = str(norm.get("effective_at") or "").strip()
+                            if eff_s in {"", "—", "-"} and "missing_effective_at" not in strata:
+                                strata.append("missing_effective_at")
+                            if not strata:
+                                strata.append("baseline")
+                            norm["sampling_strata"] = strata
+                            restored_list.append(norm)
+                        out[k] = restored_list
                 return out
         except Exception:
             pass
@@ -1179,6 +1269,7 @@ def _extract_payload_snippet(
     mime_type: str | None,
     content_xpath: str | None,
     charset: str | None = None,
+    max_chars: int = 12000,
 ) -> str:
     if raw_bytes.startswith(b"%PDF"):
         return ""
@@ -1190,7 +1281,7 @@ def _extract_payload_snippet(
                         (".xml", ".html", ".htm", ".json", ".txt")
                     ) and not name.startswith("word/"):
                         inner = zf.read(name).decode("utf-8", errors="replace")
-                        snippet = _format_multiline_payload(inner)[:12000]
+                        snippet = _format_multiline_payload(inner)[:max_chars]
                         if len(snippet) >= 20:
                             return snippet
         except Exception:
@@ -1245,7 +1336,7 @@ def _extract_payload_snippet(
                             str(etree_mod.tostring(n, encoding="unicode", method="html"))
                             for n in nodes_list
                         )
-                        cleaned_frag = _format_multiline_payload(frag)[:12000]
+                        cleaned_frag = _format_multiline_payload(frag)[:max_chars]
                         if len(cleaned_frag) >= 20 and not any(
                             b in cleaned_frag for b in FORBIDDEN_PLACEHOLDERS
                         ):
@@ -1256,7 +1347,7 @@ def _extract_payload_snippet(
                 if parent is not None and len(tree.xpath("//body//*")) > 0:
                     parent.remove(head_el)
             cleaned_tree = str(etree_mod.tostring(tree, encoding="unicode", method="html"))
-            cleaned_all = _format_multiline_payload(cleaned_tree)[:12000]
+            cleaned_all = _format_multiline_payload(cleaned_tree)[:max_chars]
             if not any(b in cleaned_all for b in FORBIDDEN_PLACEHOLDERS):
                 return cleaned_all
         except Exception:
@@ -1267,7 +1358,7 @@ def _extract_payload_snippet(
         text,
         flags=re.S,
     )
-    out_txt = _format_multiline_payload(text_no_toc)[:12000]
+    out_txt = _format_multiline_payload(text_no_toc)[:max_chars]
     for bad in FORBIDDEN_PLACEHOLDERS:
         out_txt = out_txt.replace(bad, "")
     return out_txt.strip()
@@ -1276,15 +1367,311 @@ def _extract_payload_snippet(
 def _make_objects_for_bucket(bucket: str) -> Any:
     from wlh.storage.cas import Objects
 
-    prev_bucket = os.environ.get("WLH_S3_BUCKET")
-    os.environ["WLH_S3_BUCKET"] = bucket
-    try:
-        return Objects()
-    finally:
-        if prev_bucket is None:
-            os.environ.pop("WLH_S3_BUCKET", None)
-        else:
-            os.environ["WLH_S3_BUCKET"] = prev_bucket
+    return Objects(bucket=bucket)
+
+
+_CONTENT_XPATH_CACHE: dict[str, str | None] = {}
+_HYDRATED_SOURCE_CACHE: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+
+
+def _resolve_source_content_xpath(
+    source_id: str,
+    csv_path: Path = DEFAULT_CSV_PATH,
+) -> str | None:
+    cache_key = f"{csv_path.resolve().parent}:{source_id}"
+    if cache_key in _CONTENT_XPATH_CACHE:
+        return _CONTENT_XPATH_CACHE[cache_key]
+
+    import yaml
+
+    from wlh.processor.parsers import normalize_parser_config
+
+    candidates = (
+        csv_path.resolve().parent / f"{source_id}.yaml",
+        csv_path.resolve().parents[2] / "sources" / f"{source_id}.yaml",
+        Path(__file__).resolve().parents[2] / "sources" / f"{source_id}.yaml",
+    )
+    content_xpath: str | None = None
+    for yaml_path in candidates:
+        if yaml_path.is_file():
+            try:
+                raw_cfg: Any = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+                if isinstance(raw_cfg, dict):
+                    cfg_dict = normalize_parser_config(cast(dict[str, Any], raw_cfg))
+                    docs_cfg = cfg_dict.get("documents")
+                    if isinstance(docs_cfg, dict):
+                        docs_dict = cast(dict[str, Any], docs_cfg)
+                        cx = docs_dict.get("content_xpath")
+                        if isinstance(cx, str) and cx.strip():
+                            content_xpath = cx.strip()
+                            break
+            except Exception:
+                pass
+    _CONTENT_XPATH_CACHE[cache_key] = content_xpath
+    return content_xpath
+
+
+def _build_hydrated_item_from_resource_rows(
+    conn: Any,
+    objs: Any,
+    source_id: str,
+    content_xpath: str | None,
+    res_rows: list[dict[str, Any]],
+    *,
+    schema_name: str = "wlh",
+    full: bool = False,
+    base_meta: Mapping[str, Any] | None = None,
+    preloaded_md_text: str | None = None,
+) -> dict[str, Any] | None:
+    non_att = [r for r in res_rows if r.get("role") != "independent_attachment"]
+    primary = non_att[0] if non_att else res_rows[0]
+    detail_url_val = str(
+        (base_meta or {}).get("detail_url") or primary.get("detail_url") or ""
+    ).strip()
+
+    if preloaded_md_text is not None:
+        md_text = preloaded_md_text
+    else:
+        try:
+            md_text = objs.get(str(primary["markdown_hash"])).decode(
+                "utf-8", errors="replace"
+            )
+            for zip_row in res_rows:
+                if (
+                    zip_row is not primary
+                    and zip_row.get("role") == "independent_attachment"
+                    and str(zip_row.get("original_media_type") or "").lower()
+                    == "application/zip"
+                    and zip_row.get("markdown_hash")
+                ):
+                    zip_md = objs.get(str(zip_row["markdown_hash"])).decode(
+                        "utf-8", errors="replace"
+                    )
+                    if zip_md.strip():
+                        md_text = f"{md_text.rstrip()}\n\n{zip_md.lstrip()}"
+        except Exception:
+            return None
+
+    if any(bad in md_text for bad in FORBIDDEN_PLACEHOLDERS):
+        return None
+
+    att_rows = [r for r in res_rows if r.get("original_hash") is not None]
+    attachments_list: list[dict[str, str | None]] = []
+    seen_att_urls: set[str] = set()
+    if base_meta and isinstance(base_meta.get("attachments"), list):
+        for b_att in cast(list[Any], base_meta["attachments"]):
+            if isinstance(b_att, Mapping):
+                b_att_map = cast(Mapping[str, Any], b_att)
+                b_u = str(b_att_map.get("url") or "").strip()
+                if b_u and b_u not in seen_att_urls:
+                    seen_att_urls.add(b_u)
+                    attachments_list.append(
+                        {
+                            "url": b_u,
+                            "name": str(b_att_map.get("name") or "").strip() or None,
+                            "media_type": str(b_att_map.get("media_type") or "").strip()
+                            or None,
+                        }
+                    )
+    for ar in att_rows:
+        ar_url: str | None = None
+        loc = ar.get("locator")
+        if isinstance(loc, Mapping):
+            loc_map = cast(Mapping[str, Any], loc)
+            loc_url = loc_map.get("url")
+            if isinstance(loc_url, str) and loc_url.strip():
+                ar_url = loc_url.strip()
+        if not ar_url:
+            detail_candidate = str(ar.get("detail_url") or "").strip()
+            if re.search(
+                r"(?:\.(?:pdf|docx?|xlsx?|zip)(?:\?|$)|/UCMServer/TAND\d+)",
+                detail_candidate,
+                flags=re.I,
+            ):
+                ar_url = detail_candidate
+        ar_file = str(ar.get("original_file") or "").strip() or None
+        ar_mime = str(ar.get("original_media_type") or "").strip() or None
+        if ar_url and ar_url not in seen_att_urls:
+            seen_att_urls.add(ar_url)
+            attachments_list.append(
+                {
+                    "url": ar_url,
+                    "name": ar_file,
+                    "media_type": ar_mime,
+                }
+            )
+
+    attachment_url: str | None = (
+        attachments_list[0]["url"]
+        if attachments_list
+        else (
+            str(base_meta.get("attachment_url")).strip()
+            if base_meta and base_meta.get("attachment_url")
+            else None
+        )
+    )
+    original_file: str | None = (
+        attachments_list[0]["name"]
+        if attachments_list
+        else (
+            str(base_meta.get("original_file")).strip()
+            if base_meta and base_meta.get("original_file")
+            else None
+        )
+    )
+    original_media_type: str | None = (
+        attachments_list[0]["media_type"]
+        if attachments_list
+        else (
+            str(base_meta.get("original_media_type")).strip()
+            if base_meta and base_meta.get("original_media_type")
+            else None
+        )
+    )
+
+    raw_payload = ""
+    inputs_ref = primary.get("inputs_ref")
+    if isinstance(inputs_ref, str) and inputs_ref:
+        try:
+            inputs_raw: Any = json.loads(
+                objs.get(inputs_ref).decode("utf-8", errors="replace")
+            )
+            inputs_list: list[Any] = []
+            if isinstance(inputs_raw, dict):
+                raw_in = cast(dict[str, Any], inputs_raw).get("inputs")
+                if isinstance(raw_in, list):
+                    inputs_list = cast(list[Any], raw_in)
+            elif isinstance(inputs_raw, list):
+                inputs_list = cast(list[Any], inputs_raw)
+
+            for inp_obj in inputs_list:
+                if not isinstance(inp_obj, dict):
+                    continue
+                inp_map = cast(dict[str, Any], inp_obj)
+                acq_id = inp_map.get("acquisition_id")
+                arch_ref = inp_map.get("archive_ref")
+                inp_charset = str(inp_map.get("charset") or "").strip() or None
+                acq_row = (
+                    conn.execute(
+                        f"""
+                        SELECT COALESCE(actual_url, request_url) AS url, mime_type, archive_ref
+                        FROM {schema_name}.acquisition
+                        WHERE id = %s
+                        """,
+                        (acq_id,),
+                    ).fetchone()
+                    if acq_id
+                    else None
+                )
+                mime = (
+                    str(acq_row["mime_type"])
+                    if acq_row and acq_row.get("mime_type")
+                    else None
+                )
+                acq_url = (
+                    str(acq_row["url"])
+                    if acq_row and acq_row.get("url")
+                    else ""
+                )
+                target_ref = (
+                    arch_ref
+                    if isinstance(arch_ref, str) and arch_ref
+                    else (
+                        str(acq_row["archive_ref"])
+                        if acq_row and acq_row.get("archive_ref")
+                        else None
+                    )
+                )
+                if not original_media_type and mime:
+                    original_media_type = mime
+                if (
+                    acq_url
+                    and acq_url not in seen_att_urls
+                    and re.search(
+                        r"(?:\.(?:pdf|docx?|xlsx?|zip)(?:\?|$)|/UCMServer/TAND\d+)",
+                        acq_url,
+                        flags=re.I,
+                    )
+                ):
+                    seen_att_urls.add(acq_url)
+                    attachments_list.append(
+                        {
+                            "url": acq_url,
+                            "name": Path(acq_url.split("?")[0]).name or None,
+                            "media_type": mime,
+                        }
+                    )
+                    if not attachment_url:
+                        attachment_url = acq_url
+
+                if target_ref and (
+                    len(raw_payload) < 20
+                    or (
+                        raw_payload.lstrip().startswith("{")
+                        and not (mime or "").lower().endswith("json")
+                    )
+                ):
+                    raw_bytes = objs.get(target_ref)
+                    candidate = _extract_payload_snippet(
+                        raw_bytes,
+                        mime,
+                        content_xpath,
+                        inp_charset,
+                        max_chars=250_000 if full else 12_000,
+                    )
+                    if len(candidate) >= 20:
+                        raw_payload = candidate
+        except Exception:
+            raw_payload = ""
+
+    att_url_val = attachment_url.strip() if attachment_url else None
+
+    combined_check = " ".join(
+        [
+            detail_url_val,
+            att_url_val or "",
+            str(primary.get("title") or ""),
+            md_text,
+        ]
+    )
+    if (
+        any(bad in combined_check for bad in FORBIDDEN_PLACEHOLDERS)
+        or "127.0.0.1" in combined_check
+        or "[::1]" in combined_check
+        or "localhost" in combined_check
+    ):
+        return None
+
+    raw_item: dict[str, Any] = {
+        "detail_url": detail_url_val,
+        "attachment_url": att_url_val,
+        "original_file": original_file,
+        "original_media_type": original_media_type,
+        "attachments": attachments_list,
+        "raw_payload": (
+            raw_payload
+            if full
+            else _truncate_payload_aligned(raw_payload, md_text, 1500)
+        ),
+        "markdown": md_text if full else md_text[:4000],
+        "title": (base_meta or {}).get("title") or primary.get("title"),
+        "doc_number": (
+            base_meta["doc_number"]
+            if base_meta and "doc_number" in base_meta
+            else primary.get("doc_number")
+        ),
+        "issuer": (base_meta or {}).get("issuer") or primary.get("issuer"),
+        "published_at": (base_meta or {}).get("published_at")
+        or primary.get("published_at"),
+        "effective_at": (
+            base_meta["effective_at"]
+            if base_meta and "effective_at" in base_meta
+            else primary.get("effective_at")
+        ),
+        "quality_route": (base_meta or {}).get("quality_route"),
+        "sampling_strata": (base_meta or {}).get("sampling_strata"),
+    }
+    return format_sample_for_display(raw_item, full=full, source_id=source_id)
 
 
 def _extract_source_items_from_store(
@@ -1296,6 +1683,8 @@ def _extract_source_items_from_store(
     items: list[dict[str, Any]],
     seen_resource_keys: set[tuple[str, str, str]],
     schema_name: str = "wlh",
+    *,
+    full: bool = False,
 ) -> None:
     if len(items) >= max_items_per_source:
         return
@@ -1432,190 +1821,316 @@ def _extract_source_items_from_store(
         if len(items) >= max_items_per_source:
             break
         res_rows = cast(list[dict[str, Any]], cand_entry["_res_rows"])
-        primary = cast(dict[str, Any], cand_entry["_primary"])
         resource_dedup_key = cast(
             tuple[str, str, str], cand_entry["_resource_dedup_key"]
         )
-        detail_url_val = str(cand_entry["detail_url"])
         md_text = str(cand_entry["markdown"])
-
-        att_rows = [
-            r for r in res_rows if r.get("original_hash") is not None
-        ]
-        attachments_list: list[dict[str, str | None]] = []
-        seen_att_urls: set[str] = set()
-        for ar in att_rows:
-            ar_url: str | None = None
-            loc = ar.get("locator")
-            if isinstance(loc, Mapping):
-                loc_map = cast(Mapping[str, Any], loc)
-                loc_url = loc_map.get("url")
-                if isinstance(loc_url, str) and loc_url.strip():
-                    ar_url = loc_url.strip()
-            if not ar_url:
-                detail_candidate = str(ar.get("detail_url") or "").strip()
-                if re.search(
-                    r"(?:\.(?:pdf|docx?|xlsx?|zip)(?:\?|$)|/UCMServer/TAND\d+)",
-                    detail_candidate,
-                    flags=re.I,
-                ):
-                    ar_url = detail_candidate
-            ar_file = str(ar.get("original_file") or "").strip() or None
-            ar_mime = str(ar.get("original_media_type") or "").strip() or None
-            if ar_url and ar_url not in seen_att_urls:
-                seen_att_urls.add(ar_url)
-                attachments_list.append(
-                    {
-                        "url": ar_url,
-                        "name": ar_file,
-                        "media_type": ar_mime,
-                    }
-                )
-
-        attachment_url: str | None = (
-            attachments_list[0]["url"] if attachments_list else None
+        hydrated = _build_hydrated_item_from_resource_rows(
+            conn,
+            objs,
+            source_id,
+            content_xpath,
+            res_rows,
+            schema_name=schema_name,
+            full=full,
+            base_meta=cand_entry,
+            preloaded_md_text=md_text,
         )
-        original_file: str | None = (
-            attachments_list[0]["name"] if attachments_list else None
+        if hydrated is None:
+            continue
+        seen_resource_keys.add(resource_dedup_key)
+        items.append(hydrated)
+
+
+def _hydrate_cached_source_items_from_conn(
+    conn: Any,
+    objs: Any,
+    source_id: str,
+    content_xpath: str | None,
+    cached_items: Sequence[Mapping[str, Any]],
+    *,
+    schema_name: str = "wlh",
+    full: bool = False,
+) -> list[dict[str, Any]] | None:
+    """Fast-hydrate known cached items for `source_id` by matching `detail_url` or `title` without scanning 50 candidates."""
+    if not cached_items:
+        return None
+    target_urls = [
+        str(it.get("detail_url") or "").strip()
+        for it in cached_items
+        if str(it.get("detail_url") or "").strip()
+    ]
+    target_titles = [
+        str(it.get("title") or "").strip()
+        for it in cached_items
+        if str(it.get("title") or "").strip()
+    ]
+    if not target_urls and not target_titles:
+        return None
+
+    db_rows: list[dict[str, Any]] = conn.execute(
+        f"""
+        WITH matched_res AS (
+            SELECT DISTINCT r.id, v.id AS version_id, v.inputs_ref, v.result_ref
+            FROM {schema_name}.resource r
+            JOIN {schema_name}.frontier f ON f.id = r.frontier_id
+            JOIN {schema_name}.version v ON v.id = r.current_version_id
+            JOIN {schema_name}.document_row d ON d.version_id = v.id
+            WHERE f.source_id = %s
+              AND (d.detail_url = ANY(%s) OR d.title = ANY(%s))
         )
-        original_media_type: str | None = (
-            attachments_list[0]["media_type"] if attachments_list else None
-        )
+        SELECT mr.id AS resource_id, mr.inputs_ref, mr.result_ref, d.*
+        FROM matched_res mr
+        JOIN {schema_name}.document_row d ON d.version_id = mr.version_id
+        ORDER BY mr.id, d.row_index
+        """,
+        (source_id, target_urls, target_titles),
+    ).fetchall()
 
-        raw_payload = ""
-        inputs_ref = primary.get("inputs_ref")
-        if isinstance(inputs_ref, str) and inputs_ref:
-            try:
-                inputs_raw: Any = json.loads(
-                    objs.get(inputs_ref).decode("utf-8", errors="replace")
-                )
-                inputs_list: list[Any] = []
-                if isinstance(inputs_raw, dict):
-                    raw_in = cast(dict[str, Any], inputs_raw).get("inputs")
-                    if isinstance(raw_in, list):
-                        inputs_list = cast(list[Any], raw_in)
-                elif isinstance(inputs_raw, list):
-                    inputs_list = cast(list[Any], inputs_raw)
+    if not db_rows:
+        return None
 
-                for inp_obj in inputs_list:
-                    if not isinstance(inp_obj, dict):
-                        continue
-                    inp_map = cast(dict[str, Any], inp_obj)
-                    acq_id = inp_map.get("acquisition_id")
-                    arch_ref = inp_map.get("archive_ref")
-                    inp_charset = (
-                        str(inp_map.get("charset") or "").strip() or None
-                    )
-                    acq_row = (
-                        conn.execute(
-                            f"""
-                            SELECT COALESCE(actual_url, request_url) AS url, mime_type, archive_ref
-                            FROM {schema_name}.acquisition
-                            WHERE id = %s
-                            """,
-                            (acq_id,),
-                        ).fetchone()
-                        if acq_id
-                        else None
-                    )
-                    mime = (
-                        str(acq_row["mime_type"])
-                        if acq_row and acq_row.get("mime_type")
-                        else None
-                    )
-                    acq_url = (
-                        str(acq_row["url"])
-                        if acq_row and acq_row.get("url")
-                        else ""
-                    )
-                    target_ref = (
-                        arch_ref
-                        if isinstance(arch_ref, str) and arch_ref
-                        else (
-                            str(acq_row["archive_ref"])
-                            if acq_row and acq_row.get("archive_ref")
-                            else None
-                        )
-                    )
-                    if not original_media_type and mime:
-                        original_media_type = mime
-                    if (
-                        acq_url
-                        and acq_url not in seen_att_urls
-                        and re.search(
-                            r"(?:\.(?:pdf|docx?|xlsx?|zip)(?:\?|$)|/UCMServer/TAND\d+)",
-                            acq_url,
-                            flags=re.I,
-                        )
-                    ):
-                        seen_att_urls.add(acq_url)
-                        attachments_list.append(
-                            {
-                                "url": acq_url,
-                                "name": Path(acq_url.split("?")[0]).name or None,
-                                "media_type": mime,
-                            }
-                        )
-                        if not attachment_url:
-                            attachment_url = acq_url
+    by_res: dict[str, list[dict[str, Any]]] = {}
+    for r in db_rows:
+        by_res.setdefault(str(r["resource_id"]), []).append(r)
 
-                    if target_ref and (
-                        len(raw_payload) < 20
-                        or (
-                            raw_payload.lstrip().startswith("{")
-                            and not (mime or "").lower().endswith("json")
-                        )
-                    ):
-                        raw_bytes = objs.get(target_ref)
-                        candidate = _extract_payload_snippet(
-                            raw_bytes, mime, content_xpath, inp_charset
-                        )
-                        if len(candidate) >= 20:
-                            raw_payload = candidate
-            except Exception:
-                raw_payload = ""
-
-        att_url_val = attachment_url.strip() if attachment_url else None
-
-        combined_check = " ".join(
-            [
-                detail_url_val,
-                att_url_val or "",
-                str(primary.get("title") or ""),
-                md_text,
-            ]
-        )
-        if (
-            any(bad in combined_check for bad in FORBIDDEN_PLACEHOLDERS)
-            or "127.0.0.1" in combined_check
-            or "[::1]" in combined_check
-            or "localhost" in combined_check
+    by_url: dict[str, list[dict[str, Any]]] = {}
+    by_title: dict[str, list[dict[str, Any]]] = {}
+    for res_rows in by_res.values():
+        if any(
+            "127.0.0.1" in str(r.get("detail_url") or "")
+            or "[::1]" in str(r.get("detail_url") or "")
+            or "localhost" in str(r.get("detail_url") or "")
+            for r in res_rows
         ):
             continue
+        non_att = [
+            r for r in res_rows if r.get("role") != "independent_attachment"
+        ]
+        primary = non_att[0] if non_att else res_rows[0]
+        u = str(primary.get("detail_url") or "").strip()
+        t = str(primary.get("title") or "").strip()
+        if u and u not in by_url:
+            by_url[u] = res_rows
+        if t and t not in by_title:
+            by_title[t] = res_rows
 
-        seen_resource_keys.add(resource_dedup_key)
-
-        items.append(
-            {
-                "detail_url": detail_url_val,
-                "attachment_url": att_url_val,
-                "original_file": original_file,
-                "original_media_type": original_media_type,
-                "attachments": attachments_list,
-                "raw_payload": _truncate_payload_aligned(
-                    raw_payload, md_text, 1500
-                ),
-                "markdown": md_text[:4000],
-                "title": primary.get("title"),
-                "doc_number": primary.get("doc_number"),
-                "issuer": primary.get("issuer"),
-                "published_at": primary.get("published_at"),
-                "effective_at": primary.get("effective_at"),
-                "quality_route": cand_entry.get("quality_route"),
-                "sampling_strata": cand_entry.get("sampling_strata"),
-            }
+    out: list[dict[str, Any]] = []
+    for c_item in cached_items:
+        u = str(c_item.get("detail_url") or "").strip()
+        t = str(c_item.get("title") or "").strip()
+        matched_rows = by_url.get(u) or by_title.get(t)
+        if not matched_rows:
+            return None
+        hydrated = _build_hydrated_item_from_resource_rows(
+            conn,
+            objs,
+            source_id,
+            content_xpath,
+            matched_rows,
+            schema_name=schema_name,
+            full=full,
+            base_meta=c_item,
         )
+        if hydrated is None:
+            return None
+        out.append(hydrated)
+    return out
 
+
+def hydrate_samples_from_store(
+    sources_map: Mapping[str, Sequence[Mapping[str, Any]]],
+    *,
+    full: bool = False,
+    max_items_per_source: int = 10,
+    csv_path: Path = DEFAULT_CSV_PATH,
+    database_url: str | None = None,
+    s3_bucket: str | None = None,
+    fallback_database_url: str | None = None,
+    fallback_s3_bucket: str | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Hydrate `raw_payload` and `markdown` live from PostgreSQL + S3 CAS for a map of `source_id -> items`."""
+    from contextlib import ExitStack
+
+    import psycopg
+    from psycopg.rows import dict_row
+
+    target_db_url = (
+        database_url
+        or os.environ.get("WLH_SAMPLES_DATABASE_URL")
+        or DEFAULT_SAMPLES_DATABASE_URL
+    )
+    target_bucket = (
+        s3_bucket
+        or os.environ.get("WLH_SAMPLES_S3_BUCKET")
+        or DEFAULT_SAMPLES_S3_BUCKET
+    )
+    prod_db_url = (
+        fallback_database_url
+        if fallback_database_url is not None
+        else (
+            os.environ.get("WLH_FALLBACK_SAMPLES_DATABASE_URL")
+            or FALLBACK_SAMPLES_DATABASE_URL
+        )
+    )
+    prod_bucket = (
+        fallback_s3_bucket
+        or os.environ.get("WLH_FALLBACK_SAMPLES_S3_BUCKET")
+        or FALLBACK_SAMPLES_S3_BUCKET
+    )
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        prod_bucket = target_bucket
+
+    primary_objs = _make_objects_for_bucket(target_bucket)
+    fallback_objs: Any = None
+    fallback_conn: Any = None
+    out: dict[str, list[dict[str, Any]]] = {}
+
+    with ExitStack() as stack:
+        conn = stack.enter_context(
+            psycopg.Connection[dict[str, Any]].connect(
+                target_db_url, row_factory=dict_row
+            )
+        )
+        for source_id, raw_items in sources_map.items():
+            cached_seq = list(raw_items)[:max_items_per_source]
+            urls_sig = tuple(
+                str(it.get("detail_url") or "") for it in cached_seq
+            )
+            cache_key = (
+                target_db_url,
+                target_bucket,
+                prod_db_url,
+                source_id,
+                full,
+                max_items_per_source,
+                urls_sig,
+            )
+            if (
+                target_db_url == DEFAULT_SAMPLES_DATABASE_URL
+                and cache_key in _HYDRATED_SOURCE_CACHE
+            ):
+                out[source_id] = [dict(x) for x in _HYDRATED_SOURCE_CACHE[cache_key]]
+                continue
+
+            content_xpath = _resolve_source_content_xpath(source_id, csv_path)
+            hydrated_items = _hydrate_cached_source_items_from_conn(
+                conn,
+                primary_objs,
+                source_id,
+                content_xpath,
+                cached_seq,
+                full=full,
+            )
+            if (
+                hydrated_items is None
+                and prod_db_url
+                and (prod_db_url != target_db_url or prod_bucket != target_bucket)
+            ):
+                if fallback_conn is None:
+                    try:
+                        fallback_conn = stack.enter_context(
+                            psycopg.Connection[dict[str, Any]].connect(
+                                prod_db_url, row_factory=dict_row
+                            )
+                        )
+                        try:
+                            fallback_objs = _make_objects_for_bucket(prod_bucket)
+                        except Exception:
+                            fallback_objs = primary_objs
+                    except Exception:
+                        fallback_conn = False
+                if fallback_conn and fallback_objs is not None:
+                    hydrated_items = _hydrate_cached_source_items_from_conn(
+                        fallback_conn,
+                        fallback_objs,
+                        source_id,
+                        content_xpath,
+                        cached_seq,
+                        full=full,
+                    )
+
+            if hydrated_items is None:
+                items: list[dict[str, Any]] = []
+                seen_keys: set[tuple[str, str, str]] = set()
+                _extract_source_items_from_store(
+                    conn,
+                    primary_objs,
+                    source_id,
+                    content_xpath,
+                    max_items_per_source,
+                    items,
+                    seen_keys,
+                    "wlh",
+                    full=full,
+                )
+                if (
+                    len(items) < max_items_per_source
+                    and prod_db_url
+                    and (prod_db_url != target_db_url or prod_bucket != target_bucket)
+                ):
+                    if fallback_conn is None:
+                        try:
+                            fallback_conn = stack.enter_context(
+                                psycopg.Connection[dict[str, Any]].connect(
+                                    prod_db_url, row_factory=dict_row
+                                )
+                            )
+                            try:
+                                fallback_objs = _make_objects_for_bucket(prod_bucket)
+                            except Exception:
+                                fallback_objs = primary_objs
+                        except Exception:
+                            fallback_conn = False
+                    if fallback_conn and fallback_objs is not None:
+                        _extract_source_items_from_store(
+                            fallback_conn,
+                            fallback_objs,
+                            source_id,
+                            content_xpath,
+                            max_items_per_source,
+                            items,
+                            seen_keys,
+                            "wlh",
+                            full=full,
+                        )
+                hydrated_items = items
+
+            if target_db_url == DEFAULT_SAMPLES_DATABASE_URL and hydrated_items:
+                _HYDRATED_SOURCE_CACHE[cache_key] = [
+                    dict(x) for x in hydrated_items
+                ]
+            out[source_id] = hydrated_items
+
+    return out
+
+
+def fetch_live_source_samples(
+    source_id: str,
+    *,
+    html_path: Path = DEFAULT_OUTPUT_PATH,
+    csv_path: Path = DEFAULT_CSV_PATH,
+    max_items: int = 10,
+    full: bool = False,
+    database_url: str | None = None,
+    s3_bucket: str | None = None,
+    fallback_database_url: str | None = None,
+    fallback_s3_bucket: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch live `raw_payload` and `markdown` for a single `source_id` from PostgreSQL + S3 CAS on demand."""
+    existing_map = _parse_existing_html_samples(html_path)
+    seed_items = existing_map.get(source_id, [])[:max_items]
+    hydrated = hydrate_samples_from_store(
+        {source_id: seed_items},
+        full=full,
+        max_items_per_source=max_items,
+        csv_path=csv_path,
+        database_url=database_url,
+        s3_bucket=s3_bucket,
+        fallback_database_url=fallback_database_url,
+        fallback_s3_bucket=fallback_s3_bucket,
+    )
+    return hydrated.get(source_id, [])
 
 
 def generate_verification_samples_from_db(
@@ -1632,7 +2147,6 @@ def generate_verification_samples_from_db(
     from contextlib import ExitStack
 
     import psycopg
-    import yaml
     from psycopg.rows import dict_row
 
     target_db_url = (
@@ -1647,14 +2161,19 @@ def generate_verification_samples_from_db(
     )
     prod_db_url = (
         fallback_database_url
-        or os.environ.get("WLH_FALLBACK_SAMPLES_DATABASE_URL")
-        or FALLBACK_SAMPLES_DATABASE_URL
+        if fallback_database_url is not None
+        else (
+            os.environ.get("WLH_FALLBACK_SAMPLES_DATABASE_URL")
+            or FALLBACK_SAMPLES_DATABASE_URL
+        )
     )
     prod_bucket = (
         fallback_s3_bucket
         or os.environ.get("WLH_FALLBACK_SAMPLES_S3_BUCKET")
         or FALLBACK_SAMPLES_S3_BUCKET
     )
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        prod_bucket = target_bucket
 
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         active_rows = [
@@ -1679,23 +2198,7 @@ def generate_verification_samples_from_db(
             source_id = csv_row["Source ID"].strip()
             source_name = csv_row["来源名称"].strip()
             status = csv_row["状态"].strip()
-
-            yaml_path = csv_path.resolve().parents[2] / "sources" / f"{source_id}.yaml"
-            if not yaml_path.is_file():
-                yaml_path = Path(__file__).resolve().parents[2] / "sources" / f"{source_id}.yaml"
-            content_xpath: str | None = None
-            if yaml_path.is_file():
-                from wlh.processor.parsers import normalize_parser_config
-
-                raw_cfg: Any = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-                if isinstance(raw_cfg, dict):
-                    cfg_dict = normalize_parser_config(cast(dict[str, Any], raw_cfg))
-                    docs_cfg = cfg_dict.get("documents")
-                    if isinstance(docs_cfg, dict):
-                        docs_dict = cast(dict[str, Any], docs_cfg)
-                        cx = docs_dict.get("content_xpath")
-                        if isinstance(cx, str) and cx.strip():
-                            content_xpath = cx.strip()
+            content_xpath = _resolve_source_content_xpath(source_id, csv_path)
 
             items: list[dict[str, Any]] = []
             seen_resource_keys: set[tuple[str, str, str]] = set()
@@ -1767,6 +2270,127 @@ def generate_verification_samples_from_db(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(rendered, encoding="utf-8")
     return output_path
+
+
+@contextlib.contextmanager
+def start_samples_http_server(
+    host: str = "127.0.0.1",
+    port: int = 18088,
+    *,
+    html_path: Path = DEFAULT_OUTPUT_PATH,
+    csv_path: Path = DEFAULT_CSV_PATH,
+    database_url: str | None = None,
+    s3_bucket: str | None = None,
+    fallback_database_url: str | None = None,
+    fallback_s3_bucket: str | None = None,
+) -> Generator[ThreadingHTTPServer, None, None]:
+    """Start a threaded HTTP server serving `source-verification-samples.html` and live DB/CAS `/api/samples` endpoints."""
+
+    class _SamplesHTTPHandler(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+        def _send_json(self, status_code: int, payload: Mapping[str, Any]) -> None:
+            raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "*")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def do_OPTIONS(self) -> None:
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "*")
+            self.end_headers()
+
+        def do_GET(self) -> None:
+            parsed = urlsplit(self.path)
+            route = unquote(parsed.path)
+            qs = parse_qs(parsed.query)
+
+            if route in {
+                "/",
+                "/source-verification-samples.html",
+                "/docs/runbooks/source-verification-samples.html",
+            }:
+                if not html_path.is_file():
+                    self._send_json(404, {"error": "html_not_found"})
+                    return
+                body = html_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            if route == "/api/healthz":
+                self._send_json(
+                    200,
+                    {
+                        "status": "ok",
+                        "html_path": str(html_path),
+                    },
+                )
+                return
+
+            if route == "/api/samples" or route.startswith("/api/samples/"):
+                source_id = (
+                    route.removeprefix("/api/samples/").strip("/")
+                    if route.startswith("/api/samples/")
+                    else (qs.get("source_id", [""])[0]).strip()
+                )
+                if not source_id:
+                    self._send_json(400, {"error": "missing_source_id"})
+                    return
+                full_flag = qs.get("full", ["0"])[0].lower() in {
+                    "1",
+                    "true",
+                    "yes",
+                }
+                try:
+                    max_items = int(qs.get("max_items", ["10"])[0])
+                except ValueError:
+                    max_items = 10
+                items = fetch_live_source_samples(
+                    source_id,
+                    html_path=html_path,
+                    csv_path=csv_path,
+                    max_items=max_items,
+                    full=full_flag,
+                    database_url=database_url,
+                    s3_bucket=s3_bucket,
+                    fallback_database_url=fallback_database_url,
+                    fallback_s3_bucket=fallback_s3_bucket,
+                )
+                self._send_json(
+                    200,
+                    {
+                        "source_id": source_id,
+                        "full": full_flag,
+                        "count": len(items),
+                        "items": items,
+                    },
+                )
+                return
+
+            self._send_json(404, {"error": "not_found", "path": route})
+
+    srv = ThreadingHTTPServer((host, port), _SamplesHTTPHandler)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield srv
+    finally:
+        srv.shutdown()
+        thread.join(timeout=2.0)
+        srv.server_close()
 
 
 def _file_digest(path: Path) -> str:
@@ -1862,7 +2486,7 @@ def watch_csv_to_html(
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Generate or sync docs/runbooks/source-verification-samples.html"
+        description="Generate, sync, or serve docs/runbooks/source-verification-samples.html"
     )
     parser.add_argument("--csv", type=Path, default=DEFAULT_CSV_PATH)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
@@ -1877,7 +2501,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Watch CSV via OS kernel VFS events and sync HTML TOC on modification",
     )
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Start HTTP server serving source-verification-samples.html and live DB/S3 /api/samples endpoints",
+    )
+    parser.add_argument("--host", type=str, default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=18088)
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if args.serve:
+        try:
+            with start_samples_http_server(
+                host=args.host,
+                port=args.port,
+                html_path=args.output,
+                csv_path=args.csv,
+            ) as srv:
+                print(
+                    f"Serving live verification samples at http://{args.host}:{srv.server_port}/",
+                    flush=True,
+                )
+                threading.Event().wait()
+        except KeyboardInterrupt:
+            return 0
+        return 0
     if args.watch:
         try:
             watch_csv_to_html(args.csv, args.output)

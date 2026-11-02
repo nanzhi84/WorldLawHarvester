@@ -102,16 +102,41 @@ class TestRunbookVerificationSamples:
             r'<a\b[^>]*href="https://example\.gov\.vn/files/doc2\.docx"',
             html_doc,
         ), "Expected clickable HTML <a> link for DOCX attachment"
-        assert "Raw HTML payload #3" in html_doc
-        assert "Article 1 of Law #3" in html_doc
         assert "Law #10" in html_doc
         assert "Law #11" not in html_doc
         assert "Law #12" not in html_doc
+        assert "Raw HTML payload #3" not in html_doc, (
+            "Default HTML rendering must not hardcode raw_payload text into the HTML document"
+        )
+        assert "Article 1 of Law #3" not in html_doc, (
+            "Default HTML rendering must not hardcode markdown text into the HTML document"
+        )
+        assert "/api/samples" in html_doc, (
+            "Expected client-side real-time loader script referencing /api/samples"
+        )
+
+        import json
+
+        cache_match = re.search(
+            r'<script\s+id="wlh-samples-cache"\s+type="application/json">\s*(.*?)\s*</script>',
+            html_doc,
+            re.S,
+        )
+        assert cache_match is not None, "Expected #wlh-samples-cache metadata script tag"
+        cache_data = json.loads(cache_match.group(1))
+        assert len(cache_data["dd-492"]) == 10
+        for cached_item in cache_data["dd-492"]:
+            assert "raw_payload" not in cached_item, (
+                "#wlh-samples-cache must not hardcode raw_payload"
+            )
+            assert "markdown" not in cached_item, (
+                "#wlh-samples-cache must not hardcode markdown"
+            )
 
     def test_csv_to_html_one_way_sync_updates_gitbook_toc_and_preserves_samples(
         self, tmp_path: Path
     ) -> None:
-        """Syncing `source-adaptation-matrix.csv` -> `source-verification-samples.html` updates the GitBook TOC and metadata while preserving sample rows."""
+        """Syncing `source-adaptation-matrix.csv` -> `source-verification-samples.html` updates the GitBook TOC and metadata while preserving sample rows without hardcoding payload/markdown."""
         import importlib
         from typing import Any
 
@@ -210,9 +235,11 @@ class TestRunbookVerificationSamples:
         assert "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd.signed.pdf" in synced_text
         assert "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd-phu-luc.docx" in synced_text
         assert "Phụ lục Nghị định 105.docx" in synced_text
-        assert "Điều 1. Phạm vi điều chỉnh." in synced_text
-        assert "Toàn văn Thông tư 12/2026/TT-BTC" in synced_text
-        assert "Điều 1. Quy định chung về kế toán." in synced_text
+        assert "Nghị định 105/2026/NĐ-CP" in synced_text
+        assert "Thông tư 12/2026/TT-BTC" in synced_text
+        assert "Điều 1. Phạm vi điều chỉnh." not in synced_text
+        assert "Toàn văn Thông tư 12/2026/TT-BTC" not in synced_text
+        assert "Điều 1. Quy định chung về kế toán." not in synced_text
 
         tree: Any = lxml_html.fromstring(synced_text)
         sidebar_text = str(tree.xpath('//aside[contains(@class, "sidebar")]')[0].text_content())
@@ -224,13 +251,17 @@ class TestRunbookVerificationSamples:
     def test_payload_preserves_multiline_structure_and_aligns_truncation_with_markdown(
         self,
     ) -> None:
-        """Payload preview preserves multi-line structure and aligns truncation with right-column Markdown both in unit rendering and in the published HTML runbook."""
+        """Payload preview preserves multi-line structure and aligns truncation with right-column Markdown both in unit formatting and in live DB/CAS sample hydration."""
         import csv
         import importlib
         import re
         from typing import Any
 
-        from wlh.runbook_samples import render_source_verification_html
+        from wlh.runbook_samples import (
+            fetch_live_source_samples,
+            format_sample_for_display,
+            render_source_verification_html,
+        )
 
         lxml_html: Any = importlib.import_module("lxml.html")
 
@@ -266,7 +297,32 @@ class TestRunbookVerificationSamples:
         )
         assert 4500 <= len(raw_payload_b) <= 5500
 
-        rendered_unit = render_source_verification_html(
+        item_a = {
+            "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/c100012/c5200001/content.html",
+            "attachment_url": None,
+            "original_file": None,
+            "original_media_type": "text/html",
+            "raw_payload": raw_payload_a,
+            "markdown": markdown_a,
+            "title": "短篇完整法规样本",
+            "doc_number": "税总发〔2026〕1号",
+            "issuer": "国家税务总局",
+            "published_at": "2026-04-01",
+        }
+        item_b = {
+            "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/c100012/c5200002/content.html",
+            "attachment_url": None,
+            "original_file": None,
+            "original_media_type": "text/html",
+            "raw_payload": raw_payload_b,
+            "markdown": markdown_b,
+            "title": "长篇截断法规样本",
+            "doc_number": "税总发〔2026〕2号",
+            "issuer": "国家税务总局",
+            "published_at": "2026-04-02",
+        }
+
+        lightweight_html = render_source_verification_html(
             [
                 {
                     "source_id": "dd-501",
@@ -275,47 +331,22 @@ class TestRunbookVerificationSamples:
                     "continent": "1. 亚洲法域 (Asia)",
                     "jurisdiction": "1.1 中国大陆 (China Mainland)",
                     "subcategory": "—",
-                    "items": [
-                        {
-                            "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/c100012/c5200001/content.html",
-                            "attachment_url": None,
-                            "original_file": None,
-                            "original_media_type": "text/html",
-                            "raw_payload": raw_payload_a,
-                            "markdown": markdown_a,
-                            "title": "短篇完整法规样本",
-                            "doc_number": "税总发〔2026〕1号",
-                            "issuer": "国家税务总局",
-                            "published_at": "2026-04-01",
-                        },
-                        {
-                            "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/c100012/c5200002/content.html",
-                            "attachment_url": None,
-                            "original_file": None,
-                            "original_media_type": "text/html",
-                            "raw_payload": raw_payload_b,
-                            "markdown": markdown_b,
-                            "title": "长篇截断法规样本",
-                            "doc_number": "税总发〔2026〕2号",
-                            "issuer": "国家税务总局",
-                            "published_at": "2026-04-02",
-                        },
-                    ],
+                    "items": [item_a, item_b],
                 }
             ],
             max_items_per_source=10,
         )
+        assert paragraphs_a[0] not in lightweight_html, (
+            "Default lightweight HTML must not inline raw_payload or markdown bodies"
+        )
+        assert paragraphs_b[0] not in lightweight_html, (
+            "Default lightweight HTML must not inline raw_payload or markdown bodies"
+        )
 
-        unit_tree: Any = lxml_html.fromstring(rendered_unit)
-        unit_rows: list[Any] = unit_tree.xpath('//section[@id="dd-501"]//tr[count(td)=2]')
-        assert len(unit_rows) == 2
-
-        payload_text_a = str(
-            unit_rows[0].xpath('.//pre[contains(@class, "payload-box")]')[0].text_content() or ""
-        ).strip()
-        md_text_a = str(
-            unit_rows[0].xpath('.//pre[contains(@class, "markdown-box")]')[0].text_content() or ""
-        ).strip()
+        formatted_a = format_sample_for_display(item_a, full=False)
+        formatted_b = format_sample_for_display(item_b, full=False)
+        payload_text_a = str(formatted_a["raw_payload"]).strip()
+        md_text_a = str(formatted_a["markdown"]).strip()
         assert "\n" in payload_text_a, "Case A payload-box must preserve multiple lines"
         assert "…(truncated)" not in payload_text_a, (
             "Case A payload-box must not be prematurely truncated when Markdown is complete"
@@ -327,12 +358,8 @@ class TestRunbookVerificationSamples:
             "Case A final paragraph of Markdown must also be present at the end of payload-box"
         )
 
-        payload_text_b = str(
-            unit_rows[1].xpath('.//pre[contains(@class, "payload-box")]')[0].text_content() or ""
-        ).strip()
-        md_text_b = str(
-            unit_rows[1].xpath('.//pre[contains(@class, "markdown-box")]')[0].text_content() or ""
-        ).strip()
+        payload_text_b = str(formatted_b["raw_payload"]).strip()
+        md_text_b = str(formatted_b["markdown"]).strip()
         assert payload_text_b.count("\n") >= 5, (
             "Case B payload-box must preserve multi-line formatting (>= 5 newlines)"
         )
@@ -359,16 +386,6 @@ class TestRunbookVerificationSamples:
         if not samples_html.is_file() or not matrix_csv.is_file():
             return
         published_tree: Any = lxml_html.fromstring(samples_html.read_text(encoding="utf-8"))
-
-        all_payload_codes: list[Any] = published_tree.xpath(
-            '//pre[contains(@class, "payload-box")]/code'
-        )
-        assert len(all_payload_codes) > 0
-        for idx, code_el in enumerate(all_payload_codes, start=1):
-            code_text = str(code_el.text_content() or "").strip()
-            assert "\n" in code_text, (
-                f"Published payload-box <code> #{idx} is compressed into a single line: {code_text[:80]!r}"
-            )
 
         fulltext_html_sources = (
             "dd-501",
@@ -403,14 +420,16 @@ class TestRunbookVerificationSamples:
             assert len(sec_nodes) == 1, f"Missing or duplicate section #{src_id} in published HTML"
             rows: list[Any] = sec_nodes[0].xpath(".//tr[count(td)=2]")
             assert len(rows) >= 1, f"No sample rows found for {src_id}"
-            for r_idx, row in enumerate(rows, start=1):
-                p_nodes: list[Any] = row.xpath('.//pre[contains(@class, "payload-box")]')
-                m_nodes: list[Any] = row.xpath('.//pre[contains(@class, "markdown-box")]')
-                assert len(p_nodes) >= 1 and len(m_nodes) >= 1, (
-                    f"{src_id} row #{r_idx} must contain both payload-box and markdown-box"
+            live_items = fetch_live_source_samples(src_id, html_path=samples_html, full=False)
+            assert len(live_items) == len(rows), (
+                f"{src_id} live DB/CAS sample count ({len(live_items)}) must match HTML row count ({len(rows)})"
+            )
+            for r_idx, live_item in enumerate(live_items, start=1):
+                p_text = str(live_item.get("raw_payload") or "").strip()
+                m_text = str(live_item.get("markdown") or "").strip()
+                assert "\n" in p_text, (
+                    f"Live payload for {src_id} row #{r_idx} is compressed into a single line: {p_text[:80]!r}"
                 )
-                p_text = str(p_nodes[0].text_content() or "").strip()
-                m_text = str(m_nodes[0].text_content() or "").strip()
                 p_trunc = p_text.endswith("…(truncated)")
                 m_trunc = m_text.endswith("…(truncated)")
                 assert ("…(truncated)" in p_text) == ("…(truncated)" in m_text) and (
@@ -612,7 +631,7 @@ class TestRunbookVerificationSamples:
             "缺生效日",
             "基线样本",
         }
-        assert "生效日期" in rendered_html
+        assert "effective_at" in rendered_html
 
         # 1-row and 2-row candidate pools: P5 and P95 must never contradictorily overlap on the shortest document
         one_row = stratify_verification_samples(
@@ -677,5 +696,320 @@ class TestRunbookVerificationSamples:
         ]
         assert "accept_with_warning" in small_badge_strata
         assert "baseline" in small_badge_strata
+
+    def test_multiple_sources_render_paginated_source_views_and_structured_sample_metadata(
+        self,
+    ) -> None:
+        """Rendering multiple sources builds paginated source sections with breadcrumbs, navigation controls, and structured metadata cards."""
+        import importlib
+        import re
+        from typing import Any
+
+        from wlh.runbook_samples import render_source_verification_html
+
+        lxml_html: Any = importlib.import_module("lxml.html")
+
+        dd501_items: list[dict[str, object]] = [
+            {
+                "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/p5.html",
+                "raw_payload": "<div class='law'><p>第一条 极短批复。</p></div>",
+                "markdown": "# 极短批复\n\n第一条 极短批复。",
+                "title": "国家税务总局关于极短批复的公告",
+                "doc_number": "税总公告〔2026〕1号",
+                "issuer": "国家税务总局",
+                "published_at": "2026-04-01",
+                "effective_at": "2026-05-01",
+                "quality_route": "accept",
+                "sampling_strata": ["p5_shortest"],
+            },
+            {
+                "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/p95.html",
+                "raw_payload": "<div class='law'><p>" + ("第一条 超长实施细则正文内容。\n" * 40) + "</p></div>",
+                "markdown": "# 超长实施细则\n\n" + ("第一条 超长实施细则正文内容。\n\n" * 40),
+                "title": "国家税务总局超长实施细则",
+                "doc_number": "税总发〔2026〕2号",
+                "issuer": "国家税务总局",
+                "published_at": "2026-04-02",
+                "effective_at": "2026-05-02",
+                "quality_route": "accept",
+                "sampling_strata": ["p95_longest"],
+            },
+            {
+                "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/warning.html",
+                "raw_payload": "<div class='law'><p>含OCR告警字符\ufffd的正文内容。</p></div>",
+                "markdown": "# 告警样本\n\n" + ("第二条 含OCR告警字符\ufffd的正文内容。\n" * 5),
+                "title": "国家税务总局告警路由样本",
+                "doc_number": "税总发〔2026〕3号",
+                "issuer": "国家税务总局",
+                "published_at": "2026-04-03",
+                "effective_at": "2026-05-03",
+                "quality_route": "accept_with_warning",
+                "sampling_strata": ["accept_with_warning"],
+            },
+            {
+                "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/missing-doc.html",
+                "raw_payload": "<div class='law'><p>无发文字号通知正文。</p></div>",
+                "markdown": "# 缺文号样本\n\n" + ("第三条 无发文字号通知正文内容。\n" * 5),
+                "title": "国家税务总局无文号通知",
+                "doc_number": None,
+                "issuer": "国家税务总局",
+                "published_at": "2026-04-04",
+                "effective_at": "2026-05-04",
+                "quality_route": "accept",
+                "sampling_strata": ["missing_doc_number"],
+            },
+            {
+                "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/missing-eff.html",
+                "raw_payload": "<div class='law'><p>无生效日期通知正文。</p></div>",
+                "markdown": "# 缺生效日样本\n\n" + ("第四条 无生效日期通知正文内容。\n" * 5),
+                "title": "国家税务总局无生效日通知",
+                "doc_number": "税总发〔2026〕5号",
+                "issuer": "国家税务总局",
+                "published_at": "2026-04-05",
+                "effective_at": None,
+                "quality_route": "accept",
+                "sampling_strata": ["missing_effective_at"],
+            },
+            {
+                "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/baseline.html",
+                "raw_payload": "<div class='law'><p>常规基线法规正文。</p></div>",
+                "markdown": "# 基线样本\n\n" + ("第五条 常规基线法规正文内容。\n" * 6),
+                "title": "国家税务总局常规基线公告",
+                "doc_number": "税总发〔2026〕6号",
+                "issuer": "国家税务总局",
+                "published_at": "2026-04-06",
+                "effective_at": "2026-05-06",
+                "quality_route": "accept",
+                "sampling_strata": ["baseline"],
+            },
+        ]
+
+        dd502_items: list[dict[str, object]] = [
+            {
+                "detail_url": "https://vanban.chinhphu.vn/page/pagenew.aspx?docid=210001",
+                "raw_payload": "<html><body><div>Chi tiết văn bản 105/2026/NĐ-CP</div></body></html>",
+                "markdown": "# Nghị định 105/2026/NĐ-CP\n\nĐiều 1. Phạm vi điều chỉnh.",
+                "title": "Nghị định 105/2026/NĐ-CP",
+                "doc_number": "105/2026/NĐ-CP",
+                "issuer": "Chính phủ",
+                "published_at": "2026-04-15",
+                "effective_at": "2026-06-01",
+                "quality_route": "accept",
+            }
+        ]
+
+        rendered_html = render_source_verification_html(
+            [
+                {
+                    "source_id": "dd-501",
+                    "source_name": "国家税务总局法规库",
+                    "status": "[x] 已实网跑通",
+                    "continent": "1. 亚洲法域 (Asia)",
+                    "jurisdiction": "1.1 中国大陆 (China Mainland)",
+                    "subcategory": "1.1.1 税收法规",
+                    "items": dd501_items,
+                },
+                {
+                    "source_id": "dd-502",
+                    "source_name": "越南政府文献门户",
+                    "status": "[x] 已实网跑通",
+                    "continent": "1. 亚洲法域 (Asia)",
+                    "jurisdiction": "1.4 越南 (Vietnam)",
+                    "subcategory": "1.4.1 越南核心法规",
+                    "items": dd502_items,
+                },
+            ],
+            max_items_per_source=10,
+        )
+
+        tree: Any = lxml_html.fromstring(rendered_html)
+
+        # 1. Sidebar TOC source switching & active-page visibility (no redundant top pagination bar)
+        assert not tree.xpath('//nav[contains(@class, "source-pagination-bar")]'), (
+            "Redundant top/bottom .source-pagination-bar must not be present"
+        )
+        assert not tree.xpath('//*[@id="source-page-select"]'), (
+            "Redundant #source-page-select dropdown must not be present"
+        )
+        assert not tree.xpath('//*[@id="prev-source-btn" or @id="next-source-btn"]'), (
+            "Redundant #prev-source-btn / #next-source-btn buttons must not be present"
+        )
+
+        toc_links = [
+            str(a.get("href") or "")
+            for a in tree.xpath(
+                '//aside[contains(@class, "gitbook-sidebar")]//a[contains(@class, "toc-link")]'
+            )
+        ]
+        assert "#dd-501" in toc_links and "#dd-502" in toc_links, (
+            f"Expected sidebar TOC links for #dd-501 and #dd-502, got {toc_links}"
+        )
+
+        style_text = "\n".join(str(s.text_content() or "") for s in tree.xpath("//style"))
+        assert re.search(
+            r"\.source-section\s*\{[^}]*display\s*:\s*none", style_text, re.S
+        ), "Expected CSS rule setting .source-section to display: none by default"
+        assert re.search(
+            r"\.source-section\.is-active\s*\{[^}]*display\s*:\s*block", style_text, re.S
+        ), "Expected CSS rule setting .source-section.is-active to display: block"
+
+        # 2. Full text loaded by default, collapsed by default, expandable on demand, balanced cell layout
+        assert "完整全文" not in rendered_html, (
+            "Deprecated '📖 完整全文' button must not exist in rendered HTML"
+        )
+        assert re.search(r"/api/samples\?source_id=[^\"'\s]*full=1", rendered_html), (
+            "Expected client loader script to fetch full text directly (full=1)"
+        )
+        assert re.search(
+            r"tr\s*\{[^}]*display\s*:\s*grid[^}]*grid-template-columns\s*:\s*(?:minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)|1fr\s+1fr|repeat\(2,\s*minmax\(0,\s*1fr\)\))",
+            style_text,
+            re.S,
+        ), "Expected sample table rows (tr) to use a balanced 2-column CSS grid layout"
+        assert re.search(
+            r"td\.col-(?:left|right)[^{]*\{[^}]*display\s*:\s*flex[^}]*flex-direction\s*:\s*column",
+            style_text,
+            re.S,
+        ), "Expected td.col-left and td.col-right to use display: flex; flex-direction: column"
+        assert re.search(
+            r"(?:pre|\.payload-box|\.markdown-box)[^{]*\{[^}]*flex\s*:\s*1\b",
+            style_text,
+            re.S,
+        ), "Expected pre / .payload-box / .markdown-box to set flex: 1 so both columns stretch evenly"
+        assert re.search(
+            r"(?:pre|\.payload-box|\.markdown-box)[^{]*\{[^}]*overflow\s*:\s*hidden",
+            style_text,
+            re.S,
+        ), "Expected default <pre> / .payload-box / .markdown-box rule to set overflow: hidden"
+        assert re.search(
+            r"tbody\s+tr:not\(\.is-expanded\)\s*\{[^}]*(?:block-size|height)\s*:\s*\d+px",
+            style_text,
+            re.S,
+        ), "Expected collapsed rows (tbody tr:not(.is-expanded)) to set a uniform block-size/height"
+        assert re.search(
+            r"tbody\s+tr:not\(\.is-expanded\)\s+pre[^{]*\{[^}]*(?:max-block-size|max-height)\s*:\s*none",
+            style_text,
+            re.S,
+        ), (
+            "Expected tbody tr:not(.is-expanded) pre to set max-block-size/max-height: none so both columns fill the row height and align toggle buttons"
+        )
+        assert re.search(
+            r"\.is-expanded\s*\{[^}]*(?:max-block-size|max-height)\s*:\s*none",
+            style_text,
+            re.S,
+        ), "Expected .is-expanded CSS rule setting max-block-size/max-height: none"
+        assert "expand-toggle-btn" in rendered_html, (
+            "Expected .expand-toggle-btn in client script/styles for on-demand expansion"
+        )
+        assert re.search(
+            r"(?:row|tr)\.classList\.toggle\(\s*['\"]is-expanded['\"]",
+            rendered_html,
+        ), "Expected .expand-toggle-btn click handler to toggle .is-expanded on the row (tr)"
+        assert "展开全文" in rendered_html and "收起全文" in rendered_html, (
+            "Expected '展开全文' and '收起全文' toggle labels in client script"
+        )
+
+        sec_501_list = tree.xpath('//section[@id="dd-501"]')
+        sec_502_list = tree.xpath('//section[@id="dd-502"]')
+        assert len(sec_501_list) == 1 and len(sec_502_list) == 1
+        sec_501 = sec_501_list[0]
+        sec_502 = sec_502_list[0]
+
+        sec_501_classes = set(str(sec_501.get("class") or "").split())
+        sec_502_classes = set(str(sec_502.get("class") or "").split())
+        assert "source-section" in sec_501_classes
+        assert "is-active" in sec_501_classes, (
+            "First source section #dd-501 must have 'is-active' class in initial static markup"
+        )
+        assert "source-section" in sec_502_classes
+        assert "is-active" not in sec_502_classes, (
+            "Subsequent source section #dd-502 must not have 'is-active' class in initial static markup"
+        )
+
+        # Each source section has a self-contained hierarchy breadcrumb (.source-breadcrumb)
+        bc_501 = sec_501.xpath('.//*[contains(@class, "source-breadcrumb")]')
+        bc_502 = sec_502.xpath('.//*[contains(@class, "source-breadcrumb")]')
+        assert len(bc_501) >= 1, "Expected .source-breadcrumb inside #dd-501"
+        assert len(bc_502) >= 1, "Expected .source-breadcrumb inside #dd-502"
+        bc_501_text = str(bc_501[0].text_content() or "")
+        bc_502_text = str(bc_502[0].text_content() or "")
+        assert "1. 亚洲法域 (Asia)" in bc_501_text
+        assert "1.1 中国大陆 (China Mainland)" in bc_501_text
+        assert "1.1.1 税收法规" in bc_501_text
+        assert "1. 亚洲法域 (Asia)" in bc_502_text
+        assert "1.4 越南 (Vietnam)" in bc_502_text
+        assert "1.4.1 越南核心法规" in bc_502_text
+
+        # 2. Structured sample metadata display
+        rows_501 = sec_501.xpath(".//tr[count(td)=2]")
+        assert len(rows_501) == 6
+        first_left_td = rows_501[0].xpath('./td[contains(@class, "col-left")]')[0]
+        sample_index_nodes = first_left_td.xpath('.//*[contains(@class, "sample-index")]')
+        assert len(sample_index_nodes) >= 1, "Expected .sample-index badge in td.col-left"
+        assert "#1" in str(sample_index_nodes[0].text_content() or "")
+
+        expected_stratum_class_map = {
+            "p5_shortest": "strata-p5",
+            "p95_longest": "strata-p95",
+            "accept_with_warning": "strata-warning",
+            "missing_doc_number": "strata-missing-doc",
+            "missing_effective_at": "strata-missing-eff",
+            "baseline": "strata-baseline",
+        }
+        observed_stratum_classes: dict[str, set[str]] = {}
+        for badge in sec_501.xpath('.//td[contains(@class, "col-left")]//*[contains(@class, "strata-badge")]'):
+            stratum_key = str(badge.get("data-stratum") or "")
+            badge_classes = set(str(badge.get("class") or "").split())
+            observed_stratum_classes.setdefault(stratum_key, set()).update(badge_classes)
+
+        for stratum_key, expected_css_class in expected_stratum_class_map.items():
+            assert stratum_key in observed_stratum_classes, (
+                f"Expected strata-badge with data-stratum={stratum_key!r}"
+            )
+            assert expected_css_class in observed_stratum_classes[stratum_key], (
+                f"Expected strata-badge[{stratum_key}] to include class {expected_css_class!r}, "
+                f"got {observed_stratum_classes[stratum_key]}"
+            )
+
+        import json
+
+        first_right_td = rows_501[0].xpath('./td[contains(@class, "col-right")]')[0]
+        doc_meta_nodes = first_right_td.xpath(
+            './/*[contains(@class, "doc-meta-card") or contains(@class, "doc-meta-json")]'
+        )
+        assert len(doc_meta_nodes) >= 1, (
+            "Expected .doc-meta-card or .doc-meta-json inside td.col-right"
+        )
+        assert doc_meta_nodes[0].xpath('.//span[contains(@class, "json-key")]'), (
+            "Expected syntax-highlighted <span class='json-key'> inside .doc-meta-card"
+        )
+        assert doc_meta_nodes[0].xpath('.//span[contains(@class, "json-string")]'), (
+            "Expected syntax-highlighted <span class='json-string'> inside .doc-meta-card"
+        )
+        assert "json-null" in rendered_html, (
+            "Expected .json-null syntax-highlighting support in styles/markup"
+        )
+        doc_meta_text = str(doc_meta_nodes[0].text_content() or "").strip()
+        assert "发文字号" not in doc_meta_text, (
+            "Chinese mapped key '发文字号' must not appear inside JSON metadata block"
+        )
+        assert "发布机关" not in doc_meta_text, (
+            "Chinese mapped key '发布机关' must not appear inside JSON metadata block"
+        )
+        doc_meta_obj = json.loads(doc_meta_text)
+        assert isinstance(doc_meta_obj, dict)
+        assert doc_meta_obj["title"] == "国家税务总局关于极短批复的公告"
+        assert doc_meta_obj["doc_number"] == "税总公告〔2026〕1号"
+        assert doc_meta_obj["issuer"] == "国家税务总局"
+        assert doc_meta_obj["published_at"] == "2026-04-01"
+        assert doc_meta_obj["effective_at"] == "2026-05-01"
+
+        right_td_html = str(lxml_html.tostring(first_right_td, encoding="unicode"))
+        meta_pos = re.search(r'class="[^"]*\bdoc-meta-(?:card|json)\b', right_td_html)
+        md_pre_pos = re.search(r'class="[^"]*\bmarkdown-box\b', right_td_html)
+        assert meta_pos is not None and md_pre_pos is not None
+        assert meta_pos.start() < md_pre_pos.start(), (
+            "JSON document metadata block must appear above the .markdown-box preview container"
+        )
+
 
 

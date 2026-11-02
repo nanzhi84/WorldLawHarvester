@@ -73,7 +73,7 @@ def work_directory() -> Path:
 
 
 class Objects:
-    def __init__(self) -> None:
+    def __init__(self, bucket: str | None = None) -> None:
         defaults: dict[str, str] = {
             "ENDPOINT": "http://127.0.0.1:19000",
             "BUCKET": "wlh-archive",
@@ -83,6 +83,8 @@ class Objects:
         settings: dict[str, str] = {
             name: os.environ.get("WLH_S3_" + name, default) for name, default in defaults.items()
         }
+        if bucket is not None:
+            settings["BUCKET"] = bucket
         try:
             endpoint = urlsplit(settings["ENDPOINT"])
             if (
