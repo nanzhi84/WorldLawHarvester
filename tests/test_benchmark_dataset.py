@@ -70,7 +70,7 @@ class TestBenchmarkDatasetContract:
     def test_benchmark_records_conform_to_canonical_schema_contract(
         self, benchmark_records: list[dict[str, Any]]
     ) -> None:
-        """Every record must contain all required top-level dictionary keys."""
+        """Every record must contain the exact 9 required top-level dictionary keys without cleanliness_ground_truth."""
         required_top_keys = {
             "id",
             "source_id",
@@ -78,13 +78,18 @@ class TestBenchmarkDatasetContract:
             "detail_url",
             "current_extracted",
             "ground_truth",
-            "cleanliness_ground_truth",
             "verification_status",
             "arbitration_notes",
+            "adjudication_metadata",
         }
         for rec in benchmark_records:
-            missing = required_top_keys - set(rec.keys())
-            assert not missing, f"Record {rec.get('id')} missing keys: {missing}"
+            rec_id = rec.get("id")
+            assert "cleanliness_ground_truth" not in rec, (
+                f"Record {rec_id} still contains deprecated cleanliness_ground_truth"
+            )
+            assert set(rec.keys()) == required_top_keys, (
+                f"Record {rec_id} keys mismatch: expected {required_top_keys}, got {set(rec.keys())}"
+            )
 
     def test_benchmark_metadata_identifiers_are_non_empty_and_valid(
         self, benchmark_records: list[dict[str, Any]]
@@ -99,7 +104,7 @@ class TestBenchmarkDatasetContract:
     def test_benchmark_ground_truth_fields_conform_to_contract_types(
         self, benchmark_records: list[dict[str, Any]]
     ) -> None:
-        """Ground truth must contain title, doc_type, clean_markdown_excerpt, and optional dates/numbers."""
+        """Ground truth must contain exact 7 required keys (with non-empty markdown and without clean_markdown_excerpt)."""
         required_gt_keys = {
             "title",
             "doc_number",
@@ -107,21 +112,25 @@ class TestBenchmarkDatasetContract:
             "effective_at",
             "issuer",
             "doc_type",
-            "clean_markdown_excerpt",
+            "markdown",
         }
         for rec in benchmark_records:
             rec_id = rec["id"]
             gt = rec["ground_truth"]
-            missing = required_gt_keys - set(gt.keys())
-            assert not missing, f"{rec_id} ground_truth missing keys: {missing}"
+            assert "clean_markdown_excerpt" not in gt, (
+                f"{rec_id}: ground_truth still contains deprecated clean_markdown_excerpt"
+            )
+            assert set(gt.keys()) == required_gt_keys, (
+                f"{rec_id} ground_truth keys mismatch: expected {required_gt_keys}, got {set(gt.keys())}"
+            )
             for field_name, field_val in gt.items():
                 assert field_val != "待人工确认", (
                     f"{rec_id}: Golden Set ground_truth.{field_name} contains unresolved placeholder '待人工确认'"
                 )
             assert isinstance(gt["title"], str) and len(gt["title"]) > 0, f"{rec_id}: title must be non-empty"
             assert isinstance(gt["doc_type"], str) and len(gt["doc_type"]) > 0, f"{rec_id}: doc_type non-empty"
-            assert isinstance(gt["clean_markdown_excerpt"], str) and len(gt["clean_markdown_excerpt"]) >= 30, (
-                f"{rec_id}: clean excerpt must be at least 30 chars"
+            assert isinstance(gt["markdown"], str) and len(gt["markdown"].strip()) > 0, (
+                f"{rec_id}: ground_truth.markdown must be a non-empty string"
             )
 
     def test_benchmark_date_fields_conform_to_iso_or_null_contract(
@@ -140,22 +149,25 @@ class TestBenchmarkDatasetContract:
                     assert isinstance(val, str), f"{rec_id}: {date_key} must be string or None"
                     assert ISO_DATE_REGEX.match(val), f"{rec_id}: {date_key} '{val}' does not match YYYY-MM-DD"
 
-    def test_benchmark_cleanliness_flags_are_strictly_boolean(
-        self, benchmark_records: list[dict[str, Any]]
+    def test_deprecated_cleanliness_ground_truth_and_excerpt_removed_from_dataset_and_verification_log(
+        self, benchmark_records: list[dict[str, Any]], verification_log: dict[str, Any]
     ) -> None:
-        """Cleanliness ground truth must include boolean flags for all major noise dimensions."""
-        required_flags = {
-            "has_html_artifacts",
-            "has_navigation_boilerplate",
-            "has_garbled_encoding",
-            "has_duplicated_body",
-        }
+        """Deprecated cleanliness_ground_truth and clean_markdown_excerpt must be absent across dataset and log."""
         for rec in benchmark_records:
             rec_id = rec["id"]
-            clean_gt = rec["cleanliness_ground_truth"]
-            for flag in required_flags:
-                assert flag in clean_gt, f"{rec_id} missing cleanliness flag: {flag}"
-                assert isinstance(clean_gt[flag], bool), f"{rec_id} flag {flag} is not boolean: {clean_gt[flag]}"
+            assert "cleanliness_ground_truth" not in rec, f"{rec_id} contains cleanliness_ground_truth"
+            assert "clean_markdown_excerpt" not in rec["ground_truth"], (
+                f"{rec_id} ground_truth contains clean_markdown_excerpt"
+            )
+        for item in verification_log.get("per_item_comparisons", []):
+            item_id = item.get("id")
+            assert "cleanliness_ground_truth" not in item, (
+                f"verification_log item {item_id} contains cleanliness_ground_truth"
+            )
+            if isinstance(item.get("ground_truth"), dict):
+                assert "clean_markdown_excerpt" not in item["ground_truth"], (
+                    f"verification_log item {item_id} ground_truth contains clean_markdown_excerpt"
+                )
 
     def test_benchmark_verification_status_is_valid_enum_with_notes_when_arbitrated(
         self, benchmark_records: list[dict[str, Any]]

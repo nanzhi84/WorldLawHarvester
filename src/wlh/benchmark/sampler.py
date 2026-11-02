@@ -6,6 +6,7 @@ and `docs/runbooks/source-adaptation-matrix.csv`, preserving raw payload and ext
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import re
@@ -818,4 +819,56 @@ def write_benchmark_candidates(
     manifest_path = output_dir / "candidate_manifest.json"
     with manifest_path.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """CLI entrypoint to extract representative benchmark candidate samples."""
+    parser = argparse.ArgumentParser(
+        description="Extract representative benchmark candidates from HTML verification cache."
+    )
+    parser.add_argument(
+        "--html",
+        type=Path,
+        default=DEFAULT_HTML_PATH,
+        help=f"Path to source-verification-samples.html (default: {DEFAULT_HTML_PATH})",
+    )
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=DEFAULT_CSV_PATH,
+        help=f"Path to source-adaptation-matrix.csv (default: {DEFAULT_CSV_PATH})",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help=f"Directory to output benchmark dataset (default: {DEFAULT_OUTPUT_DIR})",
+    )
+
+    args = parser.parse_args(argv)
+
+    print(f"Loading samples from {args.html} and metadata from {args.csv}...")
+    candidates, manifest = extract_representative_candidates(
+        html_path=args.html,
+        csv_path=args.csv,
+    )
+    print(
+        f"Extracted {len(candidates)} candidate items across "
+        f"{manifest['metadata']['total_jurisdictions']} jurisdictions."
+    )
+
+    print(f"Writing outputs to {args.output_dir}...")
+    write_benchmark_candidates(args.output_dir, candidates, manifest)
+
+    jsonl_file = args.output_dir / "raw_candidates.jsonl"
+    manifest_file = args.output_dir / "candidate_manifest.json"
+
+    print(f"✓ Created {jsonl_file} ({jsonl_file.stat().st_size} bytes)")
+    print(f"✓ Created {manifest_file} ({manifest_file.stat().st_size} bytes)")
+    print("Candidate extraction successfully completed.")
+
+
+if __name__ == "__main__":
+    main()
+
 

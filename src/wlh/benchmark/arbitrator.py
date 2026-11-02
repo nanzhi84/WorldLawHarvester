@@ -7,12 +7,13 @@ and consolidates the authoritative ground truth benchmark dataset.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import re
 import unicodedata
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 DEFAULT_CANDIDATES_PATH = Path("data/benchmark/raw_candidates.jsonl")
 DEFAULT_ANNOTATOR_A_PATH = Path("data/benchmark/annotations/annotator_a.jsonl")
@@ -145,8 +146,6 @@ def run_arbitration(
 
         gt_a = a["ground_truth"]
         gt_b = b["ground_truth"]
-        clean_a = a["cleanliness_ground_truth"]
-        clean_b = b["cleanliness_ground_truth"]
 
         field_evaluations: dict[str, dict[str, Any]] = {}
         item_has_exact_mismatch = False
@@ -173,12 +172,10 @@ def run_arbitration(
             }
 
         # Determine authoritative ground truth and arbitration ruling
-        auth_gt, clean_gt, status, notes = _arbitrate_single_item(
+        auth_gt, status, notes = _arbitrate_single_item(
             cand=cand,
             gt_a=gt_a,
             gt_b=gt_b,
-            clean_a=clean_a,
-            clean_b=clean_b,
             has_exact_mismatch=item_has_exact_mismatch,
             has_semantic_mismatch=item_has_semantic_mismatch,
             field_evaluations=field_evaluations,
@@ -217,7 +214,6 @@ def run_arbitration(
             "detail_url": cand["detail_url"],
             "current_extracted": current_extracted,
             "ground_truth": auth_gt,
-            "cleanliness_ground_truth": clean_gt,
             "verification_status": status,
             "arbitration_notes": notes,
             "adjudication_metadata": adj_metadata,
@@ -231,11 +227,6 @@ def run_arbitration(
             "title": auth_gt["title"],
             "verification_status": status,
             "field_comparisons": field_evaluations,
-            "cleanliness_comparison": {
-                "annotator_a": {k: v for k, v in clean_a.items() if k != "key_clean_text_excerpt"},
-                "annotator_b": {k: v for k, v in clean_b.items() if k != "key_clean_text_excerpt"},
-                "authoritative": {k: v for k, v in clean_gt.items() if k != "key_clean_text_excerpt"},
-            },
             "authoritative_ground_truth": auth_gt,
             "arbitration_ruling": notes if status == "ARBITRATED" else "Full consensus achieved across all fields without dispute.",
         })
@@ -284,41 +275,20 @@ def _arbitrate_single_item(
     cand: Mapping[str, Any],
     gt_a: Mapping[str, Any],
     gt_b: Mapping[str, Any],
-    clean_a: Mapping[str, Any],
-    clean_b: Mapping[str, Any],
     has_exact_mismatch: bool,
     has_semantic_mismatch: bool,
     field_evaluations: Mapping[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any], str, str]:
-    """Arbitrate ground truth fields and cleanliness flags for a candidate item."""
+) -> tuple[dict[str, Any], str, str]:
+    """Arbitrate ground truth fields for a candidate item."""
     cand_id = cand["id"]
-    md = cand["markdown"]
+    md = str(cand.get("markdown") or "")
 
     # Start with base consensus
-    auth_gt = dict(gt_a)
+    auth_gt = {k: v for k, v in gt_a.items() if k != "clean_markdown_excerpt"}
+    if not auth_gt.get("markdown"):
+        auth_gt["markdown"] = str(gt_b.get("markdown") or md)
     status = "CONSENSUS" if not has_exact_mismatch else "ARBITRATED"
     notes = ""
-
-    # Choose the richer, clean excerpt
-    excerpt_a = clean_a.get("key_clean_text_excerpt") or ""
-    excerpt_b = clean_b.get("key_clean_text_excerpt") or ""
-    clean_excerpt = excerpt_b if len(excerpt_b) >= len(excerpt_a) else excerpt_a
-    auth_gt["clean_markdown_excerpt"] = clean_excerpt
-
-    # Authoritative cleanliness flags (evaluated on candidate markdown)
-    clean_gt = {
-        "has_html_artifacts": any(tag in md for tag in ["<div", "<span", "<table", "&nbsp;", "<p ", "<a href"]),
-        "has_navigation_boilerplate": any(
-            phrase in md.lower()
-            for phrase in [
-                "top page", "トップページ", "home >", "breadcrumb",
-                "[english translation – 英譯本]", "习近平总书记在中央经济工作会议上强调",
-            ]
-        ),
-        "has_garbled_encoding": any(c == "\ufffd" for c in md) or "AN LE SO" in md,
-        "has_duplicated_body": len(md) > 300 and md[:120] in md[120:],
-        "key_clean_text_excerpt": clean_excerpt,
-    }
 
     if cand_id == "cand_01":
         # Consensus
@@ -552,7 +522,7 @@ def _arbitrate_single_item(
         status = "CONSENSUS"
         notes = "Consensus: Both Annotators A and B in 100% agreement across all fields."
 
-    return auth_gt, clean_gt, status, notes
+    return auth_gt, status, notes
 
 
 def write_benchmark_dataset(
@@ -582,16 +552,101 @@ def write_benchmark_dataset(
                 rec_id = str(existing.get("id") or "")
                 if rec_id in updates_by_id:
                     updated: dict[str, Any] = dict(updates_by_id[rec_id])
+                    updated.pop("cleanliness_ground_truth", None)
                     existing_gt: dict[str, Any] = existing.get("ground_truth") or {}
                     updated_gt: dict[str, Any] = dict(updated.get("ground_truth") or {})
-                    if "markdown" in existing_gt and not updated_gt.get("markdown"):
+                    updated_gt.pop("clean_markdown_excerpt", None)
+                    if existing_gt.get("markdown"):
                         updated_gt["markdown"] = existing_gt["markdown"]
                     updated["ground_truth"] = updated_gt
                     merged.append(updated)
                 else:
-                    merged.append(existing)
+                    existing_copy = dict(existing)
+                    existing_copy.pop("cleanliness_ground_truth", None)
+                    if isinstance(existing_copy.get("ground_truth"), dict):
+                        gt_copy = dict(existing_copy["ground_truth"])
+                        gt_copy.pop("clean_markdown_excerpt", None)
+                        existing_copy["ground_truth"] = gt_copy
+                    merged.append(existing_copy)
             records_to_write = merged
 
     with benchmark_path.open("w", encoding="utf-8") as f:
         for record in records_to_write:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """CLI entrypoint to generate authoritative ground truth benchmark dataset."""
+    parser = argparse.ArgumentParser(
+        description="Run multi-party cross-verification, agreement calculation, and arbitration."
+    )
+    parser.add_argument(
+        "--candidates",
+        type=Path,
+        default=DEFAULT_CANDIDATES_PATH,
+        help=f"Path to raw candidates (default: {DEFAULT_CANDIDATES_PATH})",
+    )
+    parser.add_argument(
+        "--annotator-a",
+        type=Path,
+        default=DEFAULT_ANNOTATOR_A_PATH,
+        help=f"Path to Annotator A annotations (default: {DEFAULT_ANNOTATOR_A_PATH})",
+    )
+    parser.add_argument(
+        "--annotator-b",
+        type=Path,
+        default=DEFAULT_ANNOTATOR_B_PATH,
+        help=f"Path to Annotator B annotations (default: {DEFAULT_ANNOTATOR_B_PATH})",
+    )
+    parser.add_argument(
+        "--log-output",
+        type=Path,
+        default=DEFAULT_LOG_PATH,
+        help=f"Path to output cross_verification_log.json (default: {DEFAULT_LOG_PATH})",
+    )
+    parser.add_argument(
+        "--benchmark-output",
+        type=Path,
+        default=DEFAULT_BENCHMARK_PATH,
+        help=f"Path to output ground_truth_benchmark.jsonl (default: {DEFAULT_BENCHMARK_PATH})",
+    )
+
+    args = parser.parse_args(argv)
+
+    print(f"Loading annotations and candidates from {args.candidates.parent}...")
+    verification_log, benchmark_records = run_arbitration(
+        candidates_path=args.candidates,
+        annotator_a_path=args.annotator_a,
+        annotator_b_path=args.annotator_b,
+    )
+
+    print("Writing verification log and authoritative benchmark dataset...")
+    write_benchmark_dataset(
+        verification_log=verification_log,
+        benchmark_records=benchmark_records,
+        log_path=args.log_output,
+        benchmark_path=args.benchmark_output,
+    )
+
+    summary = verification_log["arbitration_summary"]
+    print("=" * 60)
+    print("Cross-Verification and Arbitration Complete:")
+    print(f"  Total Samples: {verification_log['total_samples']}")
+    print(f"  Exact Agreement Rate: {verification_log['overall_agreement_rate'] * 100:.2f}%")
+    print(f"  Semantic Agreement Rate: {verification_log['overall_semantic_agreement_rate'] * 100:.2f}%")
+    print(
+        f"  Consensus Items: {summary['consensus_items_count']} "
+        f"({summary['consensus_percentage']}%)"
+    )
+    print(
+        f"  Arbitrated Items: {summary['arbitrated_items_count']} "
+        f"({summary['arbitrated_percentage']}%)"
+    )
+    print(f"✓ Created {args.log_output} ({args.log_output.stat().st_size} bytes)")
+    print(f"✓ Created {args.benchmark_output} ({args.benchmark_output.stat().st_size} bytes)")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
+

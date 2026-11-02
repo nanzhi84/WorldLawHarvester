@@ -151,14 +151,17 @@ class GroundTruthData(BaseModel):
     effective_at: str | None = Field(default=None, description="Commencement date in ISO YYYY-MM-DD")
     issuer: str | None = Field(default=None, description="Enacting authority or judicial division")
     doc_type: str = Field(min_length=1, description="Canonical legal taxonomy type")
-    clean_markdown_excerpt: str = Field(
-        default="",
-        description="Clean, artifact-free text excerpt of at least 30 characters",
-    )
     markdown: str = Field(
-        default="",
+        min_length=1,
         description="Authoritative standard answer markdown converted from raw_payload",
     )
+
+    @field_validator("markdown")
+    @classmethod
+    def validate_non_empty_markdown(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("markdown must be a non-empty string")
+        return v
 
     @field_validator("published_at", "effective_at")
     @classmethod
@@ -171,34 +174,6 @@ class GroundTruthData(BaseModel):
             datetime.strptime(v, "%Y-%m-%d")
         except ValueError as exc:
             raise ValueError(f"Date must be a valid calendar date in YYYY-MM-DD format, got '{v}'") from exc
-        return v
-
-    def to_dict(self) -> dict[str, Any]:
-        return self.model_dump()
-
-
-class CleanlinessGroundTruth(BaseModel):
-    """Authoritative boolean flags describing candidate cleanliness defects."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    has_html_artifacts: bool = Field(default=False, description="Presence of raw HTML tags/entities")
-    has_navigation_boilerplate: bool = Field(default=False, description="Presence of UI navigation noise")
-    has_garbled_encoding: bool = Field(default=False, description="Presence of mojibake or replacement chars")
-    has_duplicated_body: bool = Field(default=False, description="Presence of duplicate body blocks")
-    key_clean_text_excerpt: str = Field(default="", description="Representative clean text snippet")
-
-    @field_validator(
-        "has_html_artifacts",
-        "has_navigation_boilerplate",
-        "has_garbled_encoding",
-        "has_duplicated_body",
-        mode="before",
-    )
-    @classmethod
-    def validate_strict_boolean(cls, v: Any) -> bool:
-        if type(v) is not bool:
-            raise ValueError(f"Cleanliness flag must be a strict boolean, got {type(v).__name__}: {v!r}")
         return v
 
     def to_dict(self) -> dict[str, Any]:
@@ -254,7 +229,6 @@ class BenchmarkSampleRecord(BaseModel):
     detail_url: str = Field(min_length=1, description="Authoritative detail page URL")
     current_extracted: dict[str, Any] = Field(description="Crawler extracted fields (candidate under test)")
     ground_truth: GroundTruthData = Field(description="Authoritative frozen ground truth")
-    cleanliness_ground_truth: CleanlinessGroundTruth = Field(description="Cleanliness boolean ground truth flags")
     verification_status: VerificationStatusType = Field(description="Verification pathway or arbitration status")
     arbitration_notes: str = Field(min_length=1, description="Human or algorithmic rationale for adjudication")
     adjudication_metadata: AdjudicationMetadata | None = Field(

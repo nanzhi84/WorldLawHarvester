@@ -135,6 +135,14 @@ class TestCleanlinessMetrics:
 
         assert result.sub_scores.boilerplate_freedom < 80.0
         assert any(p["dimension"] == "boilerplate_freedom" for p in result.penalties)
+        assert result.score == round(
+            0.25 * result.sub_scores.noise_purity
+            + 0.20 * result.sub_scores.encoding_purity
+            + 0.20 * result.sub_scores.structural_integrity
+            + 0.25 * result.sub_scores.boilerplate_freedom
+            + 0.10 * result.sub_scores.deduplication_purity,
+            2,
+        )
 
     def test_consecutive_duplicate_paragraphs_trigger_deduplication_penalty(self) -> None:
         """Dual-DOM responsive duplicate text triggers deduplication purity deductions."""
@@ -152,6 +160,14 @@ class TestCleanlinessMetrics:
 
         assert result.sub_scores.deduplication_purity < 70.0
         assert any(p["dimension"] == "deduplication_purity" for p in result.penalties)
+        assert result.score == round(
+            0.25 * result.sub_scores.noise_purity
+            + 0.20 * result.sub_scores.encoding_purity
+            + 0.20 * result.sub_scores.structural_integrity
+            + 0.25 * result.sub_scores.boilerplate_freedom
+            + 0.10 * result.sub_scores.deduplication_purity,
+            2,
+        )
 
     def test_multi_table_document_with_different_column_counts_incurs_zero_structural_penalty(self) -> None:
         """Documents containing multiple valid tables with distinct column counts receive zero penalty."""
@@ -194,7 +210,6 @@ class TestCleanlinessMetrics:
             metadata={
                 "ground_truth": {
                     "markdown": ref_md,
-                    "clean_markdown_excerpt": "第一条 为深入贯彻落实法治建设要求，决定对有关规章予以修改或废止。",
                 }
             },
         )
@@ -203,19 +218,115 @@ class TestCleanlinessMetrics:
         assert any("unstripped boilerplate/noise line(s)" in p.get("reason", "") for p in result.penalties)
         assert any("substantive line(s) missing" in p.get("reason", "") for p in result.penalties)
 
+    def test_portal_metadata_headers_and_korean_chinese_sharing_controls_trigger_boilerplate_penalty(self) -> None:
+        """Portal metadata lines (e.g. 字体：[ 大 中 小 ], 담당부서, 조회수, 微信 **X**, 点击量) are strictly penalized."""
+        portal_polluted_markdown = (
+            "字体：[ 大 中 小 ] 微信 **X**\n"
+            "담당부서 : 법무심의관실 | 조회수 : 1,245 | 点击量：392 | 浏览次数：1024\n\n"
+            "# 행정규칙 제정 고시\n\n"
+            "제1조(목적) 이 고시는 행정절차의 투명성을 확보함을 목적으로 한다.\n"
+        )
+        result = evaluate_cleanliness(portal_polluted_markdown, title="행정규칙 제정 고시")
+
+        assert result.sub_scores.boilerplate_freedom < 85.0
+        assert any(p["dimension"] == "boilerplate_freedom" for p in result.penalties)
+
+    def test_repeated_inline_statutory_repeal_clauses_and_duplicate_blocks_trigger_deduplication_penalty(
+        self,
+    ) -> None:
+        """Repeated statutory repeal clauses or duplicated blocks trigger deduplication purity penalties."""
+        repeated_repeal_markdown = (
+            "# Export and Import Permits Act\n\n"
+            "Section 1. Short title.\n"
+            "[Repealed, 1997, c. 20, s. 45]\n"
+            "[Repealed, 1997, c. 20, s. 45]\n"
+            "[Repealed, 1997, c. 20, s. 45]\n"
+            "[Repealed, 1997, c. 20, s. 45]\n"
+            "[Repealed, 1997, c. 20, s. 45]\n"
+        )
+        result = evaluate_cleanliness(repeated_repeal_markdown, title="Export and Import Permits Act")
+
+        assert result.sub_scores.deduplication_purity < 95.0
+        assert any(p["dimension"] == "deduplication_purity" for p in result.penalties)
+
+    def test_candidate_matching_clean_ground_truth_markdown_achieves_perfect_cleanliness_score(self) -> None:
+        """When candidate markdown matches clean ground_truth.markdown, cleanliness score recovers to 100.0 without flag capping."""
+        clean_gt_md = (
+            "# 国家发展改革委关于修改、废止一批规章和行政规范性文件的决定\n\n"
+            "第一条 为深入贯彻落实党的二十大精神，决定对有关规章予以修改或废止。\n\n"
+            "第二条 本决定自2026年10月1日起施行。"
+        )
+        result = evaluate_cleanliness(
+            clean_gt_md,
+            title="国家发展改革委关于修改、废止一批规章和行政规范性文件的决定",
+            metadata={
+                "ground_truth": {"markdown": clean_gt_md},
+                "cleanliness_ground_truth": {
+                    "has_html_artifacts": True,
+                    "has_navigation_boilerplate": True,
+                    "has_garbled_encoding": True,
+                    "has_duplicated_body": True,
+                },
+            },
+        )
+        assert result.score == 100.0
+        assert result.sub_scores.noise_purity == 100.0
+        assert result.sub_scores.encoding_purity == 100.0
+        assert result.sub_scores.structural_integrity == 100.0
+        assert result.sub_scores.boilerplate_freedom == 100.0
+        assert result.sub_scores.deduplication_purity == 100.0
+        assert len(result.penalties) == 0
+
     def test_empty_extracted_markdown_against_non_empty_reference_markdown_triggers_heavy_structural_penalty(
         self,
     ) -> None:
-        """An empty extracted markdown against non-empty ground_truth.markdown must be heavily penalized."""
+        """An empty extracted markdown against non-empty ground_truth.markdown must score 0.0 structural integrity."""
         ref_md = "# 国家发展改革委令第45号\n\n第一条 为深入贯彻落实法治建设要求，决定对有关规章予以修改或废止。"
         result = evaluate_cleanliness(
             "",
             title="国家发展改革委令第45号",
             metadata={"ground_truth": {"markdown": ref_md}},
         )
-        assert result.sub_scores.structural_integrity <= 40.0
+        assert result.sub_scores.structural_integrity == 0.0
         assert result.score < 90.0
         assert any("extracted markdown is empty" in p.get("reason", "").lower() for p in result.penalties)
+
+    def test_severe_recall_and_precision_gaps_against_ground_truth_markdown_scale_without_artificial_caps(
+        self,
+    ) -> None:
+        """Missing >60% of ground_truth.markdown or having >60% excess boilerplate scales without 30-pt caps."""
+        ref_md = (
+            "# 国家发展改革委令第45号\n\n"
+            "第一条 为深入贯彻落实法治建设要求，决定对有关规章予以修改或废止。\n\n"
+            "第二条 各级行政机关应当严格按照修改后的规章履行法定职责，确保行政执法公开公正。\n\n"
+            "第三条 各地有关部门应当在规定期限内完成配套制度的清理与衔接工作，不得延误。\n\n"
+            "第四条 对违反本决定的行为，依法追究相关责任人员的行政责任。\n\n"
+            "第五条 本决定自2026年10月1日起施行，此前有关规定与本决定不一致的，以本决定为准。"
+        )
+        truncated_candidate = "# 国家发展改革委令第45号\n\n第一条 为深入贯彻落实法治建设要求。"
+        recall_loss_res = evaluate_cleanliness(
+            truncated_candidate,
+            title="国家发展改革委令第45号",
+            metadata={"ground_truth": {"markdown": ref_md}},
+        )
+        assert recall_loss_res.sub_scores.structural_integrity < 50.0
+
+        short_ref_md = "# 通知\n\n第一条 本通知自发布之日起施行。"
+        bloated_candidate = (
+            short_ref_md
+            + "\n\n版权所有：某某省人民政府办公厅 网站标识码：4100000001\n"
+            + "地址：某某市行政中心大楼1号 邮政编码：450000\n"
+            + "技术支持：政务服务大数据局 备案号：ICP备12345678号\n"
+            + "政务微博 | 政务微信 | 移动客户端 | 网站地图 | 联系我们\n"
+            + "热门搜索：营商环境 政务公开 重点民生 法治政府 政策解读\n"
+            + "友情链接：国务院部门网站 各省区市政府网站 市县政府门户网站"
+        )
+        precision_loss_res = evaluate_cleanliness(
+            bloated_candidate,
+            title="通知",
+            metadata={"ground_truth": {"markdown": short_ref_md}},
+        )
+        assert precision_loss_res.sub_scores.boilerplate_freedom < 40.0
 
     def test_line_wrapped_identical_markdown_incurs_zero_reference_comparison_penalty(self) -> None:
         """Identical substantive prose with different hard line breaks incurs zero false-positive penalty."""
@@ -398,6 +509,47 @@ class TestAccuracyMetrics:
         assert result_none.sub_scores.title_accuracy == 0.0
         assert any(m["field"] == "title" for m in result_none.mismatches)
 
+    def test_date_mismatch_on_day_or_month_enforces_strict_zero_exact_match(self) -> None:
+        """Dates must enforce Strict Exact Match (EM): day or month mismatches score strictly 0.0."""
+        ground_truth = {
+            "published_at": "2026-10-01",
+            "effective_at": "2026-10-01",
+        }
+        same_year_month_diff_day = {
+            "published_at": "2026-10-15",
+            "effective_at": "2026-10-02",
+        }
+        res_day = evaluate_accuracy(same_year_month_diff_day, ground_truth)
+        assert res_day.sub_scores.published_at_accuracy == 0.0
+        assert res_day.sub_scores.effective_at_accuracy == 0.0
+        assert any(m["field"] == "published_at" for m in res_day.mismatches)
+        assert any(m["field"] == "effective_at" for m in res_day.mismatches)
+
+        same_year_diff_month = {
+            "published_at": "2026-09-01",
+            "effective_at": "2026-01-01",
+        }
+        res_month = evaluate_accuracy(same_year_diff_month, ground_truth)
+        assert res_month.sub_scores.published_at_accuracy == 0.0
+        assert res_month.sub_scores.effective_at_accuracy == 0.0
+
+    def test_anls_threshold_clips_low_similarity_title_issuer_and_doc_number_to_zero(self) -> None:
+        """When normalized Levenshtein similarity < 0.50 (without containment), field accuracy is clipped to 0.0."""
+        ground_truth = {
+            "title": "Environmental Protection and Pollution Control Act",
+            "doc_number": "Regulation 2026-8841-A",
+            "issuer": "Ministry of Ecological Transition",
+        }
+        unrelated_prediction = {
+            "title": "Notice of Municipal Highway Closure",
+            "doc_number": "Decree 1998-0012-Z",
+            "issuer": "Department of Fisheries",
+        }
+        result = evaluate_accuracy(unrelated_prediction, ground_truth)
+        assert result.sub_scores.title_accuracy == 0.0
+        assert result.sub_scores.doc_number_accuracy == 0.0
+        assert result.sub_scores.issuer_accuracy == 0.0
+
 
 # ==============================================================================
 # 3. Benchmark Evaluator Black-Box Tests
@@ -425,6 +577,7 @@ class TestBenchmarkEvaluator:
             "effective_at": "2026-02-18",
             "issuer": "City of Cape Town",
             "doc_type": "by-law",
+            "markdown": "# City Ombudsman By-law, 2025\n\nTo provide for the appointment of the Ombudsman.",
         }
         res = evaluate_sample(
             prediction,
@@ -440,8 +593,28 @@ class TestBenchmarkEvaluator:
         assert res.jurisdiction == "ZA"
         assert res.accuracy is not None
         assert res.accuracy.score == 100.0
-        assert res.cleanliness.score >= 95.0
-        assert res.overall_score >= 95.0
+        assert res.cleanliness.score == 100.0
+        assert res.overall_score == 100.0
+
+        # Verify 30% Cleanliness + 70% Accuracy composite weighting when scores differ
+        pred_missing_effective_date = {
+            **prediction,
+            "effective_at": None,
+        }
+        res_weighted = evaluate_sample(
+            pred_missing_effective_date,
+            ground_truth=ground_truth,
+            sample_id="cand_test_02",
+            source_id="dd-572",
+            jurisdiction="ZA",
+        )
+        assert res_weighted.cleanliness.score == 100.0
+        assert res_weighted.accuracy is not None
+        assert res_weighted.accuracy.score == 85.0
+        assert res_weighted.overall_score == round(
+            0.30 * res_weighted.cleanliness.score + 0.70 * res_weighted.accuracy.score, 2
+        )
+        assert res_weighted.overall_score == 89.5
 
     def test_evaluate_single_sample_without_ground_truth_produces_cleanliness_only(self) -> None:
         """Evaluating a sample without ground truth assigns accuracy=None and overall_score=cleanliness.score."""
@@ -567,6 +740,11 @@ class TestBenchmarkReporter:
         assert "## 4. Worst-Performing Error Cases & Defect Diagnostics" in md_str
         assert "noise_purity" in md_str
         assert "effective_at_accuracy" in md_str
+        assert "| >= 91.5 |" in md_str
+        assert "| >= 95.0 |" in md_str
+        assert "| >= 90.0 |" in md_str
+        assert any("| `boilerplate_freedom` |" in line and "| 25% |" in line for line in md_str.splitlines())
+        assert any("| `deduplication_purity` |" in line and "| 10% |" in line for line in md_str.splitlines())
 
         json_out, md_out = write_benchmark_reports(report, tmp_path)
         assert json_out.is_file()

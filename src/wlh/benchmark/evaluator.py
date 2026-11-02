@@ -46,7 +46,6 @@ def evaluate_sample(
     sample_id: str = "",
     source_id: str = "",
     jurisdiction: str = "",
-    cleanliness_ground_truth: Mapping[str, Any] | None = None,
 ) -> SampleEvaluationResult:
     """Evaluate a single document sample for cleanliness and optional ground truth accuracy."""
     pred_dict = _extract_prediction_dict(prediction)
@@ -58,13 +57,6 @@ def evaluate_sample(
     title = str(pred_dict.get("title") or "")
 
     clean_meta = dict(pred_dict)
-    cgt = cleanliness_ground_truth or (
-        cast(Mapping[str, Any], prediction.get("cleanliness_ground_truth"))
-        if isinstance(prediction.get("cleanliness_ground_truth"), Mapping)
-        else None
-    )
-    if cgt is not None:
-        clean_meta["cleanliness_ground_truth"] = dict(cgt)
     if ground_truth is not None:
         clean_meta["ground_truth"] = dict(ground_truth)
 
@@ -72,7 +64,7 @@ def evaluate_sample(
 
     if ground_truth is not None:
         accuracy = evaluate_accuracy(pred_dict, ground_truth)
-        overall_score = round(0.50 * cleanliness.score + 0.50 * accuracy.score, 2)
+        overall_score = round(0.30 * cleanliness.score + 0.70 * accuracy.score, 2)
     else:
         accuracy = None
         overall_score = cleanliness.score
@@ -162,16 +154,12 @@ def evaluate_benchmark_dataset(
             prediction = item.get("current_extracted") or item
             ground_truth = None
 
-        cgt_val = item.get("cleanliness_ground_truth")
-        cgt_map = cast(Mapping[str, Any], cgt_val) if isinstance(cgt_val, Mapping) else None
-
         res = evaluate_sample(
             prediction=prediction,
             ground_truth=ground_truth,
             sample_id=sid,
             source_id=src_id,
             jurisdiction=jur,
-            cleanliness_ground_truth=cgt_map,
         )
         sample_results.append(res)
 

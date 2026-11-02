@@ -20,6 +20,10 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
     cleanliness = report.average_cleanliness_score
     accuracy = report.average_accuracy_score if report.average_accuracy_score is not None else 0.0
 
+    clean_target = 95.0
+    acc_target = 90.0
+    overall_target = round(0.30 * clean_target + 0.70 * acc_target, 1)
+
     lines: list[str] = [
         "# WorldLawHarvester Quantitative Benchmark Evaluation Report",
         "",
@@ -35,9 +39,9 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
         "",
         "| Evaluation Metric | Score | Target Standard | Assessment |",
         "| :--- | :---: | :---: | :---: |",
-        f"| **Overall Quality Index** | **{overall:.2f}** | >= 75.0 | {'✅ PASS' if overall >= 75.0 else '⚠️ NEEDS REVIEW'} |",
-        f"| **Text Cleanliness (干净度)** | **{cleanliness:.2f}** | >= 80.0 | {'✅ PASS' if cleanliness >= 80.0 else '⚠️ NEEDS REVIEW'} |",
-        f"| **Field Accuracy (准确度)** | **{accuracy:.2f}** | >= 70.0 | {'✅ PASS' if accuracy >= 70.0 else '⚠️ NEEDS REVIEW'} |",
+        f"| **Overall Quality Index** | **{overall:.2f}** | >= {overall_target:.1f} | {'✅ PASS' if overall >= overall_target else '⚠️ NEEDS REVIEW'} |",
+        f"| **Text Cleanliness (干净度)** | **{cleanliness:.2f}** | >= {clean_target:.1f} | {'✅ PASS' if cleanliness >= clean_target else '⚠️ NEEDS REVIEW'} |",
+        f"| **Field Accuracy (准确度)** | **{accuracy:.2f}** | >= {acc_target:.1f} | {'✅ PASS' if accuracy >= acc_target else '⚠️ NEEDS REVIEW'} |",
         "",
         "---",
         "",
@@ -53,8 +57,8 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
         "noise_purity": (0.25, "HTML/Entity/Control Char Stripping (vs raw_payload)"),
         "encoding_purity": (0.20, "Unicode \\ufffd & Mojibake Freedom"),
         "structural_integrity": (0.20, "Table/Heading Formatting & Reference Markdown Recall"),
-        "boilerplate_freedom": (0.20, "UI Navigation & Reference Markdown Boilerplate Removal"),
-        "deduplication_purity": (0.15, "Paragraph & Block Deduplication"),
+        "boilerplate_freedom": (0.25, "UI Navigation & Reference Markdown Boilerplate Removal"),
+        "deduplication_purity": (0.10, "Paragraph & Block Deduplication"),
     }
 
     for dim, (w, label) in clean_weights.items():

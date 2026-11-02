@@ -65,10 +65,17 @@ DOC_TYPE_TAXONOMY_MAP: dict[str, str] = {
 
 # UI navigation, buttons, and boilerplate phrases
 UI_BOILERPLATE_PATTERNS = [
-    re.compile(r"【?(?:打印|打印本页|关闭|关闭窗口|分享|分享到微信)】?"),
-    re.compile(r"字体\s*[:：]?\s*\[?\s*(?:大\s*中\s*小|小\s*中\s*大)\s*\]?"),
-    re.compile(r"正文字体|浏览次数\s*[:：]|来源\s*[:：]|网站标识码\s*\d+|公网安备\d+号|相关链接\s*[:：]|相关文档\b|담당부서|조회수|微信\s*\*\*X\*\*"),
-    re.compile(r"\b(?:Print|Print this page|Close window|Share this|Back to top|Breadcrumbs|Site Navigation|Search this site|Search Query)\b", re.IGNORECASE),
+    re.compile(r"【?(?:打印|打印本页|关闭|关闭窗口|分享|分享到|分享到微信|返回顶部|收藏本页|纠错)】?"),
+    re.compile(r"字体\s*[:：]?\s*\[?\s*(?:大\s*[｜|/\s]*中\s*[｜|/\s]*小|小\s*[｜|/\s]*中\s*[｜|/\s]*大)\s*\]?"),
+    re.compile(
+        r"正文字体|浏览次数\s*[:：]?|点击量\s*[:：]?|點閱次數\s*[:：]?|阅读量\s*[:：]?|来源\s*[:：]|"
+        r"网站标识码\s*\d+|公网安备\d+号|相关链接\s*[:：]?|相关文档\b|담당부서|조회수|微信\s*\*\*X\*\*|扫一扫在手机打开当前页"
+    ),
+    re.compile(
+        r"\b(?:Print|Print this page|Close window|Share this|Share on|Back to top|Breadcrumbs|"
+        r"Site Navigation|Search this site|Search Query|Skip to main content|Skip to content)\b",
+        re.IGNORECASE,
+    ),
 ]
 
 PORTAL_FOOTER_NOISE_PATTERNS = [
@@ -178,8 +185,8 @@ def evaluate_cleanliness(
     - noise_purity (weight: 25%)
     - encoding_purity (weight: 20%)
     - structural_integrity (weight: 20%)
-    - boilerplate_freedom (weight: 20%)
-    - deduplication_purity (weight: 15%)
+    - boilerplate_freedom (weight: 25%)
+    - deduplication_purity (weight: 10%)
     """
     text_content = markdown or ""
     combined_content = f"{title}\n\n{text_content}" if title else text_content
@@ -192,7 +199,7 @@ def evaluate_cleanliness(
 
     noise_deduction = 0.0
     if html_tags:
-        deduction = min(60.0, len(html_tags) * 8.0)
+        deduction = min(80.0, len(html_tags) * 12.0)
         noise_deduction += deduction
         penalties.append({
             "dimension": "noise_purity",
@@ -200,7 +207,7 @@ def evaluate_cleanliness(
             "deduction": round(deduction, 2),
         })
     if html_entities:
-        deduction = min(30.0, len(html_entities) * 3.0)
+        deduction = min(50.0, len(html_entities) * 5.0)
         noise_deduction += deduction
         penalties.append({
             "dimension": "noise_purity",
@@ -208,7 +215,7 @@ def evaluate_cleanliness(
             "deduction": round(deduction, 2),
         })
     if control_chars:
-        deduction = min(30.0, len(control_chars) * 10.0)
+        deduction = min(60.0, len(control_chars) * 15.0)
         noise_deduction += deduction
         penalties.append({
             "dimension": "noise_purity",
@@ -227,7 +234,7 @@ def evaluate_cleanliness(
 
     encoding_deduction = 0.0
     if ufffd_count > 0:
-        deduction = min(70.0, ufffd_count * 20.0)
+        deduction = min(100.0, ufffd_count * 25.0)
         encoding_deduction += deduction
         penalties.append({
             "dimension": "encoding_purity",
@@ -235,7 +242,7 @@ def evaluate_cleanliness(
             "deduction": round(deduction, 2),
         })
     if pua_count > 0:
-        deduction = min(40.0, pua_count * 5.0)
+        deduction = min(70.0, pua_count * 8.0)
         encoding_deduction += deduction
         penalties.append({
             "dimension": "encoding_purity",
@@ -243,7 +250,7 @@ def evaluate_cleanliness(
             "deduction": round(deduction, 2),
         })
     if mojibake_matches:
-        deduction = min(50.0, len(mojibake_matches) * 15.0)
+        deduction = min(80.0, len(mojibake_matches) * 25.0)
         encoding_deduction += deduction
         penalties.append({
             "dimension": "encoding_purity",
@@ -336,7 +343,7 @@ def evaluate_cleanliness(
     uuid_matches = UUID_PATTERN.findall(combined_content)
 
     if ui_match_count > 0:
-        deduction = min(60.0, ui_match_count * 12.0)
+        deduction = min(75.0, ui_match_count * 15.0)
         boilerplate_deduction += deduction
         penalties.append({
             "dimension": "boilerplate_freedom",
@@ -345,7 +352,7 @@ def evaluate_cleanliness(
         })
 
     if uuid_matches:
-        deduction = min(40.0, len(uuid_matches) * 15.0)
+        deduction = min(60.0, len(uuid_matches) * 20.0)
         boilerplate_deduction += deduction
         penalties.append({
             "dimension": "boilerplate_freedom",
@@ -355,12 +362,25 @@ def evaluate_cleanliness(
 
     boilerplate_score = round(max(0.0, 100.0 - boilerplate_deduction), 2)
 
-    # 5. Deduplication Purity (Consecutive duplicate paragraphs and repeated blocks)
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text_content) if len(p.strip()) >= 30]
+    # 5. Deduplication Purity (Consecutive duplicate paragraphs, repeated blocks, and repeated lines)
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text_content) if len(p.strip()) >= 25]
     consec_dups = 0
     for i in range(1, len(paragraphs)):
         if paragraphs[i] == paragraphs[i - 1]:
             consec_dups += 1
+
+    # Check consecutive duplicate non-table-separator lines or heavily repeated lines
+    non_sep_lines = [
+        ln.strip()
+        for ln in lines
+        if len(ln.strip()) >= 15 and not re.match(r"^\|(?:\s*:?-+:?\s*\|)+$", ln.strip())
+    ]
+    consec_line_dups = 0
+    for i in range(1, len(non_sep_lines)):
+        if non_sep_lines[i] == non_sep_lines[i - 1]:
+            consec_line_dups += 1
+    line_counts = Counter(non_sep_lines)
+    repeated_line_excess = sum(cnt - 2 for ln_txt, cnt in line_counts.items() if cnt >= 3 and len(ln_txt) >= 18)
 
     # Ratio of repeated paragraph characters
     seen_paras: set[str] = set()
@@ -375,16 +395,25 @@ def evaluate_cleanliness(
     dup_ratio = dup_chars / total_chars
     dedup_deduction = 0.0
     if consec_dups > 0:
-        deduction = min(50.0, consec_dups * 25.0)
+        deduction = min(80.0, consec_dups * 30.0)
         dedup_deduction += deduction
         penalties.append({
             "dimension": "deduplication_purity",
             "reason": f"Detected {consec_dups} consecutive duplicate paragraph(s)",
             "deduction": round(deduction, 2),
         })
+    elif consec_line_dups > 0 or repeated_line_excess > 0:
+        rep_count = max(consec_line_dups, repeated_line_excess)
+        deduction = min(70.0, rep_count * 15.0)
+        dedup_deduction += deduction
+        penalties.append({
+            "dimension": "deduplication_purity",
+            "reason": f"Detected {rep_count} repeated line/clause block(s)",
+            "deduction": round(deduction, 2),
+        })
 
-    if dup_ratio > 0.2:
-        deduction = min(50.0, (dup_ratio - 0.2) * 100.0)
+    if dup_ratio > 0.12:
+        deduction = min(70.0, (dup_ratio - 0.12) * 120.0)
         dedup_deduction += deduction
         penalties.append({
             "dimension": "deduplication_purity",
@@ -394,74 +423,15 @@ def evaluate_cleanliness(
 
     dedup_score = round(max(0.0, 100.0 - dedup_deduction), 2)
 
-    # 6. Apply Golden Set cleanliness_ground_truth annotations when provided via metadata
-    cgt_raw = metadata.get("cleanliness_ground_truth") if isinstance(metadata, Mapping) else None
-    if isinstance(cgt_raw, Mapping):
-        cgt = cast(Mapping[str, Any], cgt_raw)
-        if cgt.get("has_html_artifacts") is True and noise_score > 80.0:
-            ded = round(noise_score - 80.0, 2)
-            noise_score = 80.0
-            penalties.append({
-                "dimension": "noise_purity",
-                "reason": "Annotated Golden Set: residual HTML artifacts in extracted markdown",
-                "deduction": ded,
-            })
-        if cgt.get("has_navigation_boilerplate") is True and boilerplate_score > 75.0:
-            ded = round(boilerplate_score - 75.0, 2)
-            boilerplate_score = 75.0
-            penalties.append({
-                "dimension": "boilerplate_freedom",
-                "reason": "Annotated Golden Set: navigation/UI/metadata boilerplate in extracted markdown",
-                "deduction": ded,
-            })
-        if cgt.get("has_garbled_encoding") is True and encoding_score > 70.0:
-            ded = round(encoding_score - 70.0, 2)
-            encoding_score = 70.0
-            penalties.append({
-                "dimension": "encoding_purity",
-                "reason": "Annotated Golden Set: garbled encoding or font corruption in extracted markdown",
-                "deduction": ded,
-            })
-        if cgt.get("has_duplicated_body") is True and dedup_score > 75.0:
-            ded = round(dedup_score - 75.0, 2)
-            dedup_score = 75.0
-            penalties.append({
-                "dimension": "deduplication_purity",
-                "reason": "Annotated Golden Set: duplicated content blocks in extracted markdown",
-                "deduction": ded,
-            })
-
-    # 7. Compare extracted markdown against reference ground_truth.markdown & clean_markdown_excerpt
+    # 6. Compare extracted markdown against reference ground_truth.markdown (chrF 4-gram Precision/Recall & Line Diff)
     gt_raw = metadata.get("ground_truth") if isinstance(metadata, Mapping) else None
     if isinstance(gt_raw, Mapping):
         gt_map = cast(Mapping[str, Any], gt_raw)
-        clean_excerpt = str(gt_map.get("clean_markdown_excerpt") or "").strip()
-        if len(clean_excerpt) >= 30:
-            norm_text = _normalize_markdown_content(text_content)
-            norm_excerpt = _normalize_markdown_content(clean_excerpt)
-            if norm_excerpt and norm_excerpt not in norm_text:
-                # Check 8-gram character window recall with stride 1
-                gram_len = min(8, len(norm_excerpt))
-                grams = [
-                    norm_excerpt[i : i + gram_len]
-                    for i in range(0, max(1, len(norm_excerpt) - gram_len + 1))
-                ]
-                hit_ratio = sum(1 for g in grams if g in norm_text) / max(len(grams), 1)
-                if hit_ratio < 0.75:
-                    excerpt_ded = round(min(25.0, (1.0 - hit_ratio) * 30.0), 2)
-                    if excerpt_ded > 0.0:
-                        structural_score = round(max(0.0, structural_score - excerpt_ded), 2)
-                        penalties.append({
-                            "dimension": "structural_integrity",
-                            "reason": f"Reference clean_markdown_excerpt recall gap ({hit_ratio:.0%} match against ground truth)",
-                            "deduction": excerpt_ded,
-                        })
-
         ref_md = str(gt_map.get("markdown") or "").strip()
         if ref_md and not text_content.strip():
-            empty_ded = round(min(60.0, structural_score), 2)
+            empty_ded = round(structural_score, 2)
             if empty_ded > 0.0:
-                structural_score = round(max(0.0, structural_score - empty_ded), 2)
+                structural_score = 0.0
                 penalties.append({
                     "dimension": "structural_integrity",
                     "reason": "Reference ground_truth.markdown comparison: extracted markdown is empty (100.0% recall gap)",
@@ -573,14 +543,14 @@ def evaluate_cleanliness(
                 precision = 1.0 if not extra_lines else 0.5
                 recall = 1.0 if not missing_lines else 0.5
 
-            if extra_lines or precision < 0.92:
+            if extra_lines or precision < 0.94:
                 extra_chars = sum(len(ln) for ln in extra_lines)
                 line_extra_ratio = extra_chars / max(len(text_content), 1)
                 extra_ratio = max(line_extra_ratio, max(0.0, 1.0 - precision))
                 extra_ded = round(
-                    min(30.0, max(5.0, len(extra_lines) * 4.0 + extra_ratio * 50.0)), 2
+                    min(100.0, max(5.0, len(extra_lines) * 6.0, extra_ratio * 100.0)), 2
                 )
-                applied = round(min(extra_ded, max(0.0, boilerplate_score - 40.0)), 2)
+                applied = round(min(extra_ded, boilerplate_score), 2)
                 if applied > 0.0:
                     boilerplate_score = round(max(0.0, boilerplate_score - applied), 2)
                     penalties.append({
@@ -592,12 +562,12 @@ def evaluate_cleanliness(
                         "deduction": applied,
                     })
 
-            if missing_lines or recall < 0.92:
+            if missing_lines or recall < 0.94:
                 missing_chars = sum(len(ln) for ln in missing_lines)
                 line_missing_ratio = missing_chars / max(len(ref_md), 1)
                 missing_ratio = max(line_missing_ratio, max(0.0, 1.0 - recall))
                 miss_ded = round(
-                    min(30.0, max(5.0, len(missing_lines) * 4.0 + missing_ratio * 50.0)), 2
+                    min(100.0, max(5.0, len(missing_lines) * 6.0, missing_ratio * 100.0)), 2
                 )
                 applied = round(min(miss_ded, structural_score), 2)
                 if applied > 0.0:
@@ -624,8 +594,8 @@ def evaluate_cleanliness(
         0.25 * sub_scores.noise_purity
         + 0.20 * sub_scores.encoding_purity
         + 0.20 * sub_scores.structural_integrity
-        + 0.20 * sub_scores.boilerplate_freedom
-        + 0.15 * sub_scores.deduplication_purity
+        + 0.25 * sub_scores.boilerplate_freedom
+        + 0.10 * sub_scores.deduplication_purity
     )
 
     return CleanlinessResult(
@@ -636,12 +606,32 @@ def evaluate_cleanliness(
 
 
 # ==============================================================================
-# Accuracy Evaluation
+# Accuracy Evaluation (ICDAR ANLS tau=0.50 & Strict Date Exact Match)
 # ==============================================================================
+
+ANLS_THRESHOLD = 0.50
+
+
+def compute_anls(s1: str, s2: str, threshold: float = ANLS_THRESHOLD) -> float:
+    """Compute ICDAR Average Normalized Levenshtein Similarity (ANLS) on a 0–100 scale.
+
+    Clips similarity to 0.0 when normalized similarity is below `threshold` (0.50),
+    eliminating noise credit on unrelated strings.
+    """
+    if s1 == s2:
+        return 100.0
+    max_len = max(len(s1), len(s2))
+    if max_len == 0:
+        return 100.0
+    dist = levenshtein_distance(s1, s2)
+    sim = max(0.0, 1.0 - (dist / max_len))
+    if sim < threshold:
+        return 0.0
+    return round(sim * 100.0, 2)
 
 
 def _score_title_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any] | None]:
-    """Score title alignment supporting CJK short titles and affixes."""
+    """Score title alignment using ICDAR ANLS (tau=0.50) and CJK affix containment."""
     if (pred is None or str(pred).strip() == "") and (gt is None or str(gt).strip() == ""):
         return 100.0, None
     if pred is None or str(pred).strip() == "":
@@ -671,19 +661,14 @@ def _score_title_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any] | N
         score = round(70.0 + 20.0 * ratio, 2)
         return score, None
 
-    # Levenshtein character similarity for CJK or general text
-    dist = levenshtein_distance(clean_pred, clean_gt)
-    max_len = max(len(clean_pred), len(clean_gt))
-    if max_len == 0:
-        dist = levenshtein_distance(str_pred, str_gt)
-        max_len = max(len(str_pred), len(str_gt))
-        if max_len == 0:
-            return 100.0, None
-    sim = max(0.0, 1.0 - (dist / max_len))
-    score = round(sim * 100.0, 2)
+    # ICDAR ANLS (tau=0.50) character similarity
+    if len(clean_pred) == 0 and len(clean_gt) == 0:
+        score = compute_anls(str_pred, str_gt)
+    else:
+        score = compute_anls(clean_pred, clean_gt)
     mismatch = None if score >= 90.0 else {
         "field": "title",
-        "reason": f"Title divergence (similarity: {score}%)",
+        "reason": f"Title divergence (ANLS: {score}%)",
         "predicted": str_pred,
         "ground_truth": str_gt,
     }
@@ -691,8 +676,7 @@ def _score_title_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any] | N
 
 
 def _score_doc_number_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any] | None]:
-    """Score doc_number with null-matching support and pollution penalties."""
-    # Null matching per M2 reviewer recommendation
+    """Score doc_number with null-matching support, pollution penalties, and ICDAR ANLS (tau=0.50)."""
     if (pred is None or str(pred).strip() == "") and (gt is None or str(gt).strip() == ""):
         return 100.0, None
 
@@ -725,11 +709,8 @@ def _score_doc_number_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any
             "ground_truth": str_gt,
         }
 
-    # Levenshtein fallback
-    dist = levenshtein_distance(clean_pred, clean_gt)
-    max_len = max(len(clean_pred), len(clean_gt))
-    sim = max(0.0, 1.0 - (dist / max_len))
-    score = round(sim * 100.0, 2)
+    # ICDAR ANLS (tau=0.50) fallback
+    score = compute_anls(clean_pred, clean_gt)
     return score, {
         "field": "doc_number",
         "reason": "Document number mismatch",
@@ -739,7 +720,7 @@ def _score_doc_number_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any
 
 
 def _score_date_accuracy(field_name: str, pred: Any, gt: Any) -> tuple[float, dict[str, Any] | None]:
-    """Score ISO date fields with null matching and temporal proximity."""
+    """Score ISO date fields using Strict Normalized Exact Match (EM, 0 or 100)."""
     if (pred is None or str(pred).strip() == "") and (gt is None or str(gt).strip() == ""):
         return 100.0, None
 
@@ -755,34 +736,16 @@ def _score_date_accuracy(field_name: str, pred: Any, gt: Any) -> tuple[float, di
     if str_pred == str_gt:
         return 100.0, None
 
-    # Check same year and month
-    if len(str_pred) >= 7 and len(str_gt) >= 7 and str_pred[:7] == str_gt[:7]:
-        return 60.0, {
-            "field": field_name,
-            "reason": f"Date mismatch on day component ({str_pred} vs {str_gt})",
-            "predicted": str_pred,
-            "ground_truth": str_gt,
-        }
-
-    # Check same year
-    if len(str_pred) >= 4 and len(str_gt) >= 4 and str_pred[:4] == str_gt[:4]:
-        return 30.0, {
-            "field": field_name,
-            "reason": f"Date mismatch on month/day ({str_pred} vs {str_gt})",
-            "predicted": str_pred,
-            "ground_truth": str_gt,
-        }
-
     return 0.0, {
         "field": field_name,
-        "reason": f"Completely mismatched date ({str_pred} vs {str_gt})",
+        "reason": f"Date mismatch ({str_pred} vs {str_gt})",
         "predicted": str_pred,
         "ground_truth": str_gt,
     }
 
 
 def _score_issuer_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any] | None]:
-    """Score enacting/issuing authority with administrative division handling."""
+    """Score enacting/issuing authority using ICDAR ANLS (tau=0.50) and administrative division containment."""
     if (pred is None or str(pred).strip() == "") and (gt is None or str(gt).strip() == ""):
         return 100.0, None
 
@@ -817,11 +780,8 @@ def _score_issuer_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any] | 
             "ground_truth": str_gt,
         }
 
-    # Levenshtein similarity
-    dist = levenshtein_distance(clean_pred, clean_gt)
-    max_len = max(len(clean_pred), len(clean_gt))
-    sim = max(0.0, 1.0 - (dist / max_len)) if max_len > 0 else 0.0
-    score = round(sim * 100.0, 2)
+    # ICDAR ANLS (tau=0.50) similarity
+    score = compute_anls(clean_pred, clean_gt)
     return score, {
         "field": "issuer",
         "reason": "Mismatched issuer authority",
