@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -12,8 +13,22 @@ import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 from wlh.core import WlhError
+
+
+def _probe_tcp(base_url: str, timeout: float = 1.5) -> None:
+    parsed = urlsplit(base_url)
+    host = parsed.hostname
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    if not host:
+        raise WlhError("br_ocr_url_required")
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return
+    except OSError:
+        raise WlhError("br_ocr_unavailable") from None
 
 
 def br_request(
@@ -57,6 +72,7 @@ def br_ocr(
     )
     if not base.startswith(("http://", "https://")):
         raise WlhError("br_ocr_url_required")
+    _probe_tcp(base, timeout=max(0.1, min(1.5, deadline - time.monotonic())))
     with open(path, "rb") as stream:
         content = base64.b64encode(stream.read()).decode("ascii")
     task = str(uuid.uuid4())
@@ -76,7 +92,7 @@ def br_ocr(
             "extra": None,
             "priority": 1,
         },
-        timeout=max(0.1, min(3.0, deadline - time.monotonic())),
+        timeout=max(0.1, min(30.0, deadline - time.monotonic())),
     )
     task_uuid = submitted.get("task_uuid")
     if not isinstance(task_uuid, str) or not task_uuid or "/" in task_uuid:

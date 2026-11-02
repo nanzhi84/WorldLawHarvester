@@ -303,6 +303,22 @@ def _inside(line: Line, box: tuple[float, ...], tolerance: float = 2) -> bool:
     )
 
 
+def _inside_or_trailing_overhang(
+    line: Line, box: tuple[float, ...], tolerance: float = 2.0
+) -> bool:
+    if _inside(line, box, tolerance):
+        return True
+    cx = (line.box[0] + line.box[2]) / 2.0
+    return (
+        line.text != line.text.rstrip()
+        and line.box[0] >= box[0] - tolerance
+        and box[0] <= cx <= box[2]
+        and line.box[1] >= box[1] - tolerance
+        and line.box[3] <= box[3] + tolerance
+        and line.box[2] <= box[2] + max(line.height, 8.0)
+    )
+
+
 def _ruled(table: Any, lines: list[Line]) -> tuple[set[int], str] | None:
     if table.row_count < 2 or table.col_count < 2:
         return None
@@ -339,12 +355,18 @@ def _ruled(table: Any, lines: list[Line]) -> tuple[set[int], str] | None:
                             owner.setdefault((rr, cc), (r_idx, c_idx))
     if len(owner) < table.row_count * table.col_count:
         raise WlhError("pdf_layout_unverified")
-    relevant = [line for line in lines if _inside(line, table.bbox)]
+    relevant = [line for line in lines if _inside_or_trailing_overhang(line, table.bbox)]
     if not relevant:
         return None
     cell_lines: dict[tuple[int, int], list[Line]] = {pos: [] for pos in owner_box}
     for line in relevant:
         matched = [pos for pos, box in owner_box.items() if _inside(line, box, 3.0)]
+        if len(matched) != 1:
+            matched = [
+                pos
+                for pos, box in owner_box.items()
+                if _inside_or_trailing_overhang(line, box, 3.0)
+            ]
         if len(matched) != 1:
             return None
         cell_lines[matched[0]].append(line)
@@ -480,9 +502,11 @@ def _leader_table(lines: list[Line]) -> tuple[set[int], str] | None:
     )
     if len(keys) < 2:
         return None
+    rights = [[line for line in _same_row(key, lines) if line.box[0] > key.box[2]] for key in keys]
+    if not any(rights):
+        return None
     partners: list[Line] = []
-    for key in keys:
-        right = [line for line in _same_row(key, lines) if line.box[0] > key.box[2]]
+    for right in rights:
         if len(right) != 1:
             raise WlhError("pdf_layout_unverified")
         partners.append(right[0])
@@ -562,7 +586,9 @@ def _detect_composite_boxes(page: Any) -> list[tuple[float, float, float, float]
     return frames
 
 
-def _check_box_order(page: Any, lines: list[Line]) -> list[Line]:
+def _check_box_order(
+    page: Any, lines: list[Line], strict_tables: list[Any] | None = None
+) -> list[Line]:
     prose = [
         line
         for line in lines
@@ -584,6 +610,14 @@ def _check_box_order(page: Any, lines: list[Line]) -> list[Line]:
     candidate_boxes.extend(composite_boxes)
     for box in candidate_boxes:
         if box[2] - box[0] < page.rect.width * 0.6 or box[3] - box[1] < height * 3:
+            continue
+        if any(
+            box[0] >= float(t.bbox[0]) - 4.0
+            and box[1] >= float(t.bbox[1]) - 4.0
+            and box[2] <= float(t.bbox[2]) + 4.0
+            and box[3] <= float(t.bbox[3]) + 4.0
+            for t in (strict_tables or [])
+        ):
             continue
         framed_prose = [line for line in prose if _inside(line, box, 3.0)]
         if len(framed_prose) < 2:
@@ -747,7 +781,11 @@ def page_markdown(page: Any, text: str) -> str:
         if (not is_kanpo_page and len(page.get_drawings()) >= 4)
         else []
     )
-    lines = _check_box_order(page, native_lines(page, strict_tables)) if not is_kanpo_page else native_lines(page, [])
+    lines = (
+        _check_box_order(page, native_lines(page, strict_tables), strict_tables)
+        if not is_kanpo_page
+        else native_lines(page, [])
+    )
     if sum(bool(_VERT_CJK_CHAR.fullmatch(ln.text.strip())) for ln in lines) >= 80:
         strict_tables = []
     if not strict_tables:

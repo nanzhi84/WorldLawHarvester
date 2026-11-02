@@ -112,7 +112,7 @@ def _url_rewrites(config: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
 
 
 class HtmlParser(WebDocumentBuilder, Base):
-    CONTRACT: str = "wlh.parser.html.v7"
+    CONTRACT: str = "wlh.parser.html.v8"
     PLANNING_OPTIONS: tuple[str, ...] = ("max_pages",)
 
     @staticmethod

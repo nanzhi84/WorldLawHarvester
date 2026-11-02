@@ -323,13 +323,16 @@ def infer_effective_date(
             explicit_dates.append(iso)
 
     for m_greg in re.finditer(
-        r"(?:自|於)?\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?:起)?(?:施行|生效)",
+        r"(?:(?:自|於|于)?\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?:之日)?(?:起)?(?:施行|生效)|(?:自|於|于)\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日(?:之日)?(?:起)?(?:试行|試行|执行|執行|实施|實施))",
         combined,
     ):
+        y_s = m_greg.group(1) or m_greg.group(4)
+        m_s = m_greg.group(2) or m_greg.group(5)
+        d_s = m_greg.group(3) or m_greg.group(6)
         try:
             explicit_dates.append(
                 datetime(
-                    int(m_greg.group(1)), int(m_greg.group(2)), int(m_greg.group(3))
+                    int(y_s), int(m_s), int(d_s)
                 ).date().isoformat()
             )
         except ValueError:
@@ -349,7 +352,7 @@ def infer_effective_date(
 
     has_same_day_clause = bool(
         re.search(
-            r"(?:本法|本條例|本通則|本規則|本辦法|本細則|本準則|本標準|本綱要|本規程|本編制表|本協定|本協議|本條約|本約定書|本備忘錄|修正條文)[^\n。；]{0,30}?自(?:公布|發布|簽署|簽字|換文)之?日(?:起)?(?:施行|生效)|自(?:公布|發布|簽署|簽字|換文)之?日(?:起)?(?:施行|生效)|enter(?:s|ed)?\s+into\s+force\s+(?:(?:at|on)\s+(?:the\s+)?same\s+date|(?:on|from)\s+the\s+date\s+of\s+sign(?:ature|ing)|upon\s+sign(?:ature|ing))|effective\s+(?:from\s+the\s+date\s+of\s+sign(?:ature|ing)|upon\s+sign(?:ature|ing))",
+            r"(?:本法|本條例|本条例|本通則|本通则|本規則|本规则|本辦法|本办法|本細則|本细则|本準則|本准则|本標準|本标准|本綱要|本纲要|本規程|本规程|本指引|本规范|本規範|本編制表|本協定|本協議|本协议|本條約|本約定書|本備忘錄|修正條文)[^\n。；]{0,30}?自(?:公布|發布|发布|印发|簽署|簽字|換文)之?日(?:起)?(?:施行|生效|试行|試行|执行|執行|实施|實施)|自(?:公布|發布|发布|印发|簽署|簽字|換文)之?日(?:起)?(?:施行|生效|试行|試行|执行|執行|实施|實施)|enter(?:s|ed)?\s+into\s+force\s+(?:(?:at|on)\s+(?:the\s+)?same\s+date|(?:on|from)\s+the\s+date\s+of\s+sign(?:ature|ing)|upon\s+sign(?:ature|ing))|effective\s+(?:from\s+the\s+date\s+of\s+sign(?:ature|ing)|upon\s+sign(?:ature|ing))",
             combined,
             re.IGNORECASE,
         )

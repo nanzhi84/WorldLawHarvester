@@ -32,7 +32,7 @@ from wlh.processor.extractors.quirks.vi_tcvn3 import normalize_detected_tcvn3
 
 fitz: Any = _fitz
 
-PDF_CONTRACT = "wlh.pdf-scan.v14"
+PDF_CONTRACT = "wlh.pdf-scan.v15"
 SCAN_TEXT_CHARS = 30
 SCAN_INK_RATIO = 0.003
 INK_THRESHOLD = 210
@@ -165,6 +165,13 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
                         if r.width <= 1.5 or r.height <= 1.5 or not _rect_has_ink(pix, r, rect):
                             continue
                         cov = (r.width * r.height) / page_area
+                        if (
+                            number <= 2
+                            and native >= NORMAL_PAGE_TEXT_CHARS
+                            and cov <= 0.015
+                            and float(r.y1) <= float(rect.height) * 0.30
+                        ):
+                            continue
                         if is_kanpo_pua_page and (
                             cov < 0.35
                             or native >= 500
@@ -223,7 +230,19 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
             and float(p["image_coverage"]) >= 0.25
             and float(p["ink_ratio"]) >= SIGNATURE_PAGE_MIN_INK
         )
-        suspected = is_pure_scan or is_signature_scan or unreadable_body
+        is_full_page_appendix_scan = (
+            has_normal_text_page
+            and int(p["page"]) >= 2
+            and int(p["embedded_images"]) == 1
+            and float(p["image_coverage"]) >= 0.95
+            and float(p["ink_ratio"]) >= SIGNATURE_PAGE_MIN_INK
+        )
+        suspected = (
+            is_pure_scan
+            or is_signature_scan
+            or is_full_page_appendix_scan
+            or unreadable_body
+        )
         page_entry: dict[str, Any] = dict(p, suspected_scan=suspected)
         if overlay_xrefs:
             page_entry["overlay_xrefs"] = overlay_xrefs

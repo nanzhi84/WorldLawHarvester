@@ -216,3 +216,39 @@ class TestHtmlToMarkdownConversion:
         assert parse_date("24.10.2026") == "2026-10-24"
         assert parse_date("October 24, 2026") == "2026-10-24"
 
+    def test_infer_effective_date_extracts_simplified_chinese_trial_and_execution_clauses(
+        self,
+    ) -> None:
+        """`infer_effective_date` extracts effective dates from Simplified Chinese regulatory/practice guidance trial (`试行`) and execution (`执行`) clauses."""
+        from wlh.cleaners.dates import infer_effective_date
+
+        assert (
+            infer_effective_date(
+                "第八章 附 则\n第四十四条 本指引自2019年8月1日起试行。",
+                published_at="2025-03-22",
+            )
+            == "2019-08-01"
+        )
+        assert (
+            infer_effective_date(
+                "第六章 附 则\n第四十四条 本指引自2019年8月1日之日起试行。",
+                published_at="2025-03-22",
+            )
+            == "2019-08-01"
+        )
+        assert (
+            infer_effective_date(
+                "第八章 附 则\n第三十七条 本指引自2021年8月1日试行。",
+                published_at="2025-03-22",
+            )
+            == "2021-08-01"
+        )
+        assert (
+            infer_effective_date(
+                "第六章 附 则\n第四十条 本规则自发布之日起执行。",
+                published_at="2025-03-22",
+            )
+            == "2025-03-22"
+        )
+
+
