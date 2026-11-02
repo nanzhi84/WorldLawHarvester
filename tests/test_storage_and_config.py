@@ -534,3 +534,246 @@ storage:
             with pytest.raises(WlhError) as exc_info:
                 load_file(yaml_path)
             assert exc_info.value.code == "invalid_source_config"
+
+    def test_business_tax_p0_sources_integrated_and_synced_to_delivery_subtable(
+        self, tmp_path: Path
+    ) -> None:
+        """All 45 business tax items are archived, integrated into the main matrix as P0, and one-way synced to the delivery sub-table."""
+        import csv
+        import re
+        import xml.etree.ElementTree as ET
+        import zipfile
+
+        from wlh.matrix import (
+            DEFAULT_TAX_SUBTABLE_CSV_PATH,
+            main,
+            render_tax_subtable_from_csv,
+            sync_csv_to_tax_subtable,
+        )
+
+        repo_root = Path(__file__).resolve().parents[1]
+
+        # 1. Reference Archival Contract
+        ref_docx = repo_root / "docs" / "reference" / "税务权威信息来源目录_v2.0.docx"
+        ref_xlsx = repo_root / "docs" / "reference" / "税务采集来源业务确认清单.xlsx"
+        ref_index = repo_root / "docs" / "reference" / "INDEX.md"
+
+        assert ref_docx.is_file(), f"Missing archived docx: {ref_docx}"
+        assert not (repo_root / "税务权威信息来源目录_v2.0.docx").exists()
+        assert ref_xlsx.is_file(), f"Missing archived xlsx: {ref_xlsx}"
+        assert not (repo_root / "税务采集来源业务确认清单.xlsx").exists()
+
+        index_text = ref_index.read_text(encoding="utf-8")
+        assert "税务权威信息来源目录_v2.0.docx" in index_text
+        assert "税务采集来源业务确认清单.xlsx" in index_text
+
+        # 2. Main Matrix Integration Contract
+        ns = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        excel_items: list[tuple[str, str, str, str]] = []
+        with zipfile.ZipFile(ref_xlsx) as zf:
+            sst_root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
+            shared_strings = [
+                "".join(t.text or "" for t in si.findall(".//main:t", ns))
+                for si in sst_root.findall("main:si", ns)
+            ]
+            sheet_root = ET.fromstring(zf.read("xl/worksheets/sheet1.xml"))
+            for row_el in sheet_root.findall(".//main:sheetData/main:row", ns):
+                row_idx = int(row_el.attrib["r"])
+                if 6 <= row_idx <= 50:
+                    cells: dict[str, str] = {}
+                    for cell_el in row_el.findall("main:c", ns):
+                        col_letters = "".join(
+                            ch for ch in cell_el.attrib["r"] if ch.isalpha()
+                        )
+                        val_el = cell_el.find("main:v", ns)
+                        cell_val = ""
+                        if val_el is not None and val_el.text is not None:
+                            cell_val = (
+                                shared_strings[int(val_el.text)]
+                                if cell_el.attrib.get("t") == "s"
+                                else val_el.text
+                            )
+                        cells[col_letters] = cell_val.strip()
+                    excel_items.append(
+                        (
+                            cells.get("A", ""),
+                            cells.get("C", ""),
+                            cells.get("D", ""),
+                            cells.get("E", ""),
+                        )
+                    )
+
+        assert len(excel_items) == 45
+        excel_by_code = {
+            code: (inst, col, entry_url) for code, inst, col, entry_url in excel_items
+        }
+
+        tracked_p0_source_ids = [
+            "dd-504",  # D01
+            "dd-592",  # D02
+            "dd-593",  # D03
+            "dd-594",  # D04
+            "dd-500",  # D06
+            "dd-595",  # D07
+            "dd-596",  # D08
+            "dd-507",  # I03
+            "dd-599",  # I04
+            "dd-600",  # I05
+            "dd-601",  # I06
+            "dd-602",  # I09
+            "dd-566",  # I11
+            "dd-603",  # D05
+            "dd-604",  # D10
+            "dd-605",  # D12
+            "dd-606",  # D13
+            "dd-607",  # B02
+            "dd-608",  # B03
+            "dd-611",  # B08
+            "dd-612",  # B09
+        ]
+        assert len(tracked_p0_source_ids) == 21
+
+        matrix_csv = repo_root / "docs" / "runbooks" / "source-adaptation-matrix.csv"
+        with matrix_csv.open(encoding="utf-8-sig", newline="") as handle:
+            matrix_rows = list(csv.DictReader(handle))
+
+        matrix_by_id = {row["Source ID"].strip(): row for row in matrix_rows}
+        urgent_p0_rows = [
+            row
+            for row in matrix_rows
+            if "【业务紧急P0｜" in row.get("备注与实测结论", "")
+        ]
+        downgraded_p2_rows = [
+            row
+            for row in matrix_rows
+            if "【业务清单P2｜" in row.get("备注与实测结论", "")
+        ]
+        assert len(urgent_p0_rows) == 21
+        assert len(downgraded_p2_rows) == 24
+        assert {r["Source ID"].strip() for r in urgent_p0_rows} == set(
+            tracked_p0_source_ids
+        )
+        for row in urgent_p0_rows:
+            assert row["优先级"].strip() == "P0"
+        for row in downgraded_p2_rows:
+            assert row["优先级"].strip() == "P2"
+
+        all_45_biz_rows = urgent_p0_rows + downgraded_p2_rows
+        p2_source_ids = {r["Source ID"].strip() for r in downgraded_p2_rows}
+
+        for code, inst, col, entry_url in excel_items:
+            matching = [
+                row
+                for row in all_45_biz_rows
+                if f"编号:{code}｜" in row["备注与实测结论"]
+                or f"编号:{code}】" in row["备注与实测结论"]
+            ]
+            assert len(matching) == 1, f"Expected 1 matrix row for {code}, got {len(matching)}"
+            assert matching[0]["来源名称"].strip() == f"{inst}（{col}）"
+            assert matching[0]["官方入口 URL"].strip() == entry_url
+
+        # 3. One-Way Sub-Table Export & Hook Sync Contract
+        assert DEFAULT_TAX_SUBTABLE_CSV_PATH == Path(
+            "docs/runbooks/tax-p0-delivery-matrix.csv"
+        )
+        subtable_path = repo_root / DEFAULT_TAX_SUBTABLE_CSV_PATH
+        assert subtable_path.is_file(), f"Missing sub-table CSV: {subtable_path}"
+        assert subtable_path.read_text(
+            encoding="utf-8-sig"
+        ) == render_tax_subtable_from_csv(matrix_csv).lstrip("\ufeff")
+
+        expected_fieldnames = [
+            "业务编号",
+            "Source ID",
+            "状态",
+            "优先级",
+            "推荐适配器",
+            "来源类别",
+            "来源机构",
+            "采集栏目",
+            "官方入口 URL",
+            "法域/国家",
+            "资料类型",
+            "内容形式",
+            "原建议优先级",
+            "备注与实测结论",
+            "预期完成时间",
+        ]
+        with subtable_path.open(encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            assert reader.fieldnames == expected_fieldnames
+            sub_rows = list(reader)
+
+        assert len(sub_rows) == 21
+        assert [r["Source ID"] for r in sub_rows] == tracked_p0_source_ids
+        assert p2_source_ids.isdisjoint({r["Source ID"] for r in sub_rows})
+
+        sub_by_code = {r["业务编号"]: r for r in sub_rows}
+        assert sub_by_code["I03"]["Source ID"] == "dd-507"
+        assert sub_by_code["I03"]["状态"] == "[x] 已实网跑通"
+        assert sub_by_code["D13"]["预期完成时间"] == "2026-11-03"
+        assert sub_by_code["D05"]["预期完成时间"] == "2026-11-04"
+        assert sub_by_code["D10"]["预期完成时间"] == "2026-11-05"
+        assert sub_by_code["D12"]["预期完成时间"] == "2026-11-06"
+        assert "不纳入采集范围" not in sub_by_code["D12"]["备注与实测结论"]
+        assert "微信外链" in sub_by_code["D12"]["备注与实测结论"]
+        assert "不纳入采集范围" not in matrix_by_id["dd-605"]["备注与实测结论"]
+        assert "微信外链" in matrix_by_id["dd-605"]["备注与实测结论"]
+
+        for sub_row in sub_rows:
+            code = sub_row["业务编号"]
+            inst, col, entry_url = excel_by_code[code]
+            assert sub_row["来源机构"] == inst
+            assert sub_row["采集栏目"] == col
+            assert sub_row["官方入口 URL"] == entry_url
+            eta = sub_row["预期完成时间"]
+            assert re.match(r"^2026-11-\d{2}$", eta), f"Invalid 预期完成时间 for {code}: {eta!r}"
+            assert eta >= "2026-11-03"
+            sid = sub_row["Source ID"]
+            assert sid in matrix_by_id
+            m_row = matrix_by_id[sid]
+            assert sub_row["状态"] == m_row["状态"].strip()
+            assert sub_row["优先级"] == m_row["优先级"].strip()
+            assert sub_row["推荐适配器"] == m_row["推荐适配器"].strip()
+            assert sub_row["官方入口 URL"] == m_row["官方入口 URL"].strip()
+
+        # Verify one-way sync behavior in tmp_path
+        tmp_csv = tmp_path / "matrix.csv"
+        tmp_md = tmp_path / "matrix.md"
+        tmp_subtable = tmp_path / "subtable.csv"
+
+        tmp_csv.write_text(
+            "Source ID,大洲/区域,法域/国家,业务子分类,资料类型,来源名称,官方入口 URL,优先级,推荐适配器,状态,备注与实测结论\n"
+            "dd-001,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),—,法律法规,普通来源,https://example.com/normal,P1,html,[ ] 待适配,普通备注\n"
+            "dd-597,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),—,税务与财税法规,财政部（政策发布）,https://www.mof.gov.cn/zhengwuxinxi/zhengcefabu/,P2,html,[ ] 待适配,【业务清单P2｜编号:D09｜类别:官方法规原文与政策发布｜机构:财政部｜栏目:政策发布｜形式:网页、附件｜原优先级:中】非紧急备注\n"
+            "dd-504,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),—,税务与财税法规,国家税务总局（政策法规）,https://fgk.chinatax.gov.cn/zcfgk/c100006/listflfg.html,P0,html,[ ] 待适配,🔥 【业务紧急P0｜编号:D01｜类别:官方法规原文与政策发布｜机构:国家税务总局｜栏目:政策法规｜形式:网页、PDF附件｜原优先级:高】测试备注\n",
+            encoding="utf-8",
+        )
+        assert sync_csv_to_tax_subtable(tmp_csv, tmp_subtable) is True
+        assert sync_csv_to_tax_subtable(tmp_csv, tmp_subtable) is False
+
+        tmp_csv.write_text(
+            "Source ID,大洲/区域,法域/国家,业务子分类,资料类型,来源名称,官方入口 URL,优先级,推荐适配器,状态,备注与实测结论\n"
+            "dd-001,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),—,法律法规,普通来源,https://example.com/normal,P1,html,[ ] 待适配,普通备注\n"
+            "dd-597,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),—,税务与财税法规,财政部（政策发布）,https://www.mof.gov.cn/zhengwuxinxi/zhengcefabu/,P2,html,[ ] 待适配,【业务清单P2｜编号:D09｜类别:官方法规原文与政策发布｜机构:财政部｜栏目:政策发布｜形式:网页、附件｜原优先级:中】非紧急备注\n"
+            "dd-504,1. 亚洲法域 (Asia),1.1 中国大陆 (China Mainland),—,税务与财税法规,国家税务总局（政策法规）,https://fgk.chinatax.gov.cn/zcfgk/c100006/listflfg.html,P0,html（sources/dd-504.yaml）,[x] 已实网跑通,🔥 【业务紧急P0｜编号:D01｜类别:官方法规原文与政策发布｜机构:国家税务总局｜栏目:政策法规｜形式:网页、PDF附件｜原优先级:高】测试备注\n",
+            encoding="utf-8",
+        )
+        rc = main(
+            [
+                "--csv",
+                str(tmp_csv),
+                "--md",
+                str(tmp_md),
+                "--subtable",
+                str(tmp_subtable),
+            ]
+        )
+        assert rc == 0
+        with tmp_subtable.open(encoding="utf-8-sig", newline="") as handle:
+            updated_rows = list(csv.DictReader(handle))
+        assert len(updated_rows) == 1
+        assert updated_rows[0]["业务编号"] == "D01"
+        assert updated_rows[0]["Source ID"] == "dd-504"
+        assert updated_rows[0]["状态"] == "[x] 已实网跑通"
+        assert updated_rows[0]["推荐适配器"] == "html（sources/dd-504.yaml）"

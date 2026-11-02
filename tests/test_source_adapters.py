@@ -112,6 +112,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-591", "案例", "72 年台上字第 704 號"),
             ("dd-143", "其他", "文献蓄積情報(特許・実用新案)"),
             ("dd-518", "政策文件", "政府調達"),
+            ("dd-606", "税务资料", "税务师行业涉税专业服务规范基本指引（试行）"),
         ],
     )
     def test_adapted_production_source_configs_collect_and_reparse_against_local_samples(
@@ -444,3 +445,58 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             rp_res = execute_run(rp_run)
             assert rp_res["status"] == "complete", f"{source_id} reparse failed: {rp_res}"
             assert rp_res["report"]["external_requests"] == 0
+
+    def test_tax_p0_dd507_and_dd606_production_configs_enforce_full_catalog_scope_and_metadata_contracts(
+        self,
+    ) -> None:
+        """Production configs `dd-507` and `dd-606` enforce full-catalog budgets, URL patterns, and metadata extraction."""
+        import re
+
+        repo_root = Path(__file__).resolve().parents[1]
+
+        dd507_path = repo_root / "sources" / "dd-507.yaml"
+        assert dd507_path.is_file(), "Missing sources/dd-507.yaml"
+        cfg_507: dict[str, Any] = yaml.safe_load(dd507_path.read_text(encoding="utf-8"))
+        sched_507: dict[str, Any] = cfg_507["scheduler"]
+        budget_507: dict[str, Any] = sched_507["budget"]
+        assert int(budget_507["documents"]) >= 73
+        assert int(budget_507["requests"]) >= 80
+
+        docs_507: dict[str, Any] = cfg_507["processor"]["parser"]["documents"]
+        detail_pats_507 = [str(p) for p in docs_507["detail_url_patterns"]]
+        for sample_pdf_url in (
+            "https://www.ird.gov.hk/eng/pdf/dipn01.pdf",
+            "https://www.ird.gov.hk/eng/pdf/dipn13a.pdf",
+            "https://www.ird.gov.hk/eng/pdf/edoipn01.pdf",
+            "https://www.ird.gov.hk/eng/pdf/soipn08.pdf",
+        ):
+            assert any(re.search(pat, sample_pdf_url) for pat in detail_pats_507), (
+                f"Expected detail_url_patterns in dd-507.yaml to match {sample_pdf_url}"
+            )
+        fields_507 = cast(dict[str, Any], docs_507.get("fields") or {})
+        assert isinstance(fields_507.get("title"), dict) and fields_507["title"], (
+            "Expected fields.title extraction rule in dd-507.yaml"
+        )
+
+        dd606_path = repo_root / "sources" / "dd-606.yaml"
+        assert dd606_path.is_file(), "Missing sources/dd-606.yaml"
+        raw_text_606 = dd606_path.read_text(encoding="utf-8")
+        assert (
+            raw_text_606.splitlines()[0].strip()
+            == "# 来源台账：docs/runbooks/source-adaptation-matrix.md#dd-606"
+        )
+        cfg_606: dict[str, Any] = yaml.safe_load(raw_text_606)
+        assert cfg_606["id"] == "dd-606"
+        sched_606: dict[str, Any] = cfg_606["scheduler"]
+        assert sched_606["entry_urls"] == ["https://www.cctaa.cn/zygf/"]
+        assert int(sched_606["max_depth"]) >= 2
+        assert int(sched_606["budget"]["documents"]) >= 58
+
+        meta_606: dict[str, Any] = cfg_606["storage"]["metadata"]
+        assert meta_606["document_type"] == "税务资料"
+
+        fields_606: dict[str, Any] = cfg_606["processor"]["parser"]["documents"]["fields"]
+        assert fields_606["issuer"]["value"] == "中国注册税务师协会"
+        for req_field in ("title", "document_number", "published_at"):
+            assert req_field in fields_606, f"Missing required field {req_field} in dd-606.yaml"
+

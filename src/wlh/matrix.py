@@ -6,6 +6,7 @@ import argparse
 import csv
 import fcntl
 import hashlib
+import io
 import os
 import re
 import select
@@ -14,6 +15,73 @@ from pathlib import Path
 
 DEFAULT_CSV_PATH = Path("docs/runbooks/source-adaptation-matrix.csv")
 DEFAULT_MD_PATH = Path("docs/runbooks/source-adaptation-matrix.md")
+DEFAULT_TAX_SUBTABLE_CSV_PATH = Path("docs/runbooks/tax-p0-delivery-matrix.csv")
+
+TAX_SUBTABLE_FIELDNAMES: tuple[str, ...] = (
+    "业务编号",
+    "Source ID",
+    "状态",
+    "优先级",
+    "推荐适配器",
+    "来源类别",
+    "来源机构",
+    "采集栏目",
+    "官方入口 URL",
+    "法域/国家",
+    "资料类型",
+    "内容形式",
+    "原建议优先级",
+    "备注与实测结论",
+    "预期完成时间",
+)
+
+CANONICAL_TAX_P0_ORDER: tuple[str, ...] = (
+    "D01",
+    "D02",
+    "D03",
+    "D04",
+    "D06",
+    "D07",
+    "D08",
+    "I03",
+    "I04",
+    "I05",
+    "I06",
+    "I09",
+    "I11",
+    "D05",
+    "D10",
+    "D12",
+    "D13",
+    "B02",
+    "B03",
+    "B08",
+    "B09",
+)
+
+DEFAULT_TAX_P0_EXPECTED_DATES: dict[str, str] = {
+    "D01": "2026-11-13",
+    "D02": "2026-11-10",
+    "D03": "2026-11-17",
+    "D04": "2026-11-19",
+    "D06": "2026-11-26",
+    "D07": "2026-11-24",
+    "D08": "2026-11-20",
+    "I03": "2026-11-03",
+    "I04": "2026-11-04",
+    "I05": "2026-11-09",
+    "I06": "2026-11-05",
+    "I09": "2026-11-27",
+    "I11": "2026-11-23",
+    "D05": "2026-11-04",
+    "D10": "2026-11-05",
+    "D12": "2026-11-06",
+    "D13": "2026-11-03",
+    "B02": "2026-11-13",
+    "B03": "2026-11-17",
+    "B08": "2026-11-10",
+    "B09": "2026-11-11",
+}
 
 TABLE_HEADER = (
     "| Source\u00a0ID | \u2060\u00a0\u00a0资\u2060料\u2060类\u2060型\u00a0\u00a0\u2060 "
@@ -331,6 +399,106 @@ def sync_csv_to_md(
                 pass
 
 
+def _parse_urgent_tax_tag(raw_note: str) -> tuple[dict[str, str], str] | None:
+    """Extract structured metadata from `【业务紧急P0｜...】` tag in matrix note."""
+    m = re.search(r"【业务紧急P0｜([^】]+)】(.*)$", raw_note.strip())
+    if not m:
+        return None
+    meta: dict[str, str] = {}
+    for token in m.group(1).split("｜"):
+        if ":" in token:
+            k, v = token.split(":", 1)
+            meta[k.strip()] = v.strip()
+    rest_note = m.group(2).strip()
+    return meta, (rest_note if rest_note else raw_note.strip())
+
+
+def render_tax_subtable_from_csv(csv_path: Path = DEFAULT_CSV_PATH) -> str:
+    """Render `tax-p0-delivery-matrix.csv` one-way from `source-adaptation-matrix.csv`."""
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
+
+    order_index = {code: idx for idx, code in enumerate(CANONICAL_TAX_P0_ORDER)}
+    extracted: list[tuple[int, int, dict[str, str]]] = []
+
+    for row_idx, r in enumerate(rows):
+        if r.get("优先级", "").strip() != "P0":
+            continue
+        note = r.get("备注与实测结论", "").strip()
+        parsed = _parse_urgent_tax_tag(note)
+        if parsed is None:
+            continue
+        meta, clean_note = parsed
+        code = meta.get("编号", "")
+        sort_rank = order_index.get(code, 10000 + row_idx)
+        extracted.append(
+            (
+                sort_rank,
+                row_idx,
+                {
+                    "业务编号": code,
+                    "Source ID": r.get("Source ID", "").strip(),
+                    "状态": r.get("状态", "").strip(),
+                    "优先级": r.get("优先级", "").strip(),
+                    "推荐适配器": r.get("推荐适配器", "").strip(),
+                    "来源类别": meta.get("类别", ""),
+                    "来源机构": meta.get("机构", ""),
+                    "采集栏目": meta.get("栏目", ""),
+                    "官方入口 URL": r.get("官方入口 URL", "").strip(),
+                    "法域/国家": r.get("法域/国家", "").strip(),
+                    "资料类型": r.get("资料类型", "").strip(),
+                    "内容形式": meta.get("形式", ""),
+                    "原建议优先级": meta.get("原优先级", ""),
+                    "备注与实测结论": clean_note,
+                    "预期完成时间": meta.get(
+                        "预期完成时间",
+                        DEFAULT_TAX_P0_EXPECTED_DATES.get(code, ""),
+                    ),
+                },
+            )
+        )
+
+    extracted.sort(key=lambda item: (item[0], item[1]))
+    buf = io.StringIO()
+    writer = csv.DictWriter(
+        buf, fieldnames=list(TAX_SUBTABLE_FIELDNAMES), lineterminator="\n"
+    )
+    writer.writeheader()
+    for _, _, item_row in extracted:
+        writer.writerow(item_row)
+    return buf.getvalue()
+
+
+def sync_csv_to_tax_subtable(
+    csv_path: Path = DEFAULT_CSV_PATH,
+    subtable_path: Path = DEFAULT_TAX_SUBTABLE_CSV_PATH,
+) -> bool:
+    """One-way synchronize `source-adaptation-matrix.csv` -> `tax-p0-delivery-matrix.csv`."""
+    subtable_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = subtable_path.with_suffix(".csv.lock")
+    with lock_path.open("w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            rendered = render_tax_subtable_from_csv(csv_path)
+            current = (
+                subtable_path.read_text(encoding="utf-8-sig")
+                if subtable_path.exists()
+                else ""
+            )
+            if rendered == current:
+                return False
+            tmp_path = subtable_path.with_suffix(f".csv.{os.getpid()}.tmp")
+            tmp_path.write_text(rendered, encoding="utf-8")
+            tmp_path.replace(subtable_path)
+            return True
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            try:
+                lock_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def _file_digest(path: Path) -> str:
     if not path.exists():
         return ""
@@ -340,22 +508,25 @@ def _file_digest(path: Path) -> str:
 def watch_csv(
     csv_path: Path = DEFAULT_CSV_PATH,
     md_path: Path = DEFAULT_MD_PATH,
+    subtable_path: Path = DEFAULT_TAX_SUBTABLE_CSV_PATH,
 ) -> None:
     """Wait on OS kernel VFS events (kqueue EVFILT_VNODE) for CSV modifications without polling."""
     csv_path = csv_path.resolve()
     md_path = md_path.resolve()
+    subtable_path = subtable_path.resolve()
     parent_dir = csv_path.parent
     last_digest = _file_digest(csv_path)
     html_path = md_path.parent / "source-verification-samples.html"
     if last_digest:
         changed = sync_csv_to_md(csv_path, md_path)
+        sub_changed = sync_csv_to_tax_subtable(csv_path, subtable_path)
         if html_path.is_file():
             from wlh.runbook_samples import sync_csv_to_html
 
             sync_csv_to_html(csv_path, html_path)
         ts = datetime.now().strftime("%H:%M:%S")
         print(
-            f"[{ts}] [matrix-hook] Initial sync check complete (updated={changed}). Waiting for kernel VFS events on {csv_path.name}",
+            f"[{ts}] [matrix-hook] Initial sync check complete (md={changed}, subtable={sub_changed}). Waiting for kernel VFS events on {csv_path.name}",
             flush=True,
         )
 
@@ -410,13 +581,14 @@ def watch_csv(
             if digest and digest != last_digest:
                 last_digest = digest
                 changed = sync_csv_to_md(csv_path, md_path)
+                sub_changed = sync_csv_to_tax_subtable(csv_path, subtable_path)
                 if html_path.is_file():
                     from wlh.runbook_samples import sync_csv_to_html
 
                     sync_csv_to_html(csv_path, html_path)
                 ts = datetime.now().strftime("%H:%M:%S")
                 print(
-                    f"[{ts}] [matrix-hook] CSV modification event -> synced {md_path.name} (updated={changed})",
+                    f"[{ts}] [matrix-hook] CSV modification event -> synced {md_path.name} (updated={changed}) & {subtable_path.name} (updated={sub_changed})",
                     flush=True,
                 )
     finally:
@@ -431,10 +603,16 @@ def watch_csv(
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Sync docs/runbooks/source-adaptation-matrix.csv -> source-adaptation-matrix.md"
+        description="Sync docs/runbooks/source-adaptation-matrix.csv -> source-adaptation-matrix.md & tax-p0-delivery-matrix.csv"
     )
     ap.add_argument("--csv", type=Path, default=DEFAULT_CSV_PATH, help="Path to source CSV")
     ap.add_argument("--md", type=Path, default=DEFAULT_MD_PATH, help="Path to target Markdown")
+    ap.add_argument(
+        "--subtable",
+        type=Path,
+        default=DEFAULT_TAX_SUBTABLE_CSV_PATH,
+        help="Path to target tax P0 delivery sub-table CSV",
+    )
     ap.add_argument(
         "--watch",
         action="store_true",
@@ -444,13 +622,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.watch:
         try:
-            watch_csv(args.csv, args.md)
+            watch_csv(args.csv, args.md, args.subtable)
         except KeyboardInterrupt:
             return 0
         return 0
 
     changed = sync_csv_to_md(args.csv, args.md)
     print(f"synced {args.csv} -> {args.md} (updated={changed})")
+    sub_changed = sync_csv_to_tax_subtable(args.csv, args.subtable)
+    print(f"synced {args.csv} -> {args.subtable} (updated={sub_changed})")
     html_target = args.md.resolve().parent / "source-verification-samples.html"
     if html_target.is_file():
         from wlh.runbook_samples import sync_csv_to_html
