@@ -3,6 +3,7 @@ work/
 artifacts/
 tests/fixtures/
 experiments/**/.kanpo_ocr_cache.json
+.agents/teamwork/
 
 .venv/
 __pycache__/

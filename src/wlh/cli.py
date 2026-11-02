@@ -70,6 +70,12 @@ def parser() -> Parser:
     )
     quality.add_argument("source_id")
     quality.add_argument("--require-multi-resource", action="store_true")
+    benchmark = commands.add_parser(
+        "benchmark", help="Run quantitative cleanliness and accuracy benchmarks"
+    )
+    from wlh.benchmark.cli import configure_benchmark_parser
+
+    configure_benchmark_parser(benchmark)
     return root
 
 
@@ -78,6 +84,10 @@ def dispatch(args: argparse.Namespace) -> dict[str, Any]:
         from wlh.api.server import serve
 
         return serve(args.config, args.host, args.port)
+    if args.command == "benchmark":
+        from wlh.benchmark.cli import run_benchmark_cli
+
+        return run_benchmark_cli(args)
     from wlh.storage.db import initialize, require_current
 
     if args.command == "init":
