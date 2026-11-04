@@ -12,12 +12,16 @@ import hashlib
 import json
 import re
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, cast
+
+from wlh.core import public_url
 
 DEFAULT_CANDIDATES_PATH = Path("data/benchmark/raw_candidates.jsonl")
 DEFAULT_ANNOTATOR_A_PATH = Path("data/benchmark/annotations/annotator_a.jsonl")
 DEFAULT_ANNOTATOR_B_PATH = Path("data/benchmark/annotations/annotator_b.jsonl")
+DEFAULT_DISPUTES_PATH = Path("data/benchmark/annotations/disputes.jsonl")
 DEFAULT_LOG_PATH = Path("data/benchmark/cross_verification_log.json")
 DEFAULT_BENCHMARK_PATH = Path("data/benchmark/ground_truth_benchmark.jsonl")
 
@@ -575,16 +579,336 @@ def write_benchmark_dataset(
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+
+def evaluate_task_agreement(
+    task_type: str,
+    gt_a: Mapping[str, Any],
+    gt_b: Mapping[str, Any],
+) -> tuple[bool, list[str]]:
+    """Evaluate agreement between Annotator A and B for list_page or content_page tasks."""
+    if task_type == "list_page":
+        raw_u_a = gt_a.get("target_urls")
+        u_list_a: list[object] = cast(list[object], raw_u_a) if isinstance(raw_u_a, list) else []
+        urls_a: set[str] = {public_url(str(u)).rstrip("/") for u in u_list_a if u}
+        raw_u_b = gt_b.get("target_urls")
+        u_list_b: list[object] = cast(list[object], raw_u_b) if isinstance(raw_u_b, list) else []
+        urls_b: set[str] = {public_url(str(u)).rstrip("/") for u in u_list_b if u}
+        if urls_a == urls_b:
+            return True, []
+        diffs: list[str] = []
+        if urls_a - urls_b:
+            diffs.append(f"URLs only in A: {sorted(urls_a - urls_b)}")
+        if urls_b - urls_a:
+            diffs.append(f"URLs only in B: {sorted(urls_b - urls_a)}")
+        return False, diffs
+
+    raw_recs_a = gt_a.get("records")
+    r_list_a: list[object] = cast(list[object], raw_recs_a) if isinstance(raw_recs_a, list) else []
+    recs_a: list[Mapping[str, Any]] = (
+        [cast(Mapping[str, Any], r) for r in r_list_a if isinstance(r, Mapping)]
+        if r_list_a
+        else [gt_a]
+    )
+    raw_recs_b = gt_b.get("records")
+    r_list_b: list[object] = cast(list[object], raw_recs_b) if isinstance(raw_recs_b, list) else []
+    recs_b: list[Mapping[str, Any]] = (
+        [cast(Mapping[str, Any], r) for r in r_list_b if isinstance(r, Mapping)]
+        if r_list_b
+        else [gt_b]
+    )
+
+    if len(recs_a) != len(recs_b):
+        return False, [f"Record count split mismatch: len(A)={len(recs_a)} vs len(B)={len(recs_b)}"]
+
+    all_agreed = True
+    diffs: list[str] = []
+    for idx, (ra, rb) in enumerate(zip(recs_a, recs_b, strict=False)):
+        for f in BENCHMARK_FIELDS:
+            va, vb = ra.get(f), rb.get(f)
+            exact_match, semantic_match = evaluate_field_agreement(f, va, vb)
+            if not (exact_match or semantic_match):
+                all_agreed = False
+                diffs.append(f"Record {idx} field {f} mismatch: {va!r} != {vb!r}")
+
+        raw_att_a = ra.get("attachment_urls")
+        att_list_a: list[object] = cast(list[object], raw_att_a) if isinstance(raw_att_a, list) else []
+        att_a: set[str] = {public_url(str(u)) for u in att_list_a if u}
+        raw_att_b = rb.get("attachment_urls")
+        att_list_b: list[object] = cast(list[object], raw_att_b) if isinstance(raw_att_b, list) else []
+        att_b: set[str] = {public_url(str(u)) for u in att_list_b if u}
+        if att_a != att_b:
+            all_agreed = False
+            diffs.append(f"Record {idx} attachment_urls mismatch")
+
+        # Markdown body text similarity
+        ma = normalize_semantic_text(ra.get("markdown", ""))
+        mb = normalize_semantic_text(rb.get("markdown", ""))
+        if ma != mb:
+            min_len = min(len(ma), len(mb))
+            max_len = max(len(ma), len(mb))
+            ratio = min_len / max_len if max_len > 0 else 1.0
+            if ratio < 0.95:
+                all_agreed = False
+                diffs.append(f"Record {idx} markdown boundary ratio {ratio:.2f} < 0.95")
+
+    return all_agreed, diffs
+
+
+def export_disputes(
+    annotator_a_path: Path = DEFAULT_ANNOTATOR_A_PATH,
+    annotator_b_path: Path = DEFAULT_ANNOTATOR_B_PATH,
+    output_path: Path = DEFAULT_DISPUTES_PATH,
+    bundle_path: Path | None = None,
+    candidates_path: Path = DEFAULT_CANDIDATES_PATH,
+) -> list[dict[str, Any]]:
+    """Export tasks with disagreements between Annotator A and B to disputes.jsonl."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    items_a: dict[str, dict[str, Any]] = {}
+    if annotator_a_path.is_file():
+        with annotator_a_path.open("r", encoding="utf-8") as f:
+            items_a = {x["id"]: x for x in (json.loads(line) for line in f if line.strip())}
+
+    items_b: dict[str, dict[str, Any]] = {}
+    if annotator_b_path.is_file():
+        with annotator_b_path.open("r", encoding="utf-8") as f:
+            items_b = {x["id"]: x for x in (json.loads(line) for line in f if line.strip())}
+
+    bundle_tasks: dict[str, dict[str, Any]] = {}
+    if bundle_path and bundle_path.is_file():
+        with bundle_path.open("r", encoding="utf-8") as f:
+            bundle_tasks = {x["id"]: x for x in (json.loads(line) for line in f if line.strip())}
+
+    candidate_tasks: dict[str, dict[str, Any]] = {}
+    if candidates_path and candidates_path.is_file():
+        with candidates_path.open("r", encoding="utf-8") as f:
+            candidate_tasks = {x["id"]: x for x in (json.loads(line) for line in f if line.strip())}
+
+    common_ids = sorted(set(items_a.keys()) & set(items_b.keys()))
+    disputes: list[dict[str, Any]] = []
+
+    for task_id in common_ids:
+        a = items_a[task_id]
+        b = items_b[task_id]
+        task_type = a.get("task_type") or b.get("task_type") or "content_page"
+        gt_a = a.get("ground_truth") or a
+        gt_b = b.get("ground_truth") or b
+
+        agreed, diffs = evaluate_task_agreement(task_type, gt_a, gt_b)
+        if not agreed:
+            raw_task = bundle_tasks.get(task_id) or candidate_tasks.get(task_id, {})
+            dispute_entry = {
+                "id": task_id,
+                "task_type": task_type,
+                "source_id": a.get("source_id") or b.get("source_id") or raw_task.get("source_id", ""),
+                "jurisdiction": a.get("jurisdiction") or b.get("jurisdiction") or raw_task.get("jurisdiction", ""),
+                "request_url": a.get("request_url") or b.get("request_url") or raw_task.get("request_url", ""),
+                "raw_payload": raw_task.get("raw_payload", ""),
+                "annotator_a": gt_a,
+                "annotator_b": gt_b,
+                "discrepancies": diffs,
+            }
+            disputes.append(dispute_entry)
+
+    with output_path.open("w", encoding="utf-8") as f:
+        for d in disputes:
+            f.write(json.dumps(d, ensure_ascii=False) + "\n")
+
+    return disputes
+
+
+def validate_ground_truth_integrity(gt: object, task_type: str = "content_page") -> tuple[bool, str]:
+    """Verify ground truth output integrity and filter out truncated or degraded annotations.
+
+    Enforces that:
+    1. List pages have valid HTTP(S) URL targets.
+    2. Content pages have non-empty markdown (>20 chars) without truncation markers
+       ('...(truncated)', 'Content fallback', 'Content extraction truncated').
+    3. Markdown does not terminate with trailing severed syntax.
+    """
+    if not isinstance(gt, Mapping):
+        return False, "Ground truth is not a valid dictionary object"
+
+    gt_dict = cast(Mapping[str, object], gt)
+
+    if task_type == "list_page":
+        urls = gt_dict.get("target_urls")
+        if not isinstance(urls, list):
+            return False, "Missing or invalid 'target_urls' list"
+        urls_list = cast(list[object], urls)
+        for u in urls_list:
+            if not isinstance(u, str) or not (u.startswith("http://") or u.startswith("https://")):
+                return False, f"Invalid or non-HTTP URL in target_urls: {u}"
+        return True, "Valid list page ground truth"
+
+    # For content_page
+    records_obj = gt_dict.get("records")
+    records_list: list[object]
+    if isinstance(records_obj, list):
+        records_list = cast(list[object], records_obj)
+        if not records_list:
+            return False, "Missing or empty 'records' array in content page ground truth"
+    elif "markdown" in gt_dict:
+        records_list = [gt_dict]
+    else:
+        return False, "Missing or empty 'records' array in content page ground truth"
+
+    for idx, rec in enumerate(records_list):
+        if not isinstance(rec, Mapping):
+            return False, f"Record {idx} is not a valid dictionary"
+        rec_dict = cast(Mapping[str, object], rec)
+        md_obj = rec_dict.get("markdown")
+        md = (str(md_obj) if md_obj is not None else "").strip()
+        if not md or len(md) < 5:
+            return False, f"Record {idx} has empty or suspiciously short markdown (< 5 chars)"
+        if (
+            md.endswith("…(truncated)")
+            or md.endswith("...")
+            or md == "Content fallback"
+            or md == "Content extraction truncated"
+        ):
+            return False, f"Record {idx} contains explicit truncation or fallback marker"
+        if md.endswith("\\"):
+            return False, f"Record {idx} ends with trailing escape slash"
+        if md.count("[") > md.count("]") and md.endswith("["):
+            return False, f"Record {idx} ends with unclosed markdown link"
+
+    return True, "Valid content page ground truth"
+
+
+def merge_resolutions(
+    annotator_a_path: Path = DEFAULT_ANNOTATOR_A_PATH,
+    annotator_b_path: Path = DEFAULT_ANNOTATOR_B_PATH,
+    resolutions_path: Path | None = None,
+    output_path: Path = DEFAULT_BENCHMARK_PATH,
+) -> list[dict[str, Any]]:
+    """Merge consensus tasks and arbitrated resolution tasks into ground_truth_benchmark.jsonl."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    items_a: dict[str, dict[str, Any]] = {}
+    if annotator_a_path.is_file():
+        with annotator_a_path.open("r", encoding="utf-8") as f:
+            items_a = {x["id"]: x for x in (json.loads(line) for line in f if line.strip())}
+
+    items_b: dict[str, dict[str, Any]] = {}
+    if annotator_b_path.is_file():
+        with annotator_b_path.open("r", encoding="utf-8") as f:
+            items_b = {x["id"]: x for x in (json.loads(line) for line in f if line.strip())}
+
+    resolutions: dict[str, dict[str, Any]] = {}
+    if resolutions_path and resolutions_path.is_file():
+        with resolutions_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    item = json.loads(line.strip())
+                    resolutions[item["id"]] = item
+
+    merged_records: list[dict[str, Any]] = []
+    all_ids = sorted(set(items_a.keys()) | set(items_b.keys()) | set(resolutions.keys()))
+
+    def _build_adj_meta(sources: list[dict[str, Any]], gt_val: Any) -> dict[str, Any]:
+        for s in sources:
+            meta_raw = s.get("adjudication_metadata")
+            if isinstance(meta_raw, dict):
+                meta: dict[str, Any] = cast(dict[str, Any], meta_raw)
+                if "content_hash" in meta:
+                    return dict(meta)
+        h = hashlib.sha256(json.dumps(gt_val, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        return {
+            "onboarded_at": datetime.now(timezone.utc).isoformat(),
+            "pipeline_version": "1.0",
+            "content_hash": h,
+            "payload_sha256": h,
+        }
+
+    for task_id in all_ids:
+        if task_id in resolutions:
+            res = resolutions[task_id]
+            gt_val = res.get("ground_truth", {})
+            merged_records.append({
+                "id": task_id,
+                "task_type": res.get("task_type", "content_page"),
+                "source_id": res.get("source_id", ""),
+                "jurisdiction": res.get("jurisdiction", ""),
+                "request_url": res.get("request_url", ""),
+                "detail_url": res.get("request_url", ""),
+                "current_extracted": res.get("current_extracted", {}),
+                "ground_truth": gt_val,
+                "verification_status": "ARBITRATED",
+                "arbitration_notes": res.get("arbitration_notes", "Arbitrated by Gemini 3.8 Flash"),
+                "adjudication_metadata": _build_adj_meta([res], gt_val),
+            })
+        elif task_id in items_a and task_id in items_b:
+            a = items_a[task_id]
+            b = items_b[task_id]
+            t_type = a.get("task_type", "content_page")
+            gt_a = a.get("ground_truth") or a
+            gt_b = b.get("ground_truth") or b
+            agreed, diffs = evaluate_task_agreement(t_type, gt_a, gt_b)
+            status = "CONSENSUS" if agreed else "ARBITRATED"
+            notes = "Consensus achieved." if agreed else f"Auto-arbitrated: {'; '.join(diffs)}"
+            merged_records.append({
+                "id": task_id,
+                "task_type": t_type,
+                "source_id": a.get("source_id", ""),
+                "jurisdiction": a.get("jurisdiction", ""),
+                "request_url": a.get("request_url", ""),
+                "detail_url": a.get("request_url", ""),
+                "current_extracted": a.get("current_extracted", {}),
+                "ground_truth": gt_a,
+                "verification_status": status,
+                "arbitration_notes": notes,
+                "adjudication_metadata": _build_adj_meta([a, b], gt_a),
+            })
+        elif task_id in items_a:
+            a = items_a[task_id]
+            gt_val = a.get("ground_truth", {})
+            merged_records.append({
+                "id": task_id,
+                "task_type": a.get("task_type", "content_page"),
+                "source_id": a.get("source_id", ""),
+                "jurisdiction": a.get("jurisdiction", ""),
+                "request_url": a.get("request_url", ""),
+                "detail_url": a.get("request_url", ""),
+                "current_extracted": a.get("current_extracted", {}),
+                "ground_truth": gt_val,
+                "verification_status": "CONSENSUS",
+                "arbitration_notes": "Single annotator consensus.",
+                "adjudication_metadata": _build_adj_meta([a], gt_val),
+            })
+
+    valid_records: list[dict[str, Any]] = []
+    discarded_records: list[dict[str, Any]] = []
+
+    for rec in merged_records:
+        t_type = str(rec.get("task_type", "content_page"))
+        gt_obj = rec.get("ground_truth", {})
+        is_valid, reason = validate_ground_truth_integrity(gt_obj, t_type)
+        if is_valid:
+            valid_records.append(rec)
+        else:
+            discarded_records.append({"id": rec.get("id"), "reason": reason})
+
+    if discarded_records:
+        print(f"[Arbitrator Integrity] Filtered out {len(discarded_records)} truncated or invalid ground truth records.")
+
+    with output_path.open("w", encoding="utf-8") as f:
+        for rec in valid_records:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+    return valid_records
+
+
 def main(argv: Sequence[str] | None = None) -> None:
-    """CLI entrypoint to generate authoritative ground truth benchmark dataset."""
+    """CLI entrypoint to run multi-party benchmark cross-verification and arbitration."""
     parser = argparse.ArgumentParser(
-        description="Run multi-party cross-verification, agreement calculation, and arbitration."
+        description="Cross-verify independent annotations and arbitrate ground truth benchmark dataset."
     )
     parser.add_argument(
         "--candidates",
         type=Path,
         default=DEFAULT_CANDIDATES_PATH,
-        help=f"Path to raw candidates (default: {DEFAULT_CANDIDATES_PATH})",
+        help=f"Path to raw_candidates.jsonl (default: {DEFAULT_CANDIDATES_PATH})",
     )
     parser.add_argument(
         "--annotator-a",
@@ -610,8 +934,48 @@ def main(argv: Sequence[str] | None = None) -> None:
         default=DEFAULT_BENCHMARK_PATH,
         help=f"Path to output ground_truth_benchmark.jsonl (default: {DEFAULT_BENCHMARK_PATH})",
     )
+    parser.add_argument(
+        "--bundle",
+        type=Path,
+        default=None,
+        help="Path to processor_batch_bundle.jsonl for raw payload lookup",
+    )
+    parser.add_argument(
+        "--export-disputes",
+        type=Path,
+        default=None,
+        help="Path to export disputes (e.g. data/benchmark/annotations/disputes.jsonl)",
+    )
+    parser.add_argument(
+        "--merge-resolutions",
+        type=Path,
+        default=None,
+        help="Path to arbitrated resolutions to merge into benchmark ground truth",
+    )
 
     args = parser.parse_args(argv)
+
+    if args.export_disputes:
+        print(f"Exporting disputes to {args.export_disputes}...")
+        disputes = export_disputes(
+            annotator_a_path=args.annotator_a,
+            annotator_b_path=args.annotator_b,
+            output_path=args.export_disputes,
+            bundle_path=args.bundle,
+        )
+        print(f"✓ Exported {len(disputes)} disputes to {args.export_disputes}")
+        return
+
+    if args.merge_resolutions:
+        print(f"Merging resolutions from {args.merge_resolutions} to {args.benchmark_output}...")
+        merged = merge_resolutions(
+            annotator_a_path=args.annotator_a,
+            annotator_b_path=args.annotator_b,
+            resolutions_path=args.merge_resolutions,
+            output_path=args.benchmark_output,
+        )
+        print(f"✓ Merged {len(merged)} records into {args.benchmark_output}")
+        return
 
     print(f"Loading annotations and candidates from {args.candidates.parent}...")
     verification_log, benchmark_records = run_arbitration(
@@ -645,6 +1009,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     print(f"✓ Created {args.log_output} ({args.log_output.stat().st_size} bytes)")
     print(f"✓ Created {args.benchmark_output} ({args.benchmark_output.stat().st_size} bytes)")
     print("=" * 60)
+
 
 
 if __name__ == "__main__":

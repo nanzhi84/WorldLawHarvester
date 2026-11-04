@@ -30,6 +30,14 @@ dependencies = [
   "yarl>=1.18",
 ]
 
+[project.optional-dependencies]
+benchmark = [
+  "transformers>=5.22.1,<6",
+  "jinja2>=3.1,<4",
+  "sentencepiece>=0.2,<1",
+  "socksio>=1,<2",
+]
+
 [project.scripts]
 wlh = "wlh.cli:main"
 

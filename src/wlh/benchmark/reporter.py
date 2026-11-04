@@ -17,8 +17,13 @@ def render_benchmark_json_report(report: BenchmarkSummaryReport) -> str:
 def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
     """Render human-readable Markdown evaluation report with score cards, dimensions, and error diagnostics."""
     overall = report.average_overall_score
-    cleanliness = report.average_cleanliness_score
+    cleanliness = (
+        report.average_cleanliness_score if report.average_cleanliness_score is not None else 0.0
+    )
     accuracy = report.average_accuracy_score if report.average_accuracy_score is not None else 0.0
+    list_f1 = report.average_list_discovery_f1
+    split_f1 = report.average_record_split_f1
+    fid_f1 = report.average_content_fidelity_score
 
     clean_target = 95.0
     acc_target = 90.0
@@ -32,6 +37,15 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
         f"> **Overall Composite Score**: **{overall:.2f} / 100.0**  ",
         f"> **Cleanliness Score**: **{cleanliness:.2f} / 100.0**  ",
         f"> **Accuracy Score**: **{accuracy:.2f} / 100.0**",
+    ]
+    if list_f1 is not None:
+        lines.append(f"> **List Discovery F1**: **{list_f1:.2f} / 100.0**  ")
+    if split_f1 is not None:
+        lines.append(f"> **Record Split F1**: **{split_f1:.2f} / 100.0**  ")
+    if fid_f1 is not None:
+        lines.append(f"> **Content DOM Fidelity**: **{fid_f1:.2f} / 100.0**  ")
+
+    lines.extend([
         "",
         "---",
         "",
@@ -40,8 +54,18 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
         "| Evaluation Metric | Score | Target Standard | Assessment |",
         "| :--- | :---: | :---: | :---: |",
         f"| **Overall Quality Index** | **{overall:.2f}** | >= {overall_target:.1f} | {'✅ PASS' if overall >= overall_target else '⚠️ NEEDS REVIEW'} |",
-        f"| **Text Cleanliness (干净度)** | **{cleanliness:.2f}** | >= {clean_target:.1f} | {'✅ PASS' if cleanliness >= clean_target else '⚠️ NEEDS REVIEW'} |",
-        f"| **Field Accuracy (准确度)** | **{accuracy:.2f}** | >= {acc_target:.1f} | {'✅ PASS' if accuracy >= acc_target else '⚠️ NEEDS REVIEW'} |",
+    ])
+
+    if list_f1 is not None:
+        lines.append(f"| **Pillar 1: List Discovery F1** | **{list_f1:.2f}** | >= 90.0 | {'✅ PASS' if list_f1 >= 90.0 else '⚠️ NEEDS REVIEW'} |")
+    if split_f1 is not None:
+        lines.append(f"| **Pillar 2: Record Split F1** | **{split_f1:.2f}** | >= 90.0 | {'✅ PASS' if split_f1 >= 90.0 else '⚠️ NEEDS REVIEW'} |")
+    lines.append(f"| **Pillar 3: Metadata & Attachment Accuracy** | **{accuracy:.2f}** | >= {acc_target:.1f} | {'✅ PASS' if accuracy >= acc_target else '⚠️ NEEDS REVIEW'} |")
+    if fid_f1 is not None:
+        lines.append(f"| **Pillar 4: Content DOM Boundary Fidelity** | **{fid_f1:.2f}** | >= 90.0 | {'✅ PASS' if fid_f1 >= 90.0 else '⚠️ NEEDS REVIEW'} |")
+    lines.append(f"| **Pillar 5: Text Cleanliness (干净度)** | **{cleanliness:.2f}** | >= {clean_target:.1f} | {'✅ PASS' if cleanliness >= clean_target else '⚠️ NEEDS REVIEW'} |")
+
+    lines.extend([
         "",
         "---",
         "",
@@ -51,7 +75,7 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
         "",
         "| Dimension Code | Metric Name | Score | Weight | Weighted Score |",
         "| :--- | :--- | :---: | :---: | :---: |",
-    ]
+    ])
 
     clean_weights = {
         "noise_purity": (0.25, "HTML/Entity/Control Char Stripping (vs raw_payload)"),
@@ -68,7 +92,7 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
 
     lines.extend([
         "",
-        "### 2.2 Field Accuracy Dimensions (准确度六维)",
+        "### 2.2 Field Accuracy Dimensions (准确度六维与附件发现)",
         "",
         "| Field Dimension | Target Field | Score | Weight | Weighted Score |",
         "| :--- | :--- | :---: | :---: | :---: |",
@@ -87,6 +111,10 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
         score = report.accuracy_dimension_scores.get(dim, 0.0)
         weighted = score * w
         lines.append(f"| `{dim}` | {label} | {score:.2f} | {w:.0%} | {weighted:.2f} |")
+
+    att_score = report.accuracy_dimension_scores.get("attachment_url_f1")
+    if att_score is not None:
+        lines.append(f"| `attachment_url_f1` | Valid Attachment Download URLs | {att_score:.2f} | Diagnostic | N/A |")
 
     lines.extend([
         "",
@@ -157,8 +185,10 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
         sid = s.get("sample_id")
         src = s.get("source_id")
         jur = s.get("jurisdiction")
-        ovr = s.get("overall_score", 0.0)
-        cln = s.get("cleanliness_score", 0.0)
+        ovr = s.get("overall_score")
+        ovr_val = float(ovr) if ovr is not None else 0.0
+        cln = s.get("cleanliness_score")
+        cln_str = f"{cln:.2f}" if cln is not None else "N/A"
         acc = s.get("accuracy_score")
         acc_str = f"{acc:.2f}" if acc is not None else "N/A"
 
@@ -171,7 +201,7 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
             defects.append(f"[Mismatch] {m}")
         defect_str = "<br>".join(defects[:2]) if defects else "No critical defects"
 
-        lines.append(f"| `{sid}` | `{src}` | {jur} | **{ovr:.2f}** | {cln:.2f} | {acc_str} | {defect_str} |")
+        lines.append(f"| `{sid}` | `{src}` | {jur} | **{ovr_val:.2f}** | {cln_str} | {acc_str} | {defect_str} |")
 
     lines.append("")
     return "\n".join(lines)

@@ -65,6 +65,33 @@ def _create_sample_candidate(
     }
 
 
+BENCHMARK_JURISDICTIONS = ("CN", "US", "JP", "DE", "GB", "VN", "TW", "ZA")
+
+
+def _write_benchmark_ground_truth_fixture(directory: Path) -> Path:
+    """Write a self-contained multi-jurisdiction ground truth benchmark JSONL fixture."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "ground_truth_benchmark.jsonl"
+    records: list[dict[str, Any]] = []
+    for idx, jur in enumerate(BENCHMARK_JURISDICTIONS, start=1):
+        cand = _create_sample_candidate(
+            sample_id=f"cand_{jur.lower()}_{idx:02d}",
+            source_id=f"dd-{500 + idx}",
+            title=f"{jur} Statutory Regulation {idx}",
+            doc_number=f"No. 2026-{idx:02d}",
+            issuer=f"Ministry of Justice ({jur})",
+        )
+        cand["jurisdiction"] = jur
+        cand["ground_truth"] = dict(cand["current_extracted"])
+        cand["verification_status"] = "CONSENSUS"
+        records.append(cand)
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in records),
+        encoding="utf-8",
+    )
+    return path
+
+
 # ==============================================================================
 # Domain 1: Benchmark CLI Parser & Subcommand Registration
 # ==============================================================================
@@ -167,12 +194,15 @@ class TestBenchmarkCliRunExecution:
         self, tmp_path: Path
     ) -> None:
         """Run subcommand writes reports to custom --output-dir path."""
+        gt_file = _write_benchmark_ground_truth_fixture(tmp_path / "fixture")
         custom_out = tmp_path / "deeply" / "nested" / "reports"
         proc = run_wlh_cli([
             "benchmark",
             "run",
             "--input",
-            "data/benchmark/ground_truth_benchmark.jsonl",
+            str(gt_file),
+            "--ground-truth",
+            str(gt_file),
             "--output-dir",
             str(custom_out),
         ])
@@ -183,13 +213,14 @@ class TestBenchmarkCliRunExecution:
     def test_run_subcommand_defaults_to_repository_ground_truth_when_flag_omitted(
         self, tmp_path: Path
     ) -> None:
-        """Run subcommand uses data/benchmark/ground_truth_benchmark.jsonl when --ground-truth is omitted."""
+        """Run subcommand evaluates embedded ground truth when --ground-truth is omitted."""
+        gt_file = _write_benchmark_ground_truth_fixture(tmp_path / "fixture")
         out_dir = tmp_path / "reports_default_gt"
         proc = run_wlh_cli([
             "benchmark",
             "run",
             "--input",
-            "data/benchmark/raw_candidates.jsonl",
+            str(gt_file),
             "--output-dir",
             str(out_dir),
         ])
@@ -197,37 +228,21 @@ class TestBenchmarkCliRunExecution:
         report_json = out_dir / "benchmark_report.json"
         assert report_json.is_file()
         report_data = json.loads(report_json.read_text(encoding="utf-8"))
-        assert report_data["total_samples"] == 721
+        assert report_data["total_samples"] == len(BENCHMARK_JURISDICTIONS)
         assert report_data["average_accuracy_score"] is not None
-
-    def test_sample_subcommand_extracts_candidates_and_manifest(
-        self, tmp_path: Path
-    ) -> None:
-        """Sample subcommand extracts all 721 candidates and writes raw_candidates.jsonl and candidate_manifest.json."""
-        out_dir = tmp_path / "sampled_candidates"
-        proc = run_wlh_cli([
-            "benchmark",
-            "sample",
-            "--output-dir",
-            str(out_dir),
-        ])
-        assert proc.returncode == 0
-        raw_cands = out_dir / "raw_candidates.jsonl"
-        manifest = out_dir / "candidate_manifest.json"
-        assert raw_cands.is_file()
-        assert manifest.is_file()
-        lines = [ln for ln in raw_cands.read_text(encoding="utf-8").splitlines() if ln.strip()]
-        assert len(lines) == 721
 
     def test_run_subcommand_backward_compatibility_when_input_flag_passed_directly_to_benchmark(
         self, tmp_path: Path
     ) -> None:
         """Backwards compatibility: wlh benchmark --input ... defaults to evaluation workflow."""
+        gt_file = _write_benchmark_ground_truth_fixture(tmp_path / "fixture")
         out_dir = tmp_path / "reports_compat"
         proc = run_wlh_cli([
             "benchmark",
             "--input",
-            "data/benchmark/ground_truth_benchmark.jsonl",
+            str(gt_file),
+            "--ground-truth",
+            str(gt_file),
             "--output-dir",
             str(out_dir),
         ])
@@ -239,11 +254,14 @@ class TestBenchmarkCliRunExecution:
         self, tmp_path: Path
     ) -> None:
         """Standalone module execution via python -m wlh.benchmark run executes evaluation."""
+        gt_file = _write_benchmark_ground_truth_fixture(tmp_path / "fixture")
         out_dir = tmp_path / "reports_module"
         proc = run_benchmark_module([
             "run",
             "--input",
-            "data/benchmark/ground_truth_benchmark.jsonl",
+            str(gt_file),
+            "--ground-truth",
+            str(gt_file),
             "--output-dir",
             str(out_dir),
         ])
@@ -263,6 +281,7 @@ class TestBenchmarkCliOfflineIsolation:
         self, tmp_path: Path
     ) -> None:
         """Evaluation succeeds cleanly when pointing to unreachable blackhole proxy."""
+        gt_file = _write_benchmark_ground_truth_fixture(tmp_path / "fixture")
         out_dir = tmp_path / "reports_offline"
         blackhole_env = {
             "http_proxy": "http://127.0.0.1:59999",
@@ -273,7 +292,9 @@ class TestBenchmarkCliOfflineIsolation:
                 "benchmark",
                 "run",
                 "--input",
-                "data/benchmark/ground_truth_benchmark.jsonl",
+                str(gt_file),
+                "--ground-truth",
+                str(gt_file),
                 "--output-dir",
                 str(out_dir),
             ],

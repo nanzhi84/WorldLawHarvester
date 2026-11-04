@@ -5,15 +5,21 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, cast
+from typing import Any, Literal, Mapping, cast
 
 from wlh.benchmark.metrics import (
     evaluate_accuracy,
     evaluate_cleanliness,
+    evaluate_content_fidelity,
+    evaluate_list_discovery,
+    evaluate_record_split,
 )
 from wlh.benchmark.models import (
+    AccuracyResult,
     BenchmarkReport,
     BenchmarkSummaryReport,
+    CleanlinessResult,
+    ContentFidelityResult,
     SampleEvaluationResult,
 )
 
@@ -40,41 +46,342 @@ def _extract_prediction_dict(raw: Mapping[str, Any]) -> dict[str, Any]:
     return base
 
 
+def extract_with_processor(task: Mapping[str, Any]) -> dict[str, Any]:
+    """Run offline processor pipeline on a ProcessorBenchmarkTask."""
+    source_id = str(task.get("source_id", ""))
+    task_type = str(task.get("task_type", "content_page"))
+    request_url = str(task.get("request_url", ""))
+    raw_payload = str(task.get("raw_payload", ""))
+    mime_type = str(task.get("mime_type", "text/html"))
+
+    yaml_path = Path(f"sources/{source_id}.yaml")
+    if not yaml_path.is_file():
+        if task_type == "list_page":
+            return {"target_urls": []}
+        return {"records": [{"title": None, "doc_number": None, "markdown": "", "attachment_urls": []}]}
+
+    try:
+        import yaml
+
+        from wlh.processor.parsers import load, normalize_parser_config
+
+        with yaml_path.open("r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+
+        norm_cfg = normalize_parser_config(cfg)
+        parser_cls = load(norm_cfg["adapter"])
+        parser = parser_cls(norm_cfg)
+
+        payload_bytes = raw_payload.encode("utf-8")
+
+        class _OfflineCtx:
+            class _Runtime:
+                mode = "collect"
+                config = norm_cfg
+
+            runtime = _Runtime()
+            config = norm_cfg
+
+            @staticmethod
+            def read(_acq: Any) -> bytes:
+                return payload_bytes
+
+            @staticmethod
+            def follow_links(_t: Any) -> bool:
+                return True
+
+            @staticmethod
+            def text_quality(markdown: str) -> dict[str, Any]:
+                from wlh.cleaners.extraction_quality import text_check
+
+                lang = str(norm_cfg.get("metadata", {}).get("language") or "")
+                return text_check(markdown, "vi" if lang.startswith("vi") else "generic")
+
+            @staticmethod
+            def find_archived_image(_url: str) -> bytes | None:
+                return None
+
+        ctx = _OfflineCtx()
+        parse_task = {
+            "depth": 0 if task_type == "list_page" else 1,
+            "payload": {"url": request_url, "role": "page"},
+        }
+        acquisition = {
+            "id": f"acq-{source_id}",
+            "outcome": "ok",
+            "actual_url": request_url,
+            "request_url": request_url,
+            "mime_type": mime_type,
+            "charset": "utf-8",
+            "archive_ref": f"bench/{source_id}",
+            "state": "archived",
+        }
+
+        parsed = parser.parse(ctx, parse_task, acquisition)
+
+        parsed_dict: dict[str, Any] = cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
+
+        if task_type == "list_page":
+            requests_list: list[dict[str, Any]] = (
+                cast(list[dict[str, Any]], parsed_dict.get("requests"))
+                if isinstance(parsed_dict.get("requests"), list)
+                else []
+            )
+            discovered_urls = [str(r["url"]) for r in requests_list if "url" in r]
+            return {"target_urls": discovered_urls}
+        else:
+            records: list[dict[str, Any]] = []
+            targets: list[dict[str, Any]] = (
+                cast(list[dict[str, Any]], parsed_dict.get("targets"))
+                if isinstance(parsed_dict.get("targets"), list)
+                else []
+            )
+            for target in targets:
+                inputs_list: list[dict[str, Any]] = (
+                    cast(list[dict[str, Any]], target.get("inputs"))
+                    if isinstance(target.get("inputs"), list)
+                    else []
+                )
+                for inp in inputs_list:
+                    inp.setdefault("acquisition", acquisition)
+                try:
+                    built: Any = parser.build(ctx, target, inputs_list)
+                    docs: list[object] = cast(list[object], built if isinstance(built, list) else [built])
+                    for d_raw in docs:
+                        if not isinstance(d_raw, dict):
+                            continue
+                        d: dict[str, Any] = cast(dict[str, Any], d_raw)
+                        meta_dict: dict[str, Any] = cast(dict[str, Any], d.get("metadata") or {})
+                        dates_dict: dict[str, Any] = cast(dict[str, Any], d.get("dates") or {})
+                        delivs: list[object] = cast(list[object], d.get("deliverables") or [])
+                        md = ""
+                        for dev_raw in delivs:
+                            if isinstance(dev_raw, dict):
+                                dev: dict[str, Any] = cast(dict[str, Any], dev_raw)
+                                if dev.get("markdown"):
+                                    md = str(dev["markdown"])
+                                    break
+                        if not md:
+                            md_raw = d.get("markdown") or meta_dict.get("markdown") or ""
+                            md = str(md_raw)
+
+                        title: str | None = (
+                            str(d["title"])
+                            if d.get("title") is not None
+                            else (str(meta_dict["title"]) if meta_dict.get("title") is not None else None)
+                        )
+                        doc_num: str | None = (
+                            str(meta_dict["doc_number"])
+                            if meta_dict.get("doc_number") is not None
+                            else (
+                                str(meta_dict["document_number"])
+                                if meta_dict.get("document_number") is not None
+                                else None
+                            )
+                        )
+                        pub: str | None = (
+                            str(dates_dict["published_at"])
+                            if dates_dict.get("published_at") is not None
+                            else (
+                                str(meta_dict["published_at"])
+                                if meta_dict.get("published_at") is not None
+                                else None
+                            )
+                        )
+                        eff: str | None = (
+                            str(dates_dict["effective_at"])
+                            if dates_dict.get("effective_at") is not None
+                            else (
+                                str(meta_dict["effective_at"])
+                                if meta_dict.get("effective_at") is not None
+                                else None
+                            )
+                        )
+                        iss: str | None = (
+                            str(meta_dict["issuer"]) if meta_dict.get("issuer") is not None else None
+                        )
+                        cfg_meta = cast(dict[str, Any], norm_cfg.get("metadata", {}))
+                        doc_t: str = str(meta_dict.get("doc_type") or cfg_meta.get("document_type", "其他"))
+                        inp_candidates: list[object] = cast(list[object], d.get("inputs") or inputs_list)
+                        att_urls: list[str] = []
+                        for item_raw in inp_candidates:
+                            if isinstance(item_raw, dict):
+                                item_dict: dict[str, Any] = cast(dict[str, Any], item_raw)
+                                if item_dict.get("role") == "attachment":
+                                    req_raw = item_dict.get("request")
+                                    if isinstance(req_raw, dict):
+                                        req_dict: dict[str, Any] = cast(dict[str, Any], req_raw)
+                                        if "url" in req_dict:
+                                            att_urls.append(str(req_dict["url"]))
+                        records.append({
+                            "title": title,
+                            "doc_number": doc_num,
+                            "published_at": pub,
+                            "effective_at": eff,
+                            "issuer": iss,
+                            "doc_type": doc_t,
+                            "markdown": md,
+                            "attachment_urls": att_urls,
+                        })
+                except Exception:
+                    pass
+            if not records:
+                records = [{
+                    "title": None,
+                    "doc_number": None,
+                    "published_at": None,
+                    "effective_at": None,
+                    "issuer": None,
+                    "doc_type": "其他",
+                    "markdown": "",
+                    "attachment_urls": [],
+                }]
+            return {"records": records}
+    except Exception:
+        if task_type == "list_page":
+
+            return {"target_urls": []}
+        return {"records": [{"title": None, "doc_number": None, "markdown": "", "attachment_urls": []}]}
+
+
 def evaluate_sample(
     prediction: Mapping[str, Any],
     ground_truth: Mapping[str, Any] | None = None,
     sample_id: str = "",
     source_id: str = "",
     jurisdiction: str = "",
+    task_type: Literal["list_page", "content_page"] | str = "",
 ) -> SampleEvaluationResult:
-    """Evaluate a single document sample for cleanliness and optional ground truth accuracy."""
-    pred_dict = _extract_prediction_dict(prediction)
+    """Evaluate a single document sample using the unified single-track scoring formula."""
     sid = sample_id or str(prediction.get("id") or "")
     src_id = source_id or str(prediction.get("source_id") or "")
     jur = jurisdiction or str(prediction.get("jurisdiction") or "")
 
-    markdown = str(pred_dict.get("markdown") or "")
-    title = str(pred_dict.get("title") or "")
-
-    clean_meta = dict(pred_dict)
-    if ground_truth is not None:
-        clean_meta["ground_truth"] = dict(ground_truth)
-
-    cleanliness = evaluate_cleanliness(markdown, title=title, metadata=clean_meta)
-
-    if ground_truth is not None:
-        accuracy = evaluate_accuracy(pred_dict, ground_truth)
-        overall_score = round(0.30 * cleanliness.score + 0.70 * accuracy.score, 2)
+    # Detect task_type
+    t_type: Literal["list_page", "content_page"]
+    if task_type in ["list_page", "content_page"]:
+        t_type = cast(Literal["list_page", "content_page"], task_type)
+    elif "target_urls" in prediction or (isinstance(ground_truth, Mapping) and "target_urls" in ground_truth):
+        t_type = "list_page"
     else:
-        accuracy = None
-        overall_score = cleanliness.score
+        t_type = "content_page"
+
+    # Branch 1: list_page evaluation (Pillar 1: Discovery)
+    if t_type == "list_page":
+        pred_u_raw = prediction.get("target_urls")
+        pred_urls: list[str] = (
+            [str(u) for u in cast(list[object], pred_u_raw)] if isinstance(pred_u_raw, list) else []
+        )
+        gt_u_raw = ground_truth.get("target_urls") if isinstance(ground_truth, Mapping) else None
+        gt_urls: list[str] = (
+            [str(u) for u in cast(list[object], gt_u_raw)] if isinstance(gt_u_raw, list) else []
+        )
+        discovery = evaluate_list_discovery(pred_urls, gt_urls)
+        overall_score = round(discovery.target_url_f1, 2)
+
+        return SampleEvaluationResult(
+            sample_id=sid,
+            task_type="list_page",
+            source_id=src_id,
+            jurisdiction=jur,
+            discovery=discovery,
+            overall_score=overall_score,
+        )
+
+    # Branch 2: content_page evaluation
+    raw_pred_recs = prediction.get("records")
+    if isinstance(raw_pred_recs, list) and raw_pred_recs:
+        pred_records = [
+            _extract_prediction_dict(cast(Mapping[str, Any], r))
+            for r in cast(list[object], raw_pred_recs)
+            if isinstance(r, Mapping)
+        ]
+    else:
+        pred_records = [_extract_prediction_dict(prediction)]
+
+    # If ground_truth is None: cleanliness-only evaluation
+    if ground_truth is None:
+        p_rec = pred_records[0]
+        md = str(p_rec.get("markdown") or "")
+        title = str(p_rec.get("title") or "")
+        cleanliness = evaluate_cleanliness(md, title=title, metadata=p_rec)
+        return SampleEvaluationResult(
+            sample_id=sid,
+            task_type="content_page",
+            source_id=src_id,
+            jurisdiction=jur,
+            cleanliness=cleanliness,
+            accuracy=None,
+            overall_score=cleanliness.score,
+        )
+
+    # Extract ground truth records list
+    gt_recs_raw = ground_truth.get("records")
+    gt_records: list[dict[str, Any]] = []
+    if isinstance(gt_recs_raw, list) and gt_recs_raw:
+        for r in cast(list[object], gt_recs_raw):
+            if isinstance(r, Mapping):
+                gt_records.append(dict(cast(Mapping[str, Any], r)))
+    if not gt_records:
+        gt_records = [dict(ground_truth)]
+
+    record_split, matched_pairs = evaluate_record_split(pred_records, gt_records)
+
+    if not matched_pairs:
+        p_rec = pred_records[0]
+        cleanliness = evaluate_cleanliness(str(p_rec.get("markdown") or ""), title=str(p_rec.get("title") or ""))
+        acc = evaluate_accuracy(p_rec, gt_records[0])
+        fid = evaluate_content_fidelity(str(p_rec.get("markdown") or ""), str(gt_records[0].get("markdown") or ""))
+        return SampleEvaluationResult(
+            sample_id=sid,
+            task_type="content_page",
+            source_id=src_id,
+            jurisdiction=jur,
+            record_split=record_split,
+            accuracy=acc,
+            content_fidelity=fid,
+            cleanliness=cleanliness,
+            overall_score=0.0,
+        )
+
+    record_scores: list[float] = []
+    acc_scores: list[AccuracyResult] = []
+    fid_scores: list[ContentFidelityResult] = []
+    clean_scores: list[CleanlinessResult] = []
+
+    for p_idx, g_idx in matched_pairs:
+        p_rec = pred_records[p_idx]
+        g_rec: dict[str, Any] = gt_records[g_idx]
+
+        clean_meta = dict(p_rec)
+        clean_meta["ground_truth"] = g_rec
+
+        acc = evaluate_accuracy(p_rec, g_rec)
+        fid = evaluate_content_fidelity(str(p_rec.get("markdown") or ""), str(g_rec.get("markdown") or ""))
+        clean = evaluate_cleanliness(str(p_rec.get("markdown") or ""), title=str(p_rec.get("title") or ""), metadata=clean_meta)
+
+        rec_score = 0.50 * acc.score + 0.25 * fid.content_f1 + 0.25 * clean.score
+        record_scores.append(rec_score)
+        acc_scores.append(acc)
+        fid_scores.append(fid)
+        clean_scores.append(clean)
+
+    avg_rec_score = sum(record_scores) / len(record_scores)
+    overall_score = round((record_split.record_split_f1 / 100.0) * avg_rec_score, 2)
+
+    rep_acc = acc_scores[0]
+    rep_fid = fid_scores[0]
+    rep_clean = clean_scores[0]
 
     return SampleEvaluationResult(
         sample_id=sid,
+        task_type="content_page",
         source_id=src_id,
         jurisdiction=jur,
-        cleanliness=cleanliness,
-        accuracy=accuracy,
+        record_split=record_split,
+        accuracy=rep_acc,
+        content_fidelity=rep_fid,
+        cleanliness=rep_clean,
         overall_score=overall_score,
     )
 
@@ -91,7 +398,6 @@ def load_records(path_or_records: Any) -> list[dict[str, Any]]:
             head = f.read(4096).lstrip()
             f.seek(0)
             if head.startswith("["):
-                # JSON array
                 raw_data: Any = json.load(f)
                 if isinstance(raw_data, list):
                     res_items: list[dict[str, Any]] = []
@@ -99,7 +405,6 @@ def load_records(path_or_records: Any) -> list[dict[str, Any]]:
                         if isinstance(it, dict):
                             res_items.append(dict(cast(dict[str, Any], it)))
                     return res_items
-            # JSONL lines
             for line in f:
                 stripped = line.strip()
                 if stripped:
@@ -139,6 +444,7 @@ def evaluate_benchmark_dataset(
         sid = str(item.get("id") or "")
         src_id = str(item.get("source_id") or "")
         jur = str(item.get("jurisdiction") or "")
+        t_type = str(item.get("task_type") or "")
 
         # Determine prediction and ground truth pair
         if sid in gt_map:
@@ -154,12 +460,21 @@ def evaluate_benchmark_dataset(
             prediction = item.get("current_extracted") or item
             ground_truth = None
 
+        pred_map: Mapping[str, Any] = cast(Mapping[str, Any], prediction) if isinstance(prediction, Mapping) else {}
+        if "raw_payload" in pred_map and "markdown" not in pred_map and "target_urls" not in pred_map:
+            pred_map = extract_with_processor(pred_map)
+
+        gt_map_val: Mapping[str, Any] | None = (
+            cast(Mapping[str, Any], ground_truth) if isinstance(ground_truth, Mapping) else None
+        )
+
         res = evaluate_sample(
-            prediction=prediction,
-            ground_truth=ground_truth,
+            prediction=pred_map,
+            ground_truth=gt_map_val,
             sample_id=sid,
             source_id=src_id,
             jurisdiction=jur,
+            task_type=t_type,
         )
         sample_results.append(res)
 
@@ -173,33 +488,48 @@ def evaluate_benchmark_dataset(
         )
 
     avg_overall = round(sum(s.overall_score for s in sample_results) / total_samples, 2)
-    avg_cleanliness = round(sum(s.cleanliness.score for s in sample_results) / total_samples, 2)
 
-    # Cleanliness dimension breakdown
-    clean_dims = {
-        "noise_purity": round(sum(s.cleanliness.sub_scores.noise_purity for s in sample_results) / total_samples, 2),
-        "encoding_purity": round(sum(s.cleanliness.sub_scores.encoding_purity for s in sample_results) / total_samples, 2),
-        "structural_integrity": round(sum(s.cleanliness.sub_scores.structural_integrity for s in sample_results) / total_samples, 2),
-        "boilerplate_freedom": round(sum(s.cleanliness.sub_scores.boilerplate_freedom for s in sample_results) / total_samples, 2),
-        "deduplication_purity": round(sum(s.cleanliness.sub_scores.deduplication_purity for s in sample_results) / total_samples, 2),
-    }
+    # 5 Pillars Averages
+    disc_scores = [s.discovery.target_url_f1 for s in sample_results if s.discovery is not None]
+    avg_list_discovery = round(sum(disc_scores) / len(disc_scores), 2) if disc_scores else None
 
-    # Accuracy dimension breakdown
-    samples_with_acc = [s for s in sample_results if s.accuracy is not None]
-    if samples_with_acc:
-        acc_count = len(samples_with_acc)
-        avg_accuracy = round(sum(s.accuracy.score for s in samples_with_acc) / acc_count, 2)  # type: ignore[union-attr]
+    split_scores = [s.record_split.record_split_f1 for s in sample_results if s.record_split is not None]
+    avg_record_split = round(sum(split_scores) / len(split_scores), 2) if split_scores else None
+
+    valid_clean = [s.cleanliness for s in sample_results if s.cleanliness is not None]
+    if valid_clean:
+        c_len = len(valid_clean)
+        avg_cleanliness = round(sum(c.score for c in valid_clean) / c_len, 2)
+        clean_dims = {
+            "noise_purity": round(sum(c.sub_scores.noise_purity for c in valid_clean) / c_len, 2),
+            "encoding_purity": round(sum(c.sub_scores.encoding_purity for c in valid_clean) / c_len, 2),
+            "structural_integrity": round(sum(c.sub_scores.structural_integrity for c in valid_clean) / c_len, 2),
+            "boilerplate_freedom": round(sum(c.sub_scores.boilerplate_freedom for c in valid_clean) / c_len, 2),
+            "deduplication_purity": round(sum(c.sub_scores.deduplication_purity for c in valid_clean) / c_len, 2),
+        }
+    else:
+        avg_cleanliness = 0.0
+        clean_dims = {}
+
+    valid_acc = [s.accuracy for s in sample_results if s.accuracy is not None]
+    if valid_acc:
+        acc_count = len(valid_acc)
+        avg_accuracy = round(sum(a.score for a in valid_acc) / acc_count, 2)
         acc_dims = {
-            "title_accuracy": round(sum(s.accuracy.sub_scores.title_accuracy for s in samples_with_acc) / acc_count, 2),  # type: ignore[union-attr]
-            "doc_number_accuracy": round(sum(s.accuracy.sub_scores.doc_number_accuracy for s in samples_with_acc) / acc_count, 2),  # type: ignore[union-attr]
-            "published_at_accuracy": round(sum(s.accuracy.sub_scores.published_at_accuracy for s in samples_with_acc) / acc_count, 2),  # type: ignore[union-attr]
-            "effective_at_accuracy": round(sum(s.accuracy.sub_scores.effective_at_accuracy for s in samples_with_acc) / acc_count, 2),  # type: ignore[union-attr]
-            "issuer_accuracy": round(sum(s.accuracy.sub_scores.issuer_accuracy for s in samples_with_acc) / acc_count, 2),  # type: ignore[union-attr]
-            "doc_type_accuracy": round(sum(s.accuracy.sub_scores.doc_type_accuracy for s in samples_with_acc) / acc_count, 2),  # type: ignore[union-attr]
+            "title_accuracy": round(sum(a.sub_scores.title_accuracy for a in valid_acc) / acc_count, 2),
+            "doc_number_accuracy": round(sum(a.sub_scores.doc_number_accuracy for a in valid_acc) / acc_count, 2),
+            "published_at_accuracy": round(sum(a.sub_scores.published_at_accuracy for a in valid_acc) / acc_count, 2),
+            "effective_at_accuracy": round(sum(a.sub_scores.effective_at_accuracy for a in valid_acc) / acc_count, 2),
+            "issuer_accuracy": round(sum(a.sub_scores.issuer_accuracy for a in valid_acc) / acc_count, 2),
+            "doc_type_accuracy": round(sum(a.sub_scores.doc_type_accuracy for a in valid_acc) / acc_count, 2),
+            "attachment_url_f1": round(sum(a.sub_scores.attachment_url_f1 for a in valid_acc) / acc_count, 2),
         }
     else:
         avg_accuracy = None
         acc_dims = {}
+
+    fid_scores = [s.content_fidelity.content_f1 for s in sample_results if s.content_fidelity is not None]
+    avg_fidelity = round(sum(fid_scores) / len(fid_scores), 2) if fid_scores else None
 
     # Jurisdiction breakdown
     jur_groups: dict[str, list[SampleEvaluationResult]] = {}
@@ -211,9 +541,10 @@ def evaluate_benchmark_dataset(
     for jur, group in sorted(jur_groups.items()):
         cnt = len(group)
         j_overall = round(sum(item.overall_score for item in group) / cnt, 2)
-        j_clean = round(sum(item.cleanliness.score for item in group) / cnt, 2)
-        acc_items = [item for item in group if item.accuracy is not None]
-        j_acc = round(sum(item.accuracy.score for item in acc_items) / len(acc_items), 2) if acc_items else 0.0  # type: ignore[union-attr]
+        clean_items = [item.cleanliness.score for item in group if item.cleanliness is not None]
+        j_clean = round(sum(clean_items) / len(clean_items), 2) if clean_items else 0.0
+        acc_items = [item.accuracy.score for item in group if item.accuracy is not None]
+        j_acc = round(sum(acc_items) / len(acc_items), 2) if acc_items else 0.0
         jur_scores[jur] = {
             "overall": j_overall,
             "cleanliness": j_clean,
@@ -221,27 +552,42 @@ def evaluate_benchmark_dataset(
             "sample_count": float(cnt),
         }
 
+    # Source breakdown
+    source_groups: dict[str, list[SampleEvaluationResult]] = {}
+    for s in sample_results:
+        key = s.source_id or "UNKNOWN"
+        source_groups.setdefault(key, []).append(s)
+
+    source_scores: dict[str, dict[str, float]] = {}
+    for src, group in sorted(source_groups.items()):
+        cnt = len(group)
+        s_overall = round(sum(item.overall_score for item in group) / cnt, 2)
+        source_scores[src] = {
+            "overall": s_overall,
+            "sample_count": float(cnt),
+        }
+
     # Worst-performing samples diagnostics
     sorted_samples = sorted(sample_results, key=lambda x: x.overall_score)
     worst_samples: list[dict[str, Any]] = []
     for s in sorted_samples[:10]:
-        penalties_summary = [p["reason"] for p in s.cleanliness.penalties[:3]]
-        mismatches_summary = [m["reason"] for m in (s.accuracy.mismatches if s.accuracy else [])[:3]]
+        penalties_summary = [p["reason"] for p in (s.cleanliness.penalties if s.cleanliness is not None else [])[:3]]
+        mismatches_summary = [m["reason"] for m in (s.accuracy.mismatches if s.accuracy is not None else [])[:3]]
         worst_samples.append({
             "sample_id": s.sample_id,
             "source_id": s.source_id,
             "jurisdiction": s.jurisdiction,
             "overall_score": s.overall_score,
-            "cleanliness_score": s.cleanliness.score,
-            "accuracy_score": s.accuracy.score if s.accuracy else None,
+            "cleanliness_score": s.cleanliness.score if s.cleanliness is not None else None,
+            "accuracy_score": s.accuracy.score if s.accuracy is not None else None,
             "top_penalties": penalties_summary,
             "top_mismatches": mismatches_summary,
         })
 
     # Field discrepancy and fill rate analysis vs ground truth
     field_discrepancies: dict[str, dict[str, Any]] = {}
-    if samples_with_acc:
-        acc_fields = ["title", "doc_number", "published_at", "effective_at", "issuer", "doc_type"]
+    if valid_acc:
+        acc_fields = ["title", "doc_number", "published_at", "effective_at", "issuer", "doc_type", "attachment_urls"]
         field_score_keys = {
             "title": "title_accuracy",
             "doc_number": "doc_number_accuracy",
@@ -249,6 +595,7 @@ def evaluate_benchmark_dataset(
             "effective_at": "effective_at_accuracy",
             "issuer": "issuer_accuracy",
             "doc_type": "doc_type_accuracy",
+            "attachment_urls": "attachment_url_f1",
         }
         evaluated_pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
         for item in records:
@@ -265,11 +612,9 @@ def evaluate_benchmark_dataset(
             else:
                 continue
             if isinstance(p, dict) and isinstance(g, dict):
-                p_dict = cast(dict[str, Any], p)
-                g_dict = cast(dict[str, Any], g)
-                evaluated_pairs.append((p_dict, g_dict))
+                evaluated_pairs.append((cast(dict[str, Any], p), cast(dict[str, Any], g)))
 
-        acc_total = len(evaluated_pairs) if evaluated_pairs else len(samples_with_acc)
+        acc_total = len(evaluated_pairs) if evaluated_pairs else len(valid_acc)
         for field in acc_fields:
             gt_filled_count = 0
             pred_filled_count = 0
@@ -278,8 +623,14 @@ def evaluate_benchmark_dataset(
                 pred_dict = _extract_prediction_dict(pred_dict_raw)
                 gt_val = gt_dict.get(field)
                 pred_val = pred_dict.get(field)
-                gt_has = gt_val is not None and str(gt_val).strip() != ""
-                pred_has = pred_val is not None and str(pred_val).strip() != ""
+                gt_list: list[object] | None = cast(list[object], gt_val) if isinstance(gt_val, list) else None
+                pred_list: list[object] | None = cast(list[object], pred_val) if isinstance(pred_val, list) else None
+                gt_obj = cast(object, gt_val)
+                pred_obj = cast(object, pred_val)
+                gt_str = str(gt_obj).strip() if gt_obj is not None else ""
+                pred_str = str(pred_obj).strip() if pred_obj is not None else ""
+                gt_has = len(gt_list) > 0 if gt_list is not None else bool(gt_str)
+                pred_has = len(pred_list) > 0 if pred_list is not None else bool(pred_str)
                 if gt_has:
                     gt_filled_count += 1
                     if not pred_has:
@@ -303,18 +654,21 @@ def evaluate_benchmark_dataset(
         total_samples=total_samples,
         evaluated_at=datetime.now(timezone.utc).isoformat(),
         average_overall_score=avg_overall,
-        average_cleanliness_score=avg_cleanliness,
+        average_list_discovery_f1=avg_list_discovery,
+        average_record_split_f1=avg_record_split,
         average_accuracy_score=avg_accuracy,
+        average_content_fidelity_score=avg_fidelity,
+        average_cleanliness_score=avg_cleanliness,
         cleanliness_dimension_scores=clean_dims,
         accuracy_dimension_scores=acc_dims,
         jurisdiction_scores=jur_scores,
+        source_scores=source_scores,
         worst_performing_samples=worst_samples,
         field_discrepancies=field_discrepancies,
         sample_results=sample_results,
     )
 
 
-# Alias per PROJECT.md
 def evaluate_dataset(dataset: list[dict[str, Any]]) -> BenchmarkReport:
     """Evaluate dataset alias matching PROJECT.md interface contract."""
     return evaluate_benchmark_dataset(dataset)

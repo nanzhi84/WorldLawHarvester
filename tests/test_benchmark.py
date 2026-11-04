@@ -12,6 +12,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from wlh.benchmark.evaluator import (
     evaluate_benchmark_dataset,
@@ -39,7 +40,47 @@ from wlh.benchmark.reporter import (
     write_benchmark_reports,
 )
 
-BENCHMARK_GROUND_TRUTH_PATH = Path("data/benchmark/ground_truth_benchmark.jsonl")
+BENCHMARK_JURISDICTIONS = ("CN", "US", "JP", "DE", "GB", "VN", "TW", "ZA")
+
+
+def _write_benchmark_ground_truth_fixture(directory: Path) -> Path:
+    """Write a self-contained multi-jurisdiction ground truth benchmark JSONL fixture."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "ground_truth_benchmark.jsonl"
+    records: list[dict[str, Any]] = []
+    for idx, jur in enumerate(BENCHMARK_JURISDICTIONS, start=1):
+        records.append(
+            {
+                "id": f"cand_{jur.lower()}_{idx:02d}",
+                "source_id": f"dd-{500 + idx}",
+                "jurisdiction": jur,
+                "detail_url": f"https://example.gov/{jur.lower()}/{idx}",
+                "current_extracted": {
+                    "title": f"{jur} Statutory Regulation {idx}",
+                    "doc_number": f"No. 2026-{idx:02d}",
+                    "published_at": "2026-01-15",
+                    "effective_at": "2026-02-01" if idx > 1 else None,
+                    "issuer": f"Ministry of Justice ({jur})",
+                    "doc_type": "regulation",
+                    "markdown": f"# {jur} Statutory Regulation {idx}\n\nArticle 1. Substantive legal text for {jur}.",
+                },
+                "ground_truth": {
+                    "title": f"{jur} Statutory Regulation {idx}",
+                    "doc_number": f"No. 2026-{idx:02d}",
+                    "published_at": "2026-01-15",
+                    "effective_at": "2026-02-01",
+                    "issuer": f"Ministry of Justice ({jur})",
+                    "doc_type": "regulation",
+                    "markdown": f"# {jur} Statutory Regulation {idx}\n\nArticle 1. Substantive legal text for {jur}.",
+                },
+                "verification_status": "CONSENSUS",
+            }
+        )
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in records),
+        encoding="utf-8",
+    )
+    return path
 
 
 # ==============================================================================
@@ -593,6 +634,7 @@ class TestBenchmarkEvaluator:
         assert res.jurisdiction == "ZA"
         assert res.accuracy is not None
         assert res.accuracy.score == 100.0
+        assert res.cleanliness is not None
         assert res.cleanliness.score == 100.0
         assert res.overall_score == 100.0
 
@@ -608,13 +650,19 @@ class TestBenchmarkEvaluator:
             source_id="dd-572",
             jurisdiction="ZA",
         )
+        assert res_weighted.cleanliness is not None
         assert res_weighted.cleanliness.score == 100.0
         assert res_weighted.accuracy is not None
         assert res_weighted.accuracy.score == 85.0
+        assert res_weighted.content_fidelity is not None
+        assert res_weighted.content_fidelity.content_f1 == 100.0
         assert res_weighted.overall_score == round(
-            0.30 * res_weighted.cleanliness.score + 0.70 * res_weighted.accuracy.score, 2
+            0.50 * res_weighted.accuracy.score
+            + 0.25 * res_weighted.content_fidelity.content_f1
+            + 0.25 * res_weighted.cleanliness.score,
+            2,
         )
-        assert res_weighted.overall_score == 89.5
+        assert res_weighted.overall_score == 92.5
 
     def test_evaluate_single_sample_without_ground_truth_produces_cleanliness_only(self) -> None:
         """Evaluating a sample without ground truth assigns accuracy=None and overall_score=cleanliness.score."""
@@ -624,17 +672,20 @@ class TestBenchmarkEvaluator:
         }
         res = evaluate_sample(prediction, ground_truth=None, sample_id="cand_unsupervised")
         assert res.accuracy is None
+        assert res.cleanliness is not None
         assert res.overall_score == res.cleanliness.score
 
-    def test_evaluate_authoritative_benchmark_dataset_produces_summary_report(self) -> None:
-        """Evaluating the real ground_truth_benchmark.jsonl produces a fully populated BenchmarkSummaryReport."""
-        assert BENCHMARK_GROUND_TRUTH_PATH.is_file()
+    def test_evaluate_authoritative_benchmark_dataset_produces_summary_report(self, tmp_path: Path) -> None:
+        """Evaluating a multi-jurisdiction ground_truth_benchmark.jsonl produces a fully populated BenchmarkSummaryReport."""
+        gt_path = _write_benchmark_ground_truth_fixture(tmp_path)
+        assert gt_path.is_file()
 
-        report = evaluate_benchmark_dataset(BENCHMARK_GROUND_TRUTH_PATH)
+        report = evaluate_benchmark_dataset(gt_path)
 
         assert isinstance(report, BenchmarkSummaryReport)
-        assert report.total_samples == 721
+        assert report.total_samples == len(BENCHMARK_JURISDICTIONS)
         assert 0.0 <= report.average_overall_score <= 100.0
+        assert report.average_cleanliness_score is not None
         assert 0.0 <= report.average_cleanliness_score <= 100.0
         assert report.average_accuracy_score is not None
         assert 0.0 <= report.average_accuracy_score <= 100.0
@@ -659,9 +710,10 @@ class TestBenchmarkEvaluator:
         assert len(report.worst_performing_samples) > 0
         assert len(report.worst_performing_samples) <= report.total_samples
 
-    def test_evaluate_dataset_alias_matches_contract(self) -> None:
+    def test_evaluate_dataset_alias_matches_contract(self, tmp_path: Path) -> None:
         """Function alias evaluate_dataset and return type alias BenchmarkReport match contract."""
-        with BENCHMARK_GROUND_TRUTH_PATH.open(encoding="utf-8") as f:
+        gt_path = _write_benchmark_ground_truth_fixture(tmp_path)
+        with gt_path.open(encoding="utf-8") as f:
             records = [json.loads(line) for line in f][:3]
 
         report = evaluate_dataset(records)
@@ -688,6 +740,7 @@ class TestBenchmarkEvaluator:
 
         report = evaluate_benchmark_dataset(json_file)
         assert report.total_samples == 2
+        assert report.average_cleanliness_score is not None
         assert report.average_cleanliness_score >= 90.0
 
     def test_external_ground_truth_takes_precedence_over_embedded_ground_truth(self) -> None:
@@ -723,11 +776,12 @@ class TestBenchmarkReporter:
 
     def test_json_and_markdown_reports_contain_required_score_cards_and_tables(self, tmp_path: Path) -> None:
         """Reporter generates complete, parseable JSON and informative Markdown artifacts."""
-        report = evaluate_benchmark_dataset(BENCHMARK_GROUND_TRUTH_PATH)
+        gt_path = _write_benchmark_ground_truth_fixture(tmp_path / "fixture")
+        report = evaluate_benchmark_dataset(gt_path)
 
         json_str = render_benchmark_json_report(report)
         parsed_json = json.loads(json_str)
-        assert parsed_json["total_samples"] == 721
+        assert parsed_json["total_samples"] == len(BENCHMARK_JURISDICTIONS)
         assert "average_overall_score" in parsed_json
         assert "cleanliness_dimension_scores" in parsed_json
         assert "accuracy_dimension_scores" in parsed_json
@@ -763,12 +817,15 @@ class TestBenchmarkCommandLineInterface:
 
     def test_standalone_module_execution_with_valid_arguments_exits_zero(self, tmp_path: Path) -> None:
         """Executing python -m wlh.benchmark against benchmark dataset generates outputs and exits 0."""
+        gt_path = _write_benchmark_ground_truth_fixture(tmp_path / "fixture")
         cmd = [
             sys.executable,
             "-m",
             "wlh.benchmark",
             "--input",
-            str(BENCHMARK_GROUND_TRUTH_PATH),
+            str(gt_path),
+            "--ground-truth",
+            str(gt_path),
             "--output-dir",
             str(tmp_path),
         ]
@@ -782,17 +839,20 @@ class TestBenchmarkCommandLineInterface:
 
         with json_file.open(encoding="utf-8") as f:
             data = json.load(f)
-            assert data["total_samples"] == 721
+            assert data["total_samples"] == len(BENCHMARK_JURISDICTIONS)
 
     def test_wlh_cli_benchmark_subcommand_execution_exits_zero(self, tmp_path: Path) -> None:
         """Executing python -m wlh benchmark against benchmark dataset generates outputs and exits 0."""
+        gt_path = _write_benchmark_ground_truth_fixture(tmp_path / "fixture")
         cmd = [
             sys.executable,
             "-m",
             "wlh",
             "benchmark",
             "--input",
-            str(BENCHMARK_GROUND_TRUTH_PATH),
+            str(gt_path),
+            "--ground-truth",
+            str(gt_path),
             "--output-dir",
             str(tmp_path),
         ]

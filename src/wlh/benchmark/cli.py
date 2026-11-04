@@ -82,6 +82,102 @@ def configure_benchmark_parser(parser: argparse.ArgumentParser) -> None:
         help="CSV adaptation matrix file override",
     )
 
+    # export-bundle subcommand
+    export_parser = subparsers.add_parser(
+        "export-bundle",
+        help="Export 100%% untruncated HTML/JSON/XML batch bundle covering list pages and content pages",
+    )
+    export_parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("data/benchmark/processor_batch_bundle.jsonl"),
+        help="Output path for processor batch bundle JSONL",
+    )
+    export_parser.add_argument(
+        "--fixtures",
+        type=Path,
+        default=Path("tests/fixtures"),
+        help="Path to tests/fixtures directory",
+    )
+    export_parser.add_argument(
+        "--candidates",
+        type=Path,
+        default=Path("data/benchmark/raw_candidates.jsonl"),
+        help="Path to raw_candidates.jsonl",
+    )
+    export_parser.add_argument(
+        "--csv",
+        type=Path,
+        default=Path("data/benchmark/sources_matrix.csv"),
+        help="Path to sources_matrix.csv",
+    )
+
+    # preflight subcommand
+    preflight_parser = subparsers.add_parser(
+        "preflight",
+        help="Run static verification preflight checks on processor batch bundle before GPU annotation",
+    )
+    preflight_parser.add_argument(
+        "--bundle",
+        type=Path,
+        default=Path("data/benchmark/ground_truth_benchmark.jsonl"),
+        help="Path to benchmark bundle JSONL or annotation_pipeline.json",
+    )
+
+    # arbitrate subcommand
+    arbitrate_parser = subparsers.add_parser(
+        "arbitrate",
+        help="Cross-verify independent annotations and arbitrate ground truth benchmark dataset",
+    )
+    arbitrate_parser.add_argument(
+        "--candidates",
+        type=Path,
+        default=Path("data/benchmark/raw_candidates.jsonl"),
+        help="Path to raw_candidates.jsonl",
+    )
+    arbitrate_parser.add_argument(
+        "--annotator-a",
+        type=Path,
+        default=Path("data/benchmark/annotations/annotator_a.jsonl"),
+        help="Path to Annotator A annotations",
+    )
+    arbitrate_parser.add_argument(
+        "--annotator-b",
+        type=Path,
+        default=Path("data/benchmark/annotations/annotator_b.jsonl"),
+        help="Path to Annotator B annotations",
+    )
+    arbitrate_parser.add_argument(
+        "--log-output",
+        type=Path,
+        default=Path("artifacts/benchmark/cross_verification_log.json"),
+        help="Path to output cross_verification_log.json",
+    )
+    arbitrate_parser.add_argument(
+        "--benchmark-output",
+        type=Path,
+        default=Path("data/benchmark/ground_truth_benchmark.jsonl"),
+        help="Path to output ground_truth_benchmark.jsonl",
+    )
+    arbitrate_parser.add_argument(
+        "--export-disputes",
+        type=Path,
+        default=None,
+        help="Path to export disputes (e.g. data/benchmark/annotations/disputes.jsonl)",
+    )
+    arbitrate_parser.add_argument(
+        "--merge-resolutions",
+        type=Path,
+        default=None,
+        help="Path to arbitrated resolutions to merge into benchmark ground truth",
+    )
+    arbitrate_parser.add_argument(
+        "--bundle",
+        type=Path,
+        default=Path("data/benchmark/processor_batch_bundle.jsonl"),
+        help="Path to processor batch bundle JSONL for payload hydration in disputes",
+    )
+
 
 def build_benchmark_parser() -> argparse.ArgumentParser:
     """Build argument parser for the benchmark CLI."""
@@ -155,6 +251,106 @@ def run_benchmark_sample(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def run_benchmark_export_bundle(args: argparse.Namespace) -> dict[str, Any]:
+    """Export processor batch bundle."""
+    from wlh.benchmark.sampler import export_processor_batch_bundle
+
+    out_p = Path(getattr(args, "output", None) or "data/benchmark/processor_batch_bundle.jsonl")
+    fix_p = Path(getattr(args, "fixtures", None) or "tests/fixtures")
+    cand_p = Path(getattr(args, "candidates", None) or "data/benchmark/raw_candidates.jsonl")
+    csv_p = Path(getattr(args, "csv", None) or "data/benchmark/sources_matrix.csv")
+
+    tasks = export_processor_batch_bundle(
+        output_path=out_p,
+        fixtures_dir=fix_p,
+        candidates_path=cand_p,
+        csv_path=csv_p,
+    )
+    return {
+        "status": "success",
+        "command": "benchmark.export-bundle",
+        "total_tasks": len(tasks),
+        "output_path": str(out_p),
+    }
+
+
+def run_benchmark_preflight(args: argparse.Namespace) -> dict[str, Any]:
+    """Execute preflight checks on batch bundle."""
+    from wlh.benchmark.sampler import run_preflight_checks
+
+    b_p = Path(getattr(args, "bundle", None) or "data/benchmark/ground_truth_benchmark.jsonl")
+    return run_preflight_checks(bundle_path=b_p)
+
+
+def run_benchmark_arbitrate(args: argparse.Namespace) -> dict[str, Any]:
+    """Run arbitration or dispute export/merge."""
+    from wlh.benchmark.arbitrator import (
+        export_disputes,
+        merge_resolutions,
+        run_arbitration,
+        write_benchmark_dataset,
+    )
+
+    a_p = Path(getattr(args, "annotator_a", None) or "data/benchmark/annotations/annotator_a.jsonl")
+    b_p = Path(getattr(args, "annotator_b", None) or "data/benchmark/annotations/annotator_b.jsonl")
+
+    export_disp = getattr(args, "export_disputes", None)
+    bundle_p = getattr(args, "bundle", None)
+    if export_disp:
+        disputes = export_disputes(
+            annotator_a_path=a_p,
+            annotator_b_path=b_p,
+            output_path=Path(export_disp),
+            bundle_path=Path(bundle_p) if bundle_p else None,
+        )
+        return {
+            "status": "success",
+            "command": "benchmark.arbitrate.export-disputes",
+            "total_disputes": len(disputes),
+            "output_path": str(export_disp),
+        }
+
+    merge_res = getattr(args, "merge_resolutions", None)
+    bench_out = Path(getattr(args, "benchmark_output", None) or "data/benchmark/ground_truth_benchmark.jsonl")
+    if merge_res:
+        merged = merge_resolutions(
+            annotator_a_path=a_p,
+            annotator_b_path=b_p,
+            resolutions_path=Path(merge_res),
+            output_path=bench_out,
+        )
+        return {
+            "status": "success",
+            "command": "benchmark.arbitrate.merge-resolutions",
+            "total_merged": len(merged),
+            "output_path": str(bench_out),
+        }
+
+    cand_p = Path(getattr(args, "candidates", None) or "data/benchmark/raw_candidates.jsonl")
+    log_out = Path(getattr(args, "log_output", None) or "artifacts/benchmark/cross_verification_log.json")
+
+    verif_log, bench_recs = run_arbitration(
+        candidates_path=cand_p,
+        annotator_a_path=a_p,
+        annotator_b_path=b_p,
+    )
+    write_benchmark_dataset(
+        verification_log=verif_log,
+        benchmark_records=bench_recs,
+        log_path=log_out,
+        benchmark_path=bench_out,
+    )
+    return {
+        "status": "success",
+        "command": "benchmark.arbitrate",
+        "total_records": len(bench_recs),
+        "consensus_count": verif_log.get("summary", {}).get("consensus_count", 0),
+        "dispute_count": verif_log.get("summary", {}).get("dispute_count", 0),
+        "log_output": str(log_out),
+        "benchmark_output": str(bench_out),
+    }
+
+
 def run_benchmark_cli(args: argparse.Namespace) -> dict[str, Any]:
     """Dispatch benchmark subcommands or default evaluation workflow."""
     subcmd = getattr(args, "subcommand", None)
@@ -162,12 +358,18 @@ def run_benchmark_cli(args: argparse.Namespace) -> dict[str, Any]:
         return run_benchmark_evaluation(args)
     if subcmd == "sample":
         return run_benchmark_sample(args)
+    if subcmd in ("export-bundle", "export_bundle"):
+        return run_benchmark_export_bundle(args)
+    if subcmd == "preflight":
+        return run_benchmark_preflight(args)
+    if subcmd == "arbitrate":
+        return run_benchmark_arbitrate(args)
     if getattr(args, "input", None) is not None:
         # Backward compatibility: wlh benchmark --input ...
         return run_benchmark_evaluation(args)
 
     raise ValueError(
-        "A subcommand (run, sample) or --input must be specified for benchmark."
+        "A subcommand (run, sample, export-bundle, preflight, arbitrate) or --input must be specified for benchmark."
     )
 
 
@@ -187,6 +389,19 @@ def main(argv: list[str] | None = None) -> int:
                 f"Accuracy: {result['average_accuracy_score']}"
             )
             print(f"Reports written to: {result['markdown_report']}")
+        elif "total_tasks" in result:
+            print(f"Exported {result['total_tasks']} tasks to {result['output_path']}")
+        elif result.get("command") == "preflight":
+            print(f"Preflight checks passed ({result.get('total_tasks', 0)} tasks verified)")
+        elif "total_disputes" in result:
+            print(f"Exported {result['total_disputes']} disputes to {result['output_path']}")
+        elif "total_merged" in result:
+            print(f"Merged {result['total_merged']} resolutions into {result['output_path']}")
+        elif "consensus_count" in result:
+            print(
+                f"Arbitration completed: {result['total_records']} benchmark records created "
+                f"({result['consensus_count']} consensus, {result['dispute_count']} disputes)"
+            )
         return 0
     except KeyboardInterrupt:
         return 130
