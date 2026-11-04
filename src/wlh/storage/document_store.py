@@ -129,7 +129,9 @@ def sha(value: Any, code: str) -> str:
     return value
 
 
-def normalize_metadata(candidate: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str | None]]:
+def normalize_metadata(
+    candidate: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, str | None]]:
     meta: Mapping[str, Any] = candidate.get("metadata") or {}
     if set(meta) - set(METADATA_FIELDS):
         raise WlhError("invalid_document_metadata")
@@ -145,7 +147,8 @@ def normalize_metadata(candidate: Mapping[str, Any]) -> tuple[dict[str, Any], di
 
 
 def normalize_inputs(
-    candidate: Mapping[str, Any], acquisitions: Mapping[str, Mapping[str, Any]],
+    candidate: Mapping[str, Any],
+    acquisitions: Mapping[str, Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     inputs: list[dict[str, Any]] = []
     for item in cast(list[dict[str, Any]], candidate.get("inputs") or []):
@@ -193,8 +196,13 @@ def check_volumes(deliverables: Sequence[Mapping[str, Any]]) -> None:
 
 
 def build(
-    objects: Any, *, source_id: str, run_id: str, manifest: Mapping[str, Any] | None,
-    candidate: Mapping[str, Any], acquisitions: Mapping[str, Mapping[str, Any]],
+    objects: Any,
+    *,
+    source_id: str,
+    run_id: str,
+    manifest: Mapping[str, Any] | None,
+    candidate: Mapping[str, Any],
+    acquisitions: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Validate a candidate, write Markdown/manifest/document to CAS, return rows."""
     namespace = text(candidate.get("namespace"), "namespace")
@@ -332,7 +340,9 @@ def build(
     if "ocr" in parser_config:
         engines: list[str] = sorted(
             {
-                cast(dict[str, Any], d.get("extraction", {}).get("ocr") or {}).get("engine", "unknown")
+                cast(dict[str, Any], d.get("extraction", {}).get("ocr") or {}).get(
+                    "engine", "unknown"
+                )
                 for d in deliverables
                 if (d.get("extraction", {}).get("ocr"))
             }
@@ -443,15 +453,22 @@ def build(
 
 
 def verify_document(
-    objects: Any, result_ref: str, *, max_bytes: int | None = None,
-    deadline: float | None = None, sizes: dict[str, int] | None = None,
+    objects: Any,
+    result_ref: str,
+    *,
+    max_bytes: int | None = None,
+    deadline: float | None = None,
+    sizes: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Read-side validator: unified document plus its complete object closure."""
     try:
         import json
 
         value = json.loads(objects.get(result_ref, max_bytes=max_bytes, deadline=deadline))
-        if not isinstance(value, dict) or cast(dict[str, Any], value).get("schema") != DOCUMENT_SCHEMA:
+        if (
+            not isinstance(value, dict)
+            or cast(dict[str, Any], value).get("schema") != DOCUMENT_SCHEMA
+        ):
             raise ValueError
         deliverables = cast(dict[str, Any], value).get("deliverables")
         if not isinstance(deliverables, list) or not deliverables:
@@ -472,10 +489,14 @@ def verify_document(
         if not isinstance(lineage, dict):
             raise ValueError
         manifest_raw: bytes = objects.get(
-            sha(cast(dict[str, Any], lineage).get("inputs_ref"), "document_invalid"), deadline=deadline
+            sha(cast(dict[str, Any], lineage).get("inputs_ref"), "document_invalid"),
+            deadline=deadline,
         )
         manifest = json.loads(manifest_raw)
-        if not isinstance(manifest, dict) or cast(dict[str, Any], manifest).get("schema") != INPUTS_SCHEMA:
+        if (
+            not isinstance(manifest, dict)
+            or cast(dict[str, Any], manifest).get("schema") != INPUTS_SCHEMA
+        ):
             raise ValueError
         inputs = cast(dict[str, Any], manifest)["inputs"]
         if not isinstance(inputs, list) or not inputs:
@@ -483,7 +504,10 @@ def verify_document(
         for item in cast(list[Any], inputs):
             if not isinstance(item, dict):
                 raise ValueError
-            objects.get(sha(cast(dict[str, Any], item).get("archive_ref"), "document_invalid"), deadline=deadline)
+            objects.get(
+                sha(cast(dict[str, Any], item).get("archive_ref"), "document_invalid"),
+                deadline=deadline,
+            )
     except (KeyError, TypeError, ValueError, AttributeError):
         raise WlhError("document_invalid") from None
     return cast(dict[str, Any], value)
@@ -580,9 +604,13 @@ def schedule(
     c: DbConn, run: Mapping[str, Any], resource_id: str, outcome: str, success: bool
 ) -> None:
     cfg_raw = run.get("config")
-    cfg: Mapping[str, Any] = cast(Mapping[str, Any], cfg_raw) if isinstance(cfg_raw, Mapping) else {}
+    cfg: Mapping[str, Any] = (
+        cast(Mapping[str, Any], cfg_raw) if isinstance(cfg_raw, Mapping) else {}
+    )
     sched_raw = cfg.get("scheduler")
-    sched: Mapping[str, Any] = cast(Mapping[str, Any], sched_raw) if isinstance(sched_raw, Mapping) else {}
+    sched: Mapping[str, Any] = (
+        cast(Mapping[str, Any], sched_raw) if isinstance(sched_raw, Mapping) else {}
+    )
     recheck_sec = int(sched.get("recheck_seconds") or cfg.get("recheck_seconds") or 3600)
     interval: int = recheck_sec if success else min(60, recheck_sec)
     c.execute(
@@ -845,7 +873,9 @@ def save_checkpoint(run_id: str, epoch: int, checkpoint: Mapping[str, Any]) -> N
         )
 
 
-def load_source_delivery_rows(source_id: str) -> tuple[Mapping[str, Any] | None, list[dict[str, Any]]]:
+def load_source_delivery_rows(
+    source_id: str,
+) -> tuple[Mapping[str, Any] | None, list[dict[str, Any]]]:
     """Load current delivered rows and source config for a source_id from PostgreSQL."""
     with connect() as c:
         source_row = c.execute(

@@ -468,16 +468,13 @@ class Transport:
                                     actual_url=str(response.url),
                                 )
                     except aiohttp.ClientPayloadError:
-                        ext_quirks = (
-                            cast(
-                                dict[str, Any],
-                                cast(dict[str, Any], self.config.get("processor") or {}).get(
-                                    "extractor"
-                                )
-                                or {},
-                            ).get("quirks")
-                            or ("zip_salvage",)
-                        )
+                        ext_quirks = cast(
+                            dict[str, Any],
+                            cast(dict[str, Any], self.config.get("processor") or {}).get(
+                                "extractor"
+                            )
+                            or {},
+                        ).get("quirks") or ("zip_salvage",)
                         if (
                             200 <= response.status < 300
                             and bytes(body[:4]) == b"PK\x03\x04"

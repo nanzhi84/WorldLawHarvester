@@ -134,11 +134,7 @@ def tesseract_pages(
         pos = 0
         is_vert_first = str(cfg["languages"]).startswith("jpn_vert")
         while pos < len(numbers):
-            batch_len = (
-                min(12, len(numbers) - pos)
-                if (pos > 0 or is_vert_first)
-                else 1
-            )
+            batch_len = min(12, len(numbers) - pos) if (pos > 0 or is_vert_first) else 1
             batch = numbers[pos : pos + batch_len]
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -230,9 +226,7 @@ def tesseract_image_bytes(
     work_root = Path("work")
     work_root.mkdir(parents=True, exist_ok=True)
     try:
-        with tempfile.TemporaryDirectory(
-            prefix="wlh-img-ocr-", dir=work_root.resolve()
-        ) as folder:
+        with tempfile.TemporaryDirectory(prefix="wlh-img-ocr-", dir=work_root.resolve()) as folder:
             png_path = Path(folder) / "image.png"
             pix = fitz.Pixmap(data)
             if pix.alpha or pix.n > 3:

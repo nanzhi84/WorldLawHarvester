@@ -56,7 +56,9 @@ class TestBenchmarkDatasetContract:
         self, benchmark_records: list[dict[str, Any]], raw_candidates: dict[str, dict[str, Any]]
     ) -> None:
         """Benchmark dataset must contain all 721 candidate items covering 73 sources with unique identifiers."""
-        assert len(benchmark_records) == 721, f"Expected 721 records, found {len(benchmark_records)}"
+        assert len(benchmark_records) == 721, (
+            f"Expected 721 records, found {len(benchmark_records)}"
+        )
         assert len({rec["source_id"] for rec in benchmark_records}) == 73, (
             f"Expected 73 distinct source_ids, found {len({rec['source_id'] for rec in benchmark_records})}"
         )
@@ -64,8 +66,12 @@ class TestBenchmarkDatasetContract:
         assert benchmark_ids == [f"cand_{i:02d}" for i in range(1, 722)], (
             "Benchmark IDs do not match sequential cand_01..cand_721"
         )
-        assert len(benchmark_ids) == len(set(benchmark_ids)), "Duplicate IDs found in benchmark dataset"
-        assert set(benchmark_ids) == set(raw_candidates.keys()), "Benchmark IDs do not match raw candidates"
+        assert len(benchmark_ids) == len(set(benchmark_ids)), (
+            "Duplicate IDs found in benchmark dataset"
+        )
+        assert set(benchmark_ids) == set(raw_candidates.keys()), (
+            "Benchmark IDs do not match raw candidates"
+        )
 
     def test_benchmark_records_conform_to_canonical_schema_contract(
         self, benchmark_records: list[dict[str, Any]]
@@ -98,8 +104,12 @@ class TestBenchmarkDatasetContract:
         for rec in benchmark_records:
             rec_id = rec["id"]
             assert rec["source_id"].startswith("dd-"), f"{rec_id}: invalid source_id format"
-            assert len(rec["jurisdiction"]) in (2, 3), f"{rec_id}: jurisdiction code should be 2-3 chars"
-            assert rec["detail_url"].startswith("http"), f"{rec_id}: detail_url must start with http"
+            assert len(rec["jurisdiction"]) in (2, 3), (
+                f"{rec_id}: jurisdiction code should be 2-3 chars"
+            )
+            assert rec["detail_url"].startswith("http"), (
+                f"{rec_id}: detail_url must start with http"
+            )
 
     def test_benchmark_ground_truth_fields_conform_to_contract_types(
         self, benchmark_records: list[dict[str, Any]]
@@ -127,8 +137,12 @@ class TestBenchmarkDatasetContract:
                 assert field_val != "待人工确认", (
                     f"{rec_id}: Golden Set ground_truth.{field_name} contains unresolved placeholder '待人工确认'"
                 )
-            assert isinstance(gt["title"], str) and len(gt["title"]) > 0, f"{rec_id}: title must be non-empty"
-            assert isinstance(gt["doc_type"], str) and len(gt["doc_type"]) > 0, f"{rec_id}: doc_type non-empty"
+            assert isinstance(gt["title"], str) and len(gt["title"]) > 0, (
+                f"{rec_id}: title must be non-empty"
+            )
+            assert isinstance(gt["doc_type"], str) and len(gt["doc_type"]) > 0, (
+                f"{rec_id}: doc_type non-empty"
+            )
             assert isinstance(gt["markdown"], str) and len(gt["markdown"].strip()) > 0, (
                 f"{rec_id}: ground_truth.markdown must be a non-empty string"
             )
@@ -147,7 +161,9 @@ class TestBenchmarkDatasetContract:
                 )
                 if val is not None:
                     assert isinstance(val, str), f"{rec_id}: {date_key} must be string or None"
-                    assert ISO_DATE_REGEX.match(val), f"{rec_id}: {date_key} '{val}' does not match YYYY-MM-DD"
+                    assert ISO_DATE_REGEX.match(val), (
+                        f"{rec_id}: {date_key} '{val}' does not match YYYY-MM-DD"
+                    )
 
     def test_deprecated_cleanliness_ground_truth_and_excerpt_removed_from_dataset_and_verification_log(
         self, benchmark_records: list[dict[str, Any]], verification_log: dict[str, Any]
@@ -155,7 +171,9 @@ class TestBenchmarkDatasetContract:
         """Deprecated cleanliness_ground_truth and clean_markdown_excerpt must be absent across dataset and log."""
         for rec in benchmark_records:
             rec_id = rec["id"]
-            assert "cleanliness_ground_truth" not in rec, f"{rec_id} contains cleanliness_ground_truth"
+            assert "cleanliness_ground_truth" not in rec, (
+                f"{rec_id} contains cleanliness_ground_truth"
+            )
             assert "clean_markdown_excerpt" not in rec["ground_truth"], (
                 f"{rec_id} ground_truth contains clean_markdown_excerpt"
             )
@@ -223,7 +241,9 @@ class TestCrossVerificationLogContract:
     ) -> None:
         """Overall semantic agreement rate between Annotator A and B must be >= 90% (0.90)."""
         semantic_rate = verification_log["overall_semantic_agreement_rate"]
-        assert semantic_rate >= 0.90, f"Expected semantic agreement rate >= 0.90, got {semantic_rate}"
+        assert semantic_rate >= 0.90, (
+            f"Expected semantic agreement rate >= 0.90, got {semantic_rate}"
+        )
         exact_rate = verification_log["overall_agreement_rate"]
         assert exact_rate <= semantic_rate
 
@@ -360,4 +380,3 @@ class TestArbitrationIntegrityAndDefectResolutions:
                     f"{cid}.{field}: expected {arb_rec['ground_truth'][field]!r}, "
                     f"got {bench_rec['ground_truth'][field]!r}"
                 )
-

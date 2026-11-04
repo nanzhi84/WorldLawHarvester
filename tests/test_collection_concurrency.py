@@ -585,7 +585,9 @@ storage:
                 verify_source_delivery("dd-963", require_multi_resource=True)["resource_count"]
                 == 20
             )
-            assert elapsed < 30.0, f"Expected parallel PDF pool collect within budget, took {elapsed:.2f}s"
+            assert elapsed < 30.0, (
+                f"Expected parallel PDF pool collect within budget, took {elapsed:.2f}s"
+            )
         finally:
             srv.shutdown()
             srv_thread.join(timeout=2.0)

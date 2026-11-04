@@ -53,9 +53,7 @@ class DeliveryQualityRulePack:
 
 def _normalize_title_token(value: str) -> str:
     norm = unicodedata.normalize("NFKC", value).casefold()
-    norm = re.sub(
-        r"^[\s.,;:!?\"'()\[\]{}<>\-_/|\\]+|[\s.,;:!?\"'()\[\]{}<>\-_/|\\]+$", "", norm
-    )
+    norm = re.sub(r"^[\s.,;:!?\"'()\[\]{}<>\-_/|\\]+|[\s.,;:!?\"'()\[\]{}<>\-_/|\\]+$", "", norm)
     return re.sub(r"\s+", " ", norm).strip()
 
 
@@ -100,11 +98,7 @@ def _extract_config_context(
     if not isinstance(source_config, Mapping):
         cfg_id = str(getattr(source_config, "id", None) or "").strip() or None
         storage_obj = getattr(source_config, "storage", None)
-        meta_obj = (
-            getattr(storage_obj, "metadata", None)
-            if storage_obj is not None
-            else None
-        )
+        meta_obj = getattr(storage_obj, "metadata", None) if storage_obj is not None else None
         cleaners_obj = getattr(source_config, "cleaners", None)
         if meta_obj is not None or cleaners_obj is not None or cfg_id is not None:
             lang = str(getattr(meta_obj, "language", None) or "").strip() or None
@@ -155,9 +149,7 @@ def _extract_config_context(
     raw_invalid = cleaners_map.get("invalid_body_patterns")
     if isinstance(raw_invalid, Sequence) and not isinstance(raw_invalid, (str, bytes)):
         extra_invalid.extend(
-            str(p).strip().casefold()
-            for p in cast(Sequence[Any], raw_invalid)
-            if str(p).strip()
+            str(p).strip().casefold() for p in cast(Sequence[Any], raw_invalid) if str(p).strip()
         )
     return lang, jur, src_name, tuple(extra_invalid), cfg_id
 
@@ -187,9 +179,7 @@ def _build_rule_pack_cached(
         if jur_key and isinstance(jurisdictions_sec.get(jur_key), Mapping):
             jur_pack = cast(Mapping[str, Any], jurisdictions_sec[jur_key])
             linked_langs = jur_pack.get("languages")
-            if isinstance(linked_langs, Sequence) and not isinstance(
-                linked_langs, (str, bytes)
-            ):
+            if isinstance(linked_langs, Sequence) and not isinstance(linked_langs, (str, bytes)):
                 for lk in cast(Sequence[Any], linked_langs):
                     lk_str = str(lk).strip().lower()
                     if lk_str and lk_str not in lang_keys:
@@ -241,9 +231,7 @@ def _build_rule_pack_cached(
                 sig_dict = dict(cast(Mapping[str, Any], sig))
                 if sig_dict not in sig_rules:
                     sig_rules.append(sig_dict)
-        for h_pref in cast(
-            Sequence[Any], sec.get("supplementary_heading_prefixes") or ()
-        ):
+        for h_pref in cast(Sequence[Any], sec.get("supplementary_heading_prefixes") or ()):
             s_pref = str(h_pref).strip()
             if s_pref and s_pref not in supp_headings:
                 supp_headings.append(s_pref)
@@ -273,9 +261,7 @@ def load_delivery_quality_rules(
     source_id: str | None = None,
 ) -> DeliveryQualityRulePack:
     """Load and merge declarative delivery quality rules for `language` and `jurisdiction`."""
-    cfg_lang, cfg_jur, _cfg_name, extra_invalid, cfg_sid = _extract_config_context(
-        source_config
-    )
+    cfg_lang, cfg_jur, _cfg_name, extra_invalid, cfg_sid = _extract_config_context(source_config)
     resolved_lang = (language or cfg_lang or "").strip() or None
     resolved_jur = (jurisdiction or cfg_jur or "").strip() or None
     effective_sid = (source_id or cfg_sid or "").strip() or None
@@ -306,9 +292,7 @@ def _is_signature_only_stub(
         primary = str(rule.get("primary") or "").casefold().strip()
         secondary_raw = rule.get("secondary") or ()
         secondary = [
-            str(s).casefold().strip()
-            for s in cast(Sequence[Any], secondary_raw)
-            if str(s).strip()
+            str(s).casefold().strip() for s in cast(Sequence[Any], secondary_raw) if str(s).strip()
         ]
         if primary and primary in lower and any(sec in lower for sec in secondary):
             return True
@@ -337,9 +321,7 @@ def _has_duplicated_substantive_paragraph(
                 head_text = re.sub(r"\s+", " ", m_head.group(2)).strip()
                 lvl = (
                     1
-                    if supp_tuple
-                    and head_text.startswith(supp_tuple)
-                    and len(m_head.group(1)) >= 2
+                    if supp_tuple and head_text.startswith(supp_tuple) and len(m_head.group(1)) >= 2
                     else len(m_head.group(1))
                 )
                 for k in [k for k in headings_by_level if k >= lvl]:
@@ -348,10 +330,7 @@ def _has_duplicated_substantive_paragraph(
             sub_headers.clear()
             prev_compact = None
             continue
-        if (
-            stripped.startswith(("|", "```", "- ", "* ", "<table"))
-            or "<table" in stripped.lower()
-        ):
+        if stripped.startswith(("|", "```", "- ", "* ", "<table")) or "<table" in stripped.lower():
             prev_compact = None
             continue
         compact = re.sub(r"\s+", " ", stripped)
@@ -365,9 +344,7 @@ def _has_duplicated_substantive_paragraph(
         context_parts = [v for _, v in sorted(headings_by_level.items())]
         context_parts.extend(sub_headers)
         context_trail = " > ".join(context_parts)
-        contextual_blocks.append(
-            f"{context_trail} || {compact}" if context_trail else compact
-        )
+        contextual_blocks.append(f"{context_trail} || {compact}" if context_trail else compact)
         prev_compact = compact
     if has_adjacent_dup and len(substantive_blocks) <= 40:
         return True
@@ -399,9 +376,7 @@ def audit_delivery_rows(
         violations.append(
             {
                 "code": code,
-                "resource_id": str(row["resource_id"])
-                if row and row.get("resource_id")
-                else None,
+                "resource_id": str(row["resource_id"]) if row and row.get("resource_id") else None,
                 "row_index": int(row["row_index"])
                 if row and isinstance(row.get("row_index"), int)
                 else None,
@@ -409,15 +384,9 @@ def audit_delivery_rows(
             }
         )
 
-    first_source_id = (
-        str(rows[0].get("source_id") or "").strip() or None if rows else None
-    )
-    row_lang = (
-        str(rows[0].get("language") or "").strip() or None if rows else None
-    )
-    row_jur = (
-        str(rows[0].get("jurisdiction") or "").strip() or None if rows else None
-    )
+    first_source_id = str(rows[0].get("source_id") or "").strip() or None if rows else None
+    row_lang = str(rows[0].get("language") or "").strip() or None if rows else None
+    row_jur = str(rows[0].get("jurisdiction") or "").strip() or None if rows else None
     rules = load_delivery_quality_rules(
         language=language or row_lang,
         jurisdiction=jurisdiction or row_jur,
@@ -441,8 +410,8 @@ def audit_delivery_rows(
             "violation_codes": ["empty_delivery"],
         }
 
-    _cfg_lang, _cfg_jur, cfg_source_name, _extra_inv, cfg_sid = (
-        _extract_config_context(source_config)
+    _cfg_lang, _cfg_jur, cfg_source_name, _extra_inv, cfg_sid = _extract_config_context(
+        source_config
     )
     effective_sid = first_source_id or cfg_sid
     if not cfg_source_name and effective_sid:
@@ -473,9 +442,7 @@ def audit_delivery_rows(
     if resource_count >= 2:
         primary_rows: list[Mapping[str, Any]] = []
         for res_rows in by_resource.values():
-            non_att = [
-                r for r in res_rows if r.get("role") != "independent_attachment"
-            ]
+            non_att = [r for r in res_rows if r.get("role") != "independent_attachment"]
             primary_rows.append(non_att[0] if non_att else res_rows[0])
         norm_titles = {
             _normalize_title_token(str(r.get("title") or ""))
@@ -529,8 +496,7 @@ def audit_delivery_rows(
                 row,
             )
         elif any(
-            re.search(pat, title_raw, re.IGNORECASE)
-            for pat in rules.salutation_prefix_regexes
+            re.search(pat, title_raw, re.IGNORECASE) for pat in rules.salutation_prefix_regexes
         ):
             _add(
                 "boilerplate_or_garbage_title",
@@ -549,9 +515,7 @@ def audit_delivery_rows(
             else:
                 dn_stripped = doc_num.strip()
                 dn_segments = [
-                    seg.strip()
-                    for seg in re.split(r"[;；]", dn_stripped)
-                    if seg.strip()
+                    seg.strip() for seg in re.split(r"[;；]", dn_stripped) if seg.strip()
                 ]
                 max_seg_len = max((len(seg) for seg in dn_segments), default=0)
                 if (
@@ -590,19 +554,14 @@ def audit_delivery_rows(
 
         for date_field in ("published_at", "effective_at", "expired_at"):
             val = projected.get(date_field)
-            if val is not None and (
-                not isinstance(val, str) or not _ISO_DATE_RE.match(val)
-            ):
+            if val is not None and (not isinstance(val, str) or not _ISO_DATE_RE.match(val)):
                 _add(
                     "canonical_projection_violation",
                     f"invalid ISO date in {date_field}: {val!r}",
                     row,
                 )
 
-        if (
-            row.get("role") == "independent_attachment"
-            and row.get("volume_order") is not None
-        ):
+        if row.get("role") == "independent_attachment" and row.get("volume_order") is not None:
             _add(
                 "canonical_projection_violation",
                 "independent_attachment must not have volume_order",
@@ -642,9 +601,7 @@ def audit_delivery_rows(
                 stripped_gazette = re.sub(hdr_pat, "", stripped_gazette)
             non_ws_len = len(re.sub(r"\s+", "", md_text))
             substantive_non_ws_len = len(re.sub(r"\s+", "", stripped_gazette))
-            if _is_signature_only_stub(
-                md_text, non_ws_len, rules.signature_stub_rules
-            ):
+            if _is_signature_only_stub(md_text, non_ws_len, rules.signature_stub_rules):
                 _add(
                     "signature_only_markdown",
                     "markdown contains only a digital signature block without substantive text",
@@ -657,9 +614,7 @@ def audit_delivery_rows(
                     row,
                 )
             orig_file = str(row.get("original_file") or "").lower()
-            is_binary_doc = orig_file.endswith(
-                (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".rtf")
-            )
+            is_binary_doc = orig_file.endswith((".pdf", ".doc", ".docx", ".xls", ".xlsx", ".rtf"))
             if not is_binary_doc and _has_duplicated_substantive_paragraph(
                 md_text, rules.supplementary_heading_prefixes
             ):
@@ -722,9 +677,7 @@ def verify_source_delivery(
     multi_req = (
         require_multi_resource
         if require_multi_resource is not None
-        else not bool(
-            (source_cfg or {}).get("cleaners", {}).get("allow_single_resource", False)
-        )
+        else not bool((source_cfg or {}).get("cleaners", {}).get("allow_single_resource", False))
     )
     return audit_delivery_rows(
         rows,

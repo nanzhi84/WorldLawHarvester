@@ -200,9 +200,7 @@ class HtmlParser(WebDocumentBuilder, Base):
             and parts.netloc == base_parts.netloc
             and not self.is_detail(link)
         ):
-            with_query = urlunsplit(
-                (parts.scheme, parts.netloc, parts.path, base_parts.query, "")
-            )
+            with_query = urlunsplit((parts.scheme, parts.netloc, parts.path, base_parts.query, ""))
             if self.is_detail(with_query):
                 return with_query
         return link
@@ -257,18 +255,12 @@ class HtmlParser(WebDocumentBuilder, Base):
             next_page_xp = docs.get("next_page_xpath")
             page = int(cast(Mapping[str, Any], request.get("meta") or {}).get("page", 1))
             next_page_nodes: set[Any] = (
-                set(tree.xpath(str(next_page_xp)))
-                if not detail and next_page_xp
-                else set()
+                set(tree.xpath(str(next_page_xp))) if not detail and next_page_xp else set()
             )
             anchors: list[Any] = []
             if not detail and link_scope:
                 scoped_expr = str(link_scope)
-                if (
-                    self.max_pages > 1
-                    and next_page_xp
-                    and str(next_page_xp) not in scoped_expr
-                ):
+                if self.max_pages > 1 and next_page_xp and str(next_page_xp) not in scoped_expr:
                     scoped_expr = f"{scoped_expr} | {next_page_xp}"
                 anchors = tree.xpath(scoped_expr)
             if not anchors:
@@ -284,9 +276,7 @@ class HtmlParser(WebDocumentBuilder, Base):
                 att_excl_xpaths: tuple[str, ...] = (raw_att_excl.strip(),)
             elif isinstance(raw_att_excl, Sequence) and raw_att_excl:
                 att_excl_xpaths = tuple(
-                    str(x).strip()
-                    for x in cast(Sequence[Any], raw_att_excl)
-                    if str(x).strip()
+                    str(x).strip() for x in cast(Sequence[Any], raw_att_excl) if str(x).strip()
                 )
             else:
                 att_excl_xpaths = ()
@@ -381,11 +371,7 @@ class HtmlParser(WebDocumentBuilder, Base):
                         ):
                             unexpanded_paths.add(urlsplit(link).path)
                 elif ctx.follow_links(task):
-                    if (
-                        not self.details
-                        or self.is_detail(link)
-                        or task["depth"] + 1 < max_depth
-                    ):
+                    if not self.details or self.is_detail(link) or task["depth"] + 1 < max_depth:
                         requests.append({"url": link, "role": "page", "depth": task["depth"] + 1})
                     elif (
                         not detail
@@ -430,11 +416,7 @@ class HtmlParser(WebDocumentBuilder, Base):
                 )
                 seen_imgs: set[str] = set()
                 quirks = self.quirks
-                use_glyphs = (
-                    not quirks
-                    or "ja_inline_glyphs" in quirks
-                    or "ja_kanpo_pua" in quirks
-                )
+                use_glyphs = not quirks or "ja_inline_glyphs" in quirks or "ja_kanpo_pua" in quirks
                 from wlh.processor.parsers.html.dom_cleanup import clean_site_dom
 
                 excl_xpath = docs.get("exclude_content_xpath")
@@ -462,7 +444,9 @@ class HtmlParser(WebDocumentBuilder, Base):
         if detail and not wlh_trunc_code and (kind in TEXT_KINDS | BINARY_KINDS):
             inputs = [{"request": request, "role": "detail"}]
             locator: dict[str, Any] = {"url": public_url(request["url"]), "role": "page"}
-            context_url = cast(Mapping[str, Any], request.get("meta") or {}).get("title_context_url")
+            context_url = cast(Mapping[str, Any], request.get("meta") or {}).get(
+                "title_context_url"
+            )
             if kind in BINARY_KINDS and docs.get("binary_title_from_link"):
                 if context_url:
                     locator["title_context_url"] = public_url(context_url)

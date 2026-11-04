@@ -36,8 +36,7 @@ def register(
             "page_limit_exceeded",
         )
         if result.get("truncated") and (
-            self.truncated in non_error_trunc
-            or result["truncated"] not in non_error_trunc
+            self.truncated in non_error_trunc or result["truncated"] not in non_error_trunc
         ):
             self.truncated = result["truncated"]
             self.checkpoint["truncated"] = self.truncated

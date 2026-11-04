@@ -136,24 +136,23 @@ def _effective(root: Any, revision: Mapping[str, Any]) -> str | None:
                 and re.sub(r"\d+月\d+日", "", label, count=1) == _japanese_numbers(amendment)
             ):
                 provisions.append(node)
-        elif not label and str(revision.get("law_revision_id") or "").endswith(
-            "_000000000000000"
-        ):
+        elif not label and str(revision.get("law_revision_id") or "").endswith("_000000000000000"):
             provisions.append(node)
     if not provisions:
         return None
     dates: set[str] = set()
     for provision in provisions:
         sentences = [
-            _japanese_numbers("".join(node.itertext()))
-            for node in provision.xpath(".//Sentence")
+            _japanese_numbers("".join(node.itertext())) for node in provision.xpath(".//Sentence")
         ]
         if any(re.search(r"ただし|但し|但シ|ただ,|次の各号|政令で定める日", s) for s in sentences):
             return None
         for sentence in sentences:
             match = re.match(
                 r"(?:この|本)(?:法律|政令|省令|府令|規則|法|令)(?:は|ハ)[、,]?"
-                r"(?P<day>" + _JAPANESE_DAY + r"|公布の日)(?:から|より|ヨリ)施行(?:する|し|スル|ス)",
+                r"(?P<day>"
+                + _JAPANESE_DAY
+                + r"|公布の日)(?:から|より|ヨリ)施行(?:する|し|スル|ス)",
                 sentence,
             )
             if match is not None:
@@ -229,9 +228,7 @@ def japan_records(
     inline_zip_b64 = str(att_map.get("image_data") or "").strip()
     if required_srcs and inline_zip_b64:
         try:
-            verify_attachment_zip(
-                required_srcs, base64.b64decode(inline_zip_b64, validate=True)
-            )
+            verify_attachment_zip(required_srcs, base64.b64decode(inline_zip_b64, validate=True))
         except ValueError:
             raise WlhError("egov_attachments_unverified") from None
     status = str(revision.get("current_revision_status") or "").strip()
@@ -254,9 +251,7 @@ def japan_records(
         "published_at": _day(law.get("promulgation_date")),
         "effective_at": effective,
         "expired_at": (
-            _day(revision.get("repeal_date"))
-            if revision.get("repeal_status") == "Repeal"
-            else None
+            _day(revision.get("repeal_date")) if revision.get("repeal_status") == "Repeal" else None
         ),
         "status": status or None,
         "issuer": None,
@@ -325,9 +320,7 @@ def japan_requests(
         ):
             raise WlhError("egov_catalog_identity_invalid")
         seen.add(law_id)
-        target = public_url(
-            urljoin(url, "law_data/" + revision_id + "?law_full_text_format=xml")
-        )
+        target = public_url(urljoin(url, "law_data/" + revision_id + "?law_full_text_format=xml"))
         guard(config, target)
         requests.append({"url": target, "role": "page"})
     if next_offset is not None:
@@ -402,7 +395,7 @@ class XmlParser(RecordAdapter):
                 ):
                     return []
                 raise WlhError("legal_xml_invalid")
-            if re.search(br"<!DOCTYPE\s+html\b|<html(?:\s|>)", data[:2048], re.I):
+            if re.search(rb"<!DOCTYPE\s+html\b|<html(?:\s|>)", data[:2048], re.I):
                 return []
         if b"<!ENTITY" in data.upper():
             raise WlhError("legal_xml_doctype_rejected")
@@ -612,11 +605,7 @@ class XmlParser(RecordAdapter):
                     roots.append(etree.fromstring(extra_blob, xml_parser))
                 except etree.XMLSyntaxError:
                     raise WlhError("legal_xml_invalid") from None
-            nodes = [
-                rec
-                for r_node in roots
-                for rec in r_node.xpath('.//*[local-name()="Record"]')
-            ]
+            nodes = [rec for r_node in roots for rec in r_node.xpath('.//*[local-name()="Record"]')]
             total_nodes = len(nodes)
             if total_nodes > doc_budget:
                 self.truncated = "document_budget_exceeded"

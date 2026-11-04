@@ -96,7 +96,10 @@ def native_lines(page: Any, tables: list[Any] | None = None) -> list[Line]:
                 if not isinstance(s_item, dict):
                     continue
                 for ch_item in cast(list[Any], cast(dict[str, Any], s_item).get("chars") or []):
-                    if isinstance(ch_item, dict) and cast(dict[str, Any], ch_item).get("c") == "\ufffd":
+                    if (
+                        isinstance(ch_item, dict)
+                        and cast(dict[str, Any], ch_item).get("c") == "\ufffd"
+                    ):
                         has_replacement_char = True
                         break
     if has_replacement_char:
@@ -383,9 +386,7 @@ def _ruled(table: Any, lines: list[Line]) -> tuple[set[int], str] | None:
         if r_idx >= 1 and len(row) >= 2:
             k = len(row[0])
             if k >= 2 and all(len(cell) == k for cell in row):
-                sorted_cols = [
-                    sorted(cell, key=lambda ln: (ln.middle, ln.box[0])) for cell in row
-                ]
+                sorted_cols = [sorted(cell, key=lambda ln: (ln.middle, ln.box[0])) for cell in row]
                 if all(
                     max(col[i].middle for col in sorted_cols)
                     - min(col[i].middle for col in sorted_cols)
@@ -640,8 +641,7 @@ def _check_box_order(
         if not out_of_order:
             continue
         if any(
-            line.index not in framed_ids and box[1] + 2 < line.middle < box[3] - 2
-            for line in prose
+            line.index not in framed_ids and box[1] + 2 < line.middle < box[3] - 2 for line in prose
         ):
             raise WlhError("pdf_layout_unverified")
         unframed = [line for line in current if line.index not in framed_ids]

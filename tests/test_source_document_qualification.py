@@ -91,13 +91,18 @@ class TestSourceDocumentQualification:
         answer_markdown = "\n".join(str(row["markdown"]) for row in answer_rows)
         answer_text = normalized(answer_markdown)
         headings, paragraphs = _answer_contract()
-        missing_headings = [heading for heading in headings if normalized(heading) not in answer_text]
+        missing_headings = [
+            heading for heading in headings if normalized(heading) not in answer_text
+        ]
         missing_paragraphs = [text for text in paragraphs if normalized(text) not in answer_text]
         notice_rows = by_path.get(NOTICE, [])
         notice_text = normalized("\n".join(str(row["markdown"]) for row in notice_rows))
         notice_clauses = [
-            "官総6－11", "官人6－4", "平成14年4月1日以降は、これにより取り扱われたい",
-            "別紙2「廃止通達一欄表」に掲げる法令解釈通達", "新たに税理士法基本通達として制定する",
+            "官総6－11",
+            "官人6－4",
+            "平成14年4月1日以降は、これにより取り扱われたい",
+            "別紙2「廃止通達一欄表」に掲げる法令解釈通達",
+            "新たに税理士法基本通達として制定する",
         ]
         checks = {
             "official_csv_entry_requested": "/law/index.htm" in requests,
@@ -105,8 +110,10 @@ class TestSourceDocumentQualification:
             "question_directory_not_delivered": DIRECTORY not in by_path,
             "answer_page_requested": ANSWERS in requests,
             "same_title_answer_page_delivered": bool(answer_rows),
-            "all_22_question_and_answer_headings_preserved": len(headings) == 22 and not missing_headings,
-            "all_substantive_answer_paragraphs_preserved": bool(paragraphs) and not missing_paragraphs,
+            "all_22_question_and_answer_headings_preserved": len(headings) == 22
+            and not missing_headings,
+            "all_substantive_answer_paragraphs_preserved": bool(paragraphs)
+            and not missing_paragraphs,
             "answer_date_not_inferred_from_url_or_referenced_law": bool(answer_rows)
             and all(row["effective_at"] is None for row in answer_rows),
             "substantive_notice_with_annex_links_delivered": bool(notice_rows),
@@ -116,18 +123,26 @@ class TestSourceDocumentQualification:
             "both_official_notice_annexes_requested": all(path in requests for path in ANNEXES),
             "both_official_notice_annexes_delivered": all(path in by_path for path in ANNEXES),
             "markdown_has_no_replacement_characters_or_jump_navigation": all(
-                "\ufffd" not in str(row["markdown"]) and "本文へジャンプ" not in str(row["markdown"])
+                "\ufffd" not in str(row["markdown"])
+                and "本文へジャンプ" not in str(row["markdown"])
                 for row in answer_rows + notice_rows
             ),
         }
-        code, stdout, stderr = run_wlh_cli("reparse", str(config), "--no-progress", env=initialized_db)
+        code, stdout, stderr = run_wlh_cli(
+            "reparse", str(config), "--no-progress", env=initialized_db
+        )
         reparse: dict[str, Any] = json.loads(stdout) if stdout else {}
         (artifact / "reparse.json").write_text(
-            json.dumps({"exit_code": code, "result": reparse, "stderr": stderr},
-                       ensure_ascii=False, indent=2) + "\n"
+            json.dumps(
+                {"exit_code": code, "result": reparse, "stderr": stderr},
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n"
         )
         checks["offline_reparse_uses_no_external_source_requests"] = (
-            code == 0 and reparse.get("status") == "complete"
+            code == 0
+            and reparse.get("status") == "complete"
             and reparse.get("report", {}).get("external_requests") == 0
         )
         result = {

@@ -267,7 +267,9 @@ storage:
             c_run = prepare_run(source_yaml, "collect")
             c_res = execute_run(c_run)
             assert c_res["status"] == "complete", f"Initial collect failed: {c_res}"
-            assert verify_source_delivery("dd-905", require_multi_resource=True)["resource_count"] == 5
+            assert (
+                verify_source_delivery("dd-905", require_multi_resource=True)["resource_count"] == 5
+            )
 
             # Attach a CAS result_ref with recommended_route='accept_with_warning' on act-4.html
             objects = Objects()
@@ -336,8 +338,7 @@ storage:
             assert len(html_files) >= 6
             assert any("{host}" in f.read_text(encoding="utf-8") for f in html_files)
             assert all(
-                f"127.0.0.1:{origin_port}" not in f.read_text(encoding="utf-8")
-                for f in html_files
+                f"127.0.0.1:{origin_port}" not in f.read_text(encoding="utf-8") for f in html_files
             )
         finally:
             origin_srv.shutdown()
@@ -380,9 +381,7 @@ storage:
 
             replay_yaml = tmp_path / "dd-905-replay.yaml"
             replay_yaml.write_text(
-                source_yaml.read_text(encoding="utf-8").replace(
-                    str(origin_port), str(replay_port)
-                ),
+                source_yaml.read_text(encoding="utf-8").replace(str(origin_port), str(replay_port)),
                 encoding="utf-8",
             )
 

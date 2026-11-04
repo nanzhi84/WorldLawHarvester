@@ -40,9 +40,15 @@ class CleanlinessSubScores(BaseModel):
 
     noise_purity: float = Field(ge=0.0, le=100.0, description="HTML/entity/control char purity")
     encoding_purity: float = Field(ge=0.0, le=100.0, description="Unicode and mojibake purity")
-    structural_integrity: float = Field(ge=0.0, le=100.0, description="Table and heading formatting integrity")
-    boilerplate_freedom: float = Field(ge=0.0, le=100.0, description="Freedom from UI navigation and boilerplate")
-    deduplication_purity: float = Field(ge=0.0, le=100.0, description="Freedom from duplicate blocks/paragraphs")
+    structural_integrity: float = Field(
+        ge=0.0, le=100.0, description="Table and heading formatting integrity"
+    )
+    boilerplate_freedom: float = Field(
+        ge=0.0, le=100.0, description="Freedom from UI navigation and boilerplate"
+    )
+    deduplication_purity: float = Field(
+        ge=0.0, le=100.0, description="Freedom from duplicate blocks/paragraphs"
+    )
 
 
 class CleanlinessResult(BaseModel):
@@ -52,7 +58,9 @@ class CleanlinessResult(BaseModel):
 
     score: float = Field(ge=0.0, le=100.0, description="Overall cleanliness score (0–100)")
     sub_scores: CleanlinessSubScores
-    penalties: list[dict[str, Any]] = Field(default_factory=_empty_penalties, description="Detailed penalties triggered")
+    penalties: list[dict[str, Any]] = Field(
+        default_factory=_empty_penalties, description="Detailed penalties triggered"
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -64,11 +72,21 @@ class AccuracySubScores(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     title_accuracy: float = Field(ge=0.0, le=100.0, description="Document title accuracy")
-    doc_number_accuracy: float = Field(ge=0.0, le=100.0, description="Official document/docket number accuracy")
-    published_at_accuracy: float = Field(ge=0.0, le=100.0, description="Promulgation/publication date accuracy")
-    effective_at_accuracy: float = Field(ge=0.0, le=100.0, description="Commencement/effective date accuracy")
-    issuer_accuracy: float = Field(ge=0.0, le=100.0, description="Enacting authority/court issuer accuracy")
-    doc_type_accuracy: float = Field(ge=0.0, le=100.0, description="Document type taxonomy classification accuracy")
+    doc_number_accuracy: float = Field(
+        ge=0.0, le=100.0, description="Official document/docket number accuracy"
+    )
+    published_at_accuracy: float = Field(
+        ge=0.0, le=100.0, description="Promulgation/publication date accuracy"
+    )
+    effective_at_accuracy: float = Field(
+        ge=0.0, le=100.0, description="Commencement/effective date accuracy"
+    )
+    issuer_accuracy: float = Field(
+        ge=0.0, le=100.0, description="Enacting authority/court issuer accuracy"
+    )
+    doc_type_accuracy: float = Field(
+        ge=0.0, le=100.0, description="Document type taxonomy classification accuracy"
+    )
 
 
 class AccuracyResult(BaseModel):
@@ -78,8 +96,12 @@ class AccuracyResult(BaseModel):
 
     score: float = Field(ge=0.0, le=100.0, description="Overall accuracy score (0–100)")
     sub_scores: AccuracySubScores
-    field_scores: dict[str, float] = Field(default_factory=_empty_field_scores, description="Field scores dictionary")
-    mismatches: list[dict[str, Any]] = Field(default_factory=_empty_mismatches, description="Detailed field mismatches")
+    field_scores: dict[str, float] = Field(
+        default_factory=_empty_field_scores, description="Field scores dictionary"
+    )
+    mismatches: list[dict[str, Any]] = Field(
+        default_factory=_empty_mismatches, description="Detailed field mismatches"
+    )
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -147,8 +169,12 @@ class GroundTruthData(BaseModel):
 
     title: str = Field(min_length=1, description="Official statutory or administrative title")
     doc_number: str | None = Field(default=None, description="Official docket or decree number")
-    published_at: str | None = Field(default=None, description="Promulgation date in ISO YYYY-MM-DD")
-    effective_at: str | None = Field(default=None, description="Commencement date in ISO YYYY-MM-DD")
+    published_at: str | None = Field(
+        default=None, description="Promulgation date in ISO YYYY-MM-DD"
+    )
+    effective_at: str | None = Field(
+        default=None, description="Commencement date in ISO YYYY-MM-DD"
+    )
     issuer: str | None = Field(default=None, description="Enacting authority or judicial division")
     doc_type: str = Field(min_length=1, description="Canonical legal taxonomy type")
     markdown: str = Field(
@@ -173,7 +199,9 @@ class GroundTruthData(BaseModel):
         try:
             datetime.strptime(v, "%Y-%m-%d")
         except ValueError as exc:
-            raise ValueError(f"Date must be a valid calendar date in YYYY-MM-DD format, got '{v}'") from exc
+            raise ValueError(
+                f"Date must be a valid calendar date in YYYY-MM-DD format, got '{v}'"
+            ) from exc
         return v
 
     def to_dict(self) -> dict[str, Any]:
@@ -197,14 +225,18 @@ class AdjudicationMetadata(BaseModel):
     @classmethod
     def validate_content_hash(cls, v: str) -> str:
         if not HEX64_REGEX.match(v):
-            raise ValueError(f"content_hash must be a 64-character hexadecimal SHA-256 digest, got '{v}'")
+            raise ValueError(
+                f"content_hash must be a 64-character hexadecimal SHA-256 digest, got '{v}'"
+            )
         return v
 
     @field_validator("payload_sha256")
     @classmethod
     def validate_payload_sha256(cls, v: str) -> str:
         if v and not HEX64_REGEX.match(v):
-            raise ValueError(f"payload_sha256 must be a 64-character hexadecimal SHA-256 digest, got '{v}'")
+            raise ValueError(
+                f"payload_sha256 must be a 64-character hexadecimal SHA-256 digest, got '{v}'"
+            )
         return v
 
     def model_post_init(self, __context: Any) -> None:
@@ -225,12 +257,20 @@ class BenchmarkSampleRecord(BaseModel):
 
     id: str = Field(min_length=1, description="Unique sample identifier (e.g. cand_01)")
     source_id: str = Field(min_length=1, description="Origin source adapter ID (e.g. dd-501)")
-    jurisdiction: str = Field(min_length=2, description="ISO country or jurisdiction code (e.g. CN, JP)")
+    jurisdiction: str = Field(
+        min_length=2, description="ISO country or jurisdiction code (e.g. CN, JP)"
+    )
     detail_url: str = Field(min_length=1, description="Authoritative detail page URL")
-    current_extracted: dict[str, Any] = Field(description="Crawler extracted fields (candidate under test)")
+    current_extracted: dict[str, Any] = Field(
+        description="Crawler extracted fields (candidate under test)"
+    )
     ground_truth: GroundTruthData = Field(description="Authoritative frozen ground truth")
-    verification_status: VerificationStatusType = Field(description="Verification pathway or arbitration status")
-    arbitration_notes: str = Field(min_length=1, description="Human or algorithmic rationale for adjudication")
+    verification_status: VerificationStatusType = Field(
+        description="Verification pathway or arbitration status"
+    )
+    arbitration_notes: str = Field(
+        min_length=1, description="Human or algorithmic rationale for adjudication"
+    )
     adjudication_metadata: AdjudicationMetadata | None = Field(
         default=None,
         description="Extended machine audit trail",

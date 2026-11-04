@@ -15,27 +15,41 @@ from .legacy_table_browser import RENDERER, visible_text
 
 
 def show_document(page: Page, content: str, *, original: bool) -> None:
-    page.set_content(content if original else RENDERER.render(content), wait_until="domcontentloaded")
+    page.set_content(
+        content if original else RENDERER.render(content), wait_until="domcontentloaded"
+    )
 
 
 def row_headers(page: Page, *, original: bool) -> list[dict[str, Any]]:
     root = page.locator("#main" if original else "body")
-    return [cast(dict[str, Any], header.evaluate("""node => {
+    return [
+        cast(
+            dict[str, Any],
+            header.evaluate("""node => {
       const row = node.closest('tr,[role="row"]');
       return {label:node.innerText, row_text:row ? row.innerText : null,
         html:node.outerHTML, row_html:row ? row.outerHTML : null};
-    }""")) for header in root.get_by_role("rowheader").all()]
+    }"""),
+        )
+        for header in root.get_by_role("rowheader").all()
+    ]
 
 
 def header_relationships(headers: list[dict[str, Any]]) -> list[dict[str, str | None]]:
-    return [{"label": visible_text(h["label"]),
-             "row_text": visible_text(h["row_text"]) if h["row_text"] is not None else None}
-            for h in headers]
+    return [
+        {
+            "label": visible_text(h["label"]),
+            "row_text": visible_text(h["row_text"]) if h["row_text"] is not None else None,
+        }
+        for h in headers
+    ]
 
 
 def source_literal_labels(page: Page) -> list[dict[str, str]]:
     """Read the explicit legal labels from every source list with suppressed markers."""
-    return cast(list[dict[str, str]], page.locator("#main").evaluate(r"""root => {
+    return cast(
+        list[dict[str, str]],
+        page.locator("#main").evaluate(r"""root => {
       const norm = s => s.normalize('NFKC').replace(/\s/g, '');
       const result = [];
       for (const item of root.querySelectorAll('li')) {
@@ -53,7 +67,8 @@ def source_literal_labels(page: Page) -> list[dict[str, str]]:
           first_fragment:first, body_fragment:match[2]});
       }
       return result;
-    }"""))
+    }"""),
+    )
 
 
 def displayed_labels(
@@ -64,7 +79,10 @@ def displayed_labels(
     A clause may use plain text, a list with hidden markers, or one equivalent
     generated marker. The observer does not require a particular HTML tag.
     """
-    observed = cast(list[dict[str, Any]], page.evaluate(r"""input => {
+    observed = cast(
+        list[dict[str, Any]],
+        page.evaluate(
+            r"""input => {
       const root = document.querySelector(input.original ? '#main' : 'body');
       const norm = s => s.normalize('NFKC').replace(/\s/g, '');
       return input.expected.map((wanted, index) => {
@@ -82,7 +100,10 @@ def displayed_labels(
           marker_owner:hasOwnerMarker ? String(index) : null, html:node.outerHTML,
           list_style:hasOwnerMarker ? getComputedStyle(owner).listStyleType : null};
       });
-    }""", {"original": original, "expected": expected}))
+    }""",
+            {"original": original, "expected": expected},
+        ),
+    )
     # CDP is a JSON protocol; Playwright leaves its payload mapping untyped.
     session: Any = page.context.new_cdp_session(page)
     try:
@@ -92,19 +113,31 @@ def displayed_labels(
             owner = observation.get("marker_owner")
             if owner is not None:
                 selector = f'[data-acceptance-number="{owner}"]'
-                node = session.send("DOM.querySelector", {
-                    "nodeId": document["root"]["nodeId"], "selector": selector,
-                })
-                backend = session.send("DOM.describeNode", {"nodeId": node["nodeId"]})[
-                    "node"]["backendNodeId"]
-                nodes = session.send("Accessibility.getPartialAXTree", {
-                    "backendNodeId": backend, "fetchRelatives": True,
-                })["nodes"]
+                node = session.send(
+                    "DOM.querySelector",
+                    {
+                        "nodeId": document["root"]["nodeId"],
+                        "selector": selector,
+                    },
+                )
+                backend = session.send("DOM.describeNode", {"nodeId": node["nodeId"]})["node"][
+                    "backendNodeId"
+                ]
+                nodes = session.send(
+                    "Accessibility.getPartialAXTree",
+                    {
+                        "backendNodeId": backend,
+                        "fetchRelatives": True,
+                    },
+                )["nodes"]
                 target = next(n for n in nodes if n.get("backendDOMNodeId") == backend)
-                markers = [n.get("name", {}).get("value", "") for n in nodes
-                           if n["nodeId"] in target.get("childIds", [])
-                           and n.get("role", {}).get("value") == "ListMarker"
-                           and not n["ignored"]]
+                markers = [
+                    n.get("name", {}).get("value", "")
+                    for n in nodes
+                    if n["nodeId"] in target.get("childIds", [])
+                    and n.get("role", {}).get("value") == "ListMarker"
+                    and not n["ignored"]
+                ]
             observation["generated_markers"] = markers
             combined = visible_text("".join(markers) + observation.get("literal_prefix", ""))
             label = observation["label"]
@@ -129,6 +162,9 @@ def body_without_separately_checked_labels(
 
 def capture_focus(page: Page, directory: Path, kind: str, *, original: bool) -> None:
     root = page.locator("#main" if original else "body")
-    focus = (root.locator('table,[role="table"]').filter(has_text="総所得金額").first
-             if kind == "row-headers" else root)
+    focus = (
+        root.locator('table,[role="table"]').filter(has_text="総所得金額").first
+        if kind == "row-headers"
+        else root
+    )
     focus.screenshot(path=str(directory / ("original.png" if original else "delivered.png")))

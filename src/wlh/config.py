@@ -216,9 +216,7 @@ class SchedulerConfig(Strict):
     allowed_hosts: list[str] = Field(min_length=1)
     allowed_path_prefixes: list[str] = Field(default_factory=lambda: ["/"], min_length=1)
     host_path_scopes: dict[str, list[str]] = Field(default_factory=dict)
-    url_rewrites: list[UrlRewriteRule] = Field(
-        default_factory=_empty_url_rewrites, max_length=20
-    )
+    url_rewrites: list[UrlRewriteRule] = Field(default_factory=_empty_url_rewrites, max_length=20)
     max_depth: int = Field(default=3, ge=0, le=100)
     concurrency: int = Field(default=2, ge=1, le=32)
     recheck_seconds: int = Field(default=86400, ge=0, le=31536000)
@@ -380,9 +378,7 @@ class DocumentRules(Strict):
 
     @field_validator("attachment_exclude_xpath", "exclude_content_xpath")
     @classmethod
-    def valid_xpath_list_or_str(
-        cls, value: list[str] | str | None
-    ) -> list[str] | str | None:
+    def valid_xpath_list_or_str(cls, value: list[str] | str | None) -> list[str] | str | None:
         if value is None:
             return None
         if isinstance(value, str):

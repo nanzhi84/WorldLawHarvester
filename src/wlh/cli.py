@@ -65,9 +65,7 @@ def parser() -> Parser:
     fixture_export.add_argument("--run-id", default=None)
     fixture_export.add_argument("--output-dir", type=Path, default=None)
     fixture_export.add_argument("--max-resources", type=int, default=2)
-    quality = commands.add_parser(
-        "quality", help="Audit semantic delivery quality for a source"
-    )
+    quality = commands.add_parser("quality", help="Audit semantic delivery quality for a source")
     quality.add_argument("source_id")
     quality.add_argument("--require-multi-resource", action="store_true")
     benchmark = commands.add_parser(

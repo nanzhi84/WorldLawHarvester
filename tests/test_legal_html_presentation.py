@@ -73,9 +73,7 @@ def _literal_routes(case: str, directory: Path) -> dict[str, Route]:
         "/service/JP/index.html",
         f"/service/JP/idx/{case.split('/')[0]}.html",
     }
-    selected = [
-        r for r in manifest["routes"] if r["path"] in catalog or r["path"].startswith(base)
-    ]
+    selected = [r for r in manifest["routes"] if r["path"] in catalog or r["path"].startswith(base)]
     allowed = {r["path"] for r in selected}
     routes: dict[str, Route] = {}
     evidence: list[dict[str, Any]] = []
@@ -106,13 +104,15 @@ def _literal_routes(case: str, directory: Path) -> dict[str, Route]:
 
             payload = HREF.sub(restrict, text).encode(spec["encoding"])
         routes[spec["path"]] = (payload, spec["content_type"])
-        evidence.append({
-            "path": spec["path"],
-            "role": spec["role"],
-            "source_sha256": spec["sha256"],
-            "replay_sha256_before_origin_rewrite": hashlib.sha256(payload).hexdigest(),
-            "unselected_navigation_hrefs": changes,
-        })
+        evidence.append(
+            {
+                "path": spec["path"],
+                "role": spec["role"],
+                "source_sha256": spec["sha256"],
+                "replay_sha256_before_origin_rewrite": hashlib.sha256(payload).hexdigest(),
+                "unselected_navigation_hrefs": changes,
+            }
+        )
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "scope.json").write_text(
         json.dumps(
@@ -205,13 +205,21 @@ def _run_literal_case(
 
 
 class TestLegalHtmlPresentation:
-    @pytest.mark.parametrize(("case", "affected_file", "kind"), [
-        ("44/10", "index.html", "row-headers"),
-        ("103/09", "besshi02.html", "literal-labels"),
-    ], ids=["row-header-meaning", "single-explicit-numbering"])
+    @pytest.mark.parametrize(
+        ("case", "affected_file", "kind"),
+        [
+            ("44/10", "index.html", "row-headers"),
+            ("103/09", "besshi02.html", "literal-labels"),
+        ],
+        ids=["row-header-meaning", "single-explicit-numbering"],
+    )
     def test_complete_ruling_preserves_source_visible_presentation_semantics(
-        self, initialized_db: dict[str, str], tmp_path: Path,
-        case: str, affected_file: str, kind: str,
+        self,
+        initialized_db: dict[str, str],
+        tmp_path: Path,
+        case: str,
+        affected_file: str,
+        kind: str,
     ) -> None:
         name = "presentation-" + case.replace("/", "-")
         base = f"/service/JP/{case}/"
@@ -221,8 +229,11 @@ class TestLegalHtmlPresentation:
         if not (FIXTURES / "manifest.json").is_file():
             pytest.skip("Private fixture directory tests/fixtures/dd-582/content not present")
         manifest: dict[str, Any] = json.loads((FIXTURES / "manifest.json").read_text())
-        specs = [s for s in manifest["routes"] if s["path"].startswith(base)
-                 and s["role"] == "original_full_document"]
+        specs = [
+            s
+            for s in manifest["routes"]
+            if s["path"].startswith(base) and s["role"] == "original_full_document"
+        ]
         assert len(specs) == 2, "The complete parent and required annex must remain in replay"
         originals: dict[str, dict[str, Any]] = {}
         with html5_reader() as browser:
@@ -231,14 +242,22 @@ class TestLegalHtmlPresentation:
                 assert hashlib.sha256(payload).hexdigest() == spec["sha256"]
                 originals[spec["path"]] = browser.original(payload, spec["encoding"])
             focus_spec = next(s for s in specs if s["path"] == affected)
-            show_document(browser.page, (FIXTURES / focus_spec["fixture"]).read_bytes().decode(
-                focus_spec["encoding"]), original=True)
-            source_headers = row_headers(browser.page, original=True) if kind == "row-headers" else []
+            show_document(
+                browser.page,
+                (FIXTURES / focus_spec["fixture"]).read_bytes().decode(focus_spec["encoding"]),
+                original=True,
+            )
+            source_headers = (
+                row_headers(browser.page, original=True) if kind == "row-headers" else []
+            )
             labels = source_literal_labels(browser.page) if kind == "literal-labels" else []
             source_labels = displayed_labels(browser.page, labels, original=True)
             if kind == "row-headers":
                 assert [h["label"] for h in source_headers] == [
-                    "総所得金額", "分離課税の長期譲渡所得の金額", "納付すべき税額", "過少申告加算税の額",
+                    "総所得金額",
+                    "分離課税の長期譲渡所得の金額",
+                    "納付すべき税額",
+                    "過少申告加算税の額",
                 ]
             else:
                 assert len(labels) == 17 and [s["label"] for s in labels[:3]] == ["1", "2", "3"]
@@ -256,21 +275,31 @@ class TestLegalHtmlPresentation:
             empty = browser.markdown("")
             missing = {
                 path: missing_fragments(
-                    body_without_separately_checked_labels(source, labels if path == affected else []),
+                    body_without_separately_checked_labels(
+                        source, labels if path == affected else []
+                    ),
                     delivered.get(path, empty),
-                ) for path, source in originals.items()
+                )
+                for path, source in originals.items()
             }
             show_document(browser.page, markdown.get(affected, ""), original=False)
-            actual_headers = row_headers(browser.page, original=False) if kind == "row-headers" else []
+            actual_headers = (
+                row_headers(browser.page, original=False) if kind == "row-headers" else []
+            )
             actual_labels = displayed_labels(browser.page, labels, original=False)
             if affected in markdown:
                 capture_focus(browser.page, directory, kind, original=False)
-            checks.update({
-                "complete_parent_and_required_annex_delivered": report["exit_code"] == 0
-                and len(rows) == 2 and set(delivered) == set(originals),
-                "offline_reparse_successful": report["offline"]["exit_code"] == 0,
-                "complete_original_body_words_amounts_and_order_preserved": not any(missing.values()),
-            })
+            checks.update(
+                {
+                    "complete_parent_and_required_annex_delivered": report["exit_code"] == 0
+                    and len(rows) == 2
+                    and set(delivered) == set(originals),
+                    "offline_reparse_successful": report["offline"]["exit_code"] == 0,
+                    "complete_original_body_words_amounts_and_order_preserved": not any(
+                        missing.values()
+                    ),
+                }
+            )
             if kind == "row-headers":
                 checks["browser_rowheader_roles_keep_their_associated_values"] = (
                     header_relationships(source_headers) == header_relationships(actual_headers)
@@ -279,17 +308,28 @@ class TestLegalHtmlPresentation:
                 checks["each_explicit_legal_number_displayed_exactly_once"] = all(
                     s["exactly_one_expected_label"] for s in actual_labels
                 )
-            evidence = {"browser": browser.version, "originals": originals, "delivered": delivered,
-                        "source_headers": source_headers, "actual_headers": actual_headers,
-                        "source_labels": source_labels, "actual_labels": actual_labels,
-                        "raw_bytes_not_repaired": True, "missing_full_case_body": missing}
+            evidence = {
+                "browser": browser.version,
+                "originals": originals,
+                "delivered": delivered,
+                "source_headers": source_headers,
+                "actual_headers": actual_headers,
+                "source_labels": source_labels,
+                "actual_labels": actual_labels,
+                "raw_bytes_not_repaired": True,
+                "missing_full_case_body": missing,
+            }
             (directory / "browser-presentation-evidence.json").write_text(
                 json.dumps(evidence, ensure_ascii=False, indent=2)
             )
-        write_receipt(name, checks, missing_full_case_body=missing,
-                      expected_row_headers=header_relationships(source_headers),
-                      actual_row_headers=header_relationships(actual_headers),
-                      displayed_labels=actual_labels)
+        write_receipt(
+            name,
+            checks,
+            missing_full_case_body=missing,
+            expected_row_headers=header_relationships(source_headers),
+            actual_row_headers=header_relationships(actual_headers),
+            displayed_labels=actual_labels,
+        )
 
     @pytest.mark.parametrize(
         ("case", "affected_file", "kind", "expected_rows", "parent_published_at"),
@@ -315,7 +355,9 @@ class TestLegalHtmlPresentation:
         directory = LITERAL_OUTPUT / name
         directory.mkdir(parents=True, exist_ok=True)
         if not (LITERAL_FIXTURES / "manifest.json").is_file():
-            pytest.skip("Private fixture directory tests/fixtures/dd-582/literal-fidelity not present")
+            pytest.skip(
+                "Private fixture directory tests/fixtures/dd-582/literal-fidelity not present"
+            )
         manifest: dict[str, Any] = json.loads((LITERAL_FIXTURES / "manifest.json").read_text())
         specs = [
             s
@@ -332,12 +374,12 @@ class TestLegalHtmlPresentation:
                 assert hashlib.sha256(payload).hexdigest() == spec["sha256"]
                 originals[spec["path"]] = browser.original(payload, spec["encoding"])
             focus_spec = next(s for s in specs if s["path"] == affected)
-            focus_text = (LITERAL_FIXTURES / focus_spec["fixture"]).read_bytes().decode(
-                focus_spec["encoding"]
+            focus_text = (
+                (LITERAL_FIXTURES / focus_spec["fixture"])
+                .read_bytes()
+                .decode(focus_spec["encoding"])
             )
-            source_obs = capture_document(
-                browser.page, focus_text, directory, kind, original=True
-            )
+            source_obs = capture_document(browser.page, focus_text, directory, kind, original=True)
             if kind == "application":
                 assert source_obs["application_lines"] == application_lines(
                     browser.page, original=True
@@ -379,19 +421,23 @@ class TestLegalHtmlPresentation:
             actual_obs = capture_document(
                 browser.page, markdown.get(affected, ""), directory, kind, original=False
             )
-            checks.update({
-                "every_complete_input_has_matching_delivered_row": (
-                    report["exit_code"] == 0
-                    and len(rows) == expected_rows
-                    and set(delivered) == set(originals)
-                ),
-                "offline_reparse_successful": report["offline"]["exit_code"] == 0,
-                "complete_original_body_fragments_preserved_in_order": not any(missing.values()),
-                "all_meaningful_table_coordinates_preserved": all(
-                    bool(diff.get("all_relationships_preserved"))
-                    for diff in table_diffs.values()
-                ),
-            })
+            checks.update(
+                {
+                    "every_complete_input_has_matching_delivered_row": (
+                        report["exit_code"] == 0
+                        and len(rows) == expected_rows
+                        and set(delivered) == set(originals)
+                    ),
+                    "offline_reparse_successful": report["offline"]["exit_code"] == 0,
+                    "complete_original_body_fragments_preserved_in_order": not any(
+                        missing.values()
+                    ),
+                    "all_meaningful_table_coordinates_preserved": all(
+                        bool(diff.get("all_relationships_preserved"))
+                        for diff in table_diffs.values()
+                    ),
+                }
+            )
             if kind == "application":
                 checks["both_application_labels_display_literal_one_in_order"] = all(
                     item["label_and_line_boundary_preserved"]

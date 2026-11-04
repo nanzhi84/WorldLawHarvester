@@ -67,7 +67,10 @@ class TestLegalDocumentLayout:
 
             pytest.skip("Private fixture dd-520/nta-trust-tax-merged-cell-annex.pdf not present")
         payload = fixture_pdf.read_bytes()
-        with source_server({url_path: (payload, "application/pdf")}, ["www.nta.go.jp"]) as (origin, requests):
+        with source_server({url_path: (payload, "application/pdf")}, ["www.nta.go.jp"]) as (
+            origin,
+            requests,
+        ):
             config = _source(tmp_path, origin, "dd-937", url_path, "ja")
             report, rows = collect_artifact("dd-937", config, initialized_db, name, requests)
             assert url_path in requests
@@ -76,13 +79,22 @@ class TestLegalDocumentLayout:
                 assert report["result"].get("status") != "complete"
                 return
             assert len(rows) == 1
-            table = [[normalized(cell) for cell in line.strip().strip("|").split("|")]
-                     for line in rows[0]["markdown"].splitlines() if line.count("|") == 4]
+            table = [
+                [normalized(cell) for cell in line.strip().strip("|").split("|")]
+                for line in rows[0]["markdown"].splitlines()
+                if line.count("|") == 4
+            ]
             for label in ("旧公益信託設定時", "受託者変更時"):
-                assert any(normalized(label) in cells[0] and normalized("課税関係なし") in cells[2]
-                           for cells in table), "Merged no-tax statement must remain a tax-treatment statement"
-            assert any(normalized("信託財産の給付時") in cells[0] and normalized("受給者") == cells[1]
-                       and normalized("贈与税課税") in cells[2] for cells in table)
+                assert any(
+                    normalized(label) in cells[0] and normalized("課税関係なし") in cells[2]
+                    for cells in table
+                ), "Merged no-tax statement must remain a tax-treatment statement"
+            assert any(
+                normalized("信託財産の給付時") in cells[0]
+                and normalized("受給者") == cells[1]
+                and normalized("贈与税課税") in cells[2]
+                for cells in table
+            )
             assert report["result"]["status"] == "complete", report
         assert_offline_reparse(config, initialized_db, name)
 
@@ -102,9 +114,14 @@ class TestLegalDocumentLayout:
         if not fixture_pdf.is_file():
             import pytest
 
-            pytest.skip("Private fixture dd-520/tax-forest-explanation-with-form-images.pdf not present")
+            pytest.skip(
+                "Private fixture dd-520/tax-forest-explanation-with-form-images.pdf not present"
+            )
         payload = fixture_pdf.read_bytes()
-        with source_server({url_path: (payload, "application/pdf")}, ["www.nta.go.jp"]) as (origin, requests):
+        with source_server({url_path: (payload, "application/pdf")}, ["www.nta.go.jp"]) as (
+            origin,
+            requests,
+        ):
             config = _source(tmp_path, origin, "dd-941", url_path, "ja")
             report, rows = collect_artifact("dd-941", config, initialized_db, name, requests)
             assert url_path in requests
@@ -128,7 +145,10 @@ class TestLegalDocumentLayout:
 
             pytest.skip("Private fixture dd-520/nta-joho-detail-attachment.pdf not present")
         payload = fixture_pdf.read_bytes()
-        with source_server({url_path: (payload, "application/pdf")}, ["www.nta.go.jp"]) as (origin, requests):
+        with source_server({url_path: (payload, "application/pdf")}, ["www.nta.go.jp"]) as (
+            origin,
+            requests,
+        ):
             config = _source(tmp_path, origin, "dd-942", url_path, "ja")
             report, rows = collect_artifact("dd-942", config, initialized_db, name, requests)
             assert url_path in requests
@@ -137,9 +157,20 @@ class TestLegalDocumentLayout:
                 assert report["result"].get("status") != "complete"
                 return
             assert len(rows) == 1
-            table = [normalized(line) for line in rows[0]["markdown"].splitlines() if line.count("|") >= 3]
-            for term, definition in (("措置法", "租税特別措置法昭和32年法律第26号"),
-                                     ("復興財確法", "東日本大震災からの復興のための施策を実施するために必要な財源の確保")):
-                assert any(normalized(term) in line and normalized(definition) in line for line in table), term
+            table = [
+                normalized(line)
+                for line in rows[0]["markdown"].splitlines()
+                if line.count("|") >= 3
+            ]
+            for term, definition in (
+                ("措置法", "租税特別措置法昭和32年法律第26号"),
+                (
+                    "復興財確法",
+                    "東日本大震災からの復興のための施策を実施するために必要な財源の確保",
+                ),
+            ):
+                assert any(
+                    normalized(term) in line and normalized(definition) in line for line in table
+                ), term
             assert report["result"]["status"] == "complete", report
         assert_offline_reparse(config, initialized_db, name)

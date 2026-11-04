@@ -83,4 +83,3 @@ __all__ = [
     "text_check",
     "verify_source_delivery",
 ]
-

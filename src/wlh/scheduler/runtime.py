@@ -188,9 +188,9 @@ class Runtime:
         for resource in resources:
             manifest = objects.json(resource["inputs_ref"])
             for entry in manifest.get("inputs", []):
-                cache_key: str | None = cast(
-                    dict[str, Any], entry.get("context") or {}
-                ).get("ocr_cache_key")
+                cache_key: str | None = cast(dict[str, Any], entry.get("context") or {}).get(
+                    "ocr_cache_key"
+                )
                 if entry.get("role") == "derived" and cache_key:
                     self.ocr_cache[cache_key] = entry["archive_ref"]
             frozen = manifest.get("adapter_inputs")
@@ -264,14 +264,10 @@ class Runtime:
                 (self.run["source_id"],),
             )
             acq_by_rkey: dict[str, str] = {
-                str(r["request_key"]): str(r["id"])
-                for r in att_acq_rows
-                if r.get("request_key")
+                str(r["request_key"]): str(r["id"]) for r in att_acq_rows if r.get("request_key")
             }
             acq_by_url: dict[str, str] = {
-                str(r["request_url"]): str(r["id"])
-                for r in att_acq_rows
-                if r.get("request_url")
+                str(r["request_url"]): str(r["id"]) for r in att_acq_rows if r.get("request_url")
             }
             for req_row in recovery_requests:
                 self.budget.active()
@@ -551,9 +547,7 @@ class Runtime:
         rows = {row["key"]: row for row in self.target_inputs(target)}
         for meta in cast(list[dict[str, Any]], [] if frozen else target["payload"]["inputs"]):
             row = rows[meta["request_key"]]
-            acquisition = (
-                self.acquisition(row["acquisition_id"]) if row["acquisition_id"] else None
-            )
+            acquisition = self.acquisition(row["acquisition_id"]) if row["acquisition_id"] else None
             if (
                 acquisition is None
                 or acquisition["state"] != "archived"
@@ -703,9 +697,7 @@ class Runtime:
                 data = self.ctx.read(acq)
             except WlhError:
                 continue
-            kind = detect_real_format(
-                data, "html" if acq.get("mime_type") == "text/html" else ""
-            )
+            kind = detect_real_format(data, "html" if acq.get("mime_type") == "text/html" else "")
             if kind not in binary_kinds:
                 continue
             d_hash = digest(data)

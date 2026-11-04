@@ -485,9 +485,7 @@ storage:
             dd132_path = Path(__file__).resolve().parents[1] / "sources" / "dd-132.yaml"
             cfg = yaml.safe_load(dd132_path.read_text(encoding="utf-8"))
             cfg["id"] = "dd-960"
-            cfg["scheduler"]["entry_urls"] = [
-                f"http://127.0.0.1:{port}/tw/copyright/692.html"
-            ]
+            cfg["scheduler"]["entry_urls"] = [f"http://127.0.0.1:{port}/tw/copyright/692.html"]
             cfg["scheduler"]["allowed_hosts"] = ["127.0.0.1"]
             cfg["fetcher"]["robots"] = False
             cfg["fetcher"]["delay"] = 0.0
@@ -544,13 +542,10 @@ storage:
             assert primary_890["doc_number"] == "經授智字第11452800740號"
             assert project_canonical(primary_890)["published_at"] == "2025-10-20"
 
-            audit_report = audit_delivery_rows(
-                rows, objects=Objects(), require_multi_resource=True
-            )
+            audit_report = audit_delivery_rows(rows, objects=Objects(), require_multi_resource=True)
             assert audit_report["passed"] is True
             assert audit_report["violations"] == []
         finally:
             srv.shutdown()
             thread.join(timeout=2.0)
             srv.server_close()
-

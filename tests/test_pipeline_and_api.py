@@ -236,12 +236,8 @@ callers:
                 vol1, vol2, annex = items_default[0], items_default[1], items_default[2]
                 rec8 = vol1["source_record_hash"][:8]
                 assert vol1["volume_order"] == 1
-                assert vol1["markdown_file"].endswith(
-                    f"_{rec8}_{vol1['markdown_hash'][:8]}_01.md"
-                )
-                assert vol1["original_file"].endswith(
-                    f"_{rec8}_{vol1['original_hash'][:8]}_01.pdf"
-                )
+                assert vol1["markdown_file"].endswith(f"_{rec8}_{vol1['markdown_hash'][:8]}_01.md")
+                assert vol1["original_file"].endswith(f"_{rec8}_{vol1['original_hash'][:8]}_01.pdf")
                 assert vol1["doc_number"] == "100/2026/ND-CP"
                 assert vol1["issuer"] == "Government"
                 assert vol1["published_at"] == "2026-05-01"
@@ -254,15 +250,11 @@ callers:
                 )
 
                 assert vol2["volume_order"] == 2
-                assert vol2["markdown_file"].endswith(
-                    f"_{rec8}_{vol2['markdown_hash'][:8]}_02.md"
-                )
+                assert vol2["markdown_file"].endswith(f"_{rec8}_{vol2['markdown_hash'][:8]}_02.md")
 
                 assert annex["volume_order"] is None
                 assert annex["title"] == "Tariff Schedule Annex"
-                assert annex["markdown_file"].endswith(
-                    f"_{rec8}_{annex['markdown_hash'][:8]}.md"
-                )
+                assert annex["markdown_file"].endswith(f"_{rec8}_{annex['markdown_hash'][:8]}.md")
                 assert annex["doc_number"] is None
                 assert annex["issuer"] is None
 
@@ -413,9 +405,7 @@ storage:
             assert execute_run(r1)["status"] == "complete"
 
             with psycopg.connect(initialized_db["WLH_DATABASE_URL"]) as conn:
-                row_v1 = conn.execute(
-                    "SELECT id, current_version_id FROM wlh.resource"
-                ).fetchone()
+                row_v1 = conn.execute("SELECT id, current_version_id FROM wlh.resource").fetchone()
                 assert row_v1 is not None
                 resource_id = str(row_v1[0])
                 version_v1 = str(row_v1[1])
@@ -439,13 +429,7 @@ storage:
 
             overrides_file = tmp_path / "overrides.json"
             overrides_file.write_text(
-                json.dumps(
-                    {
-                        "overrides": [
-                            {"resource_id": resource_id, "version_id": version_v1}
-                        ]
-                    }
-                ),
+                json.dumps({"overrides": [{"resource_id": resource_id, "version_id": version_v1}]}),
                 encoding="utf-8",
             )
             rc, out, err = run_wlh_cli(
@@ -472,19 +456,14 @@ storage:
             assert insp_override["items"][0]["resource_id"] == resource_id
             assert insp_override["items"][0]["version_id"] == version_v1
 
-            rc_l, out_l, err_l = run_wlh_cli(
-                "snapshot", "list", "--limit", "1", env=initialized_db
-            )
+            rc_l, out_l, err_l = run_wlh_cli("snapshot", "list", "--limit", "1", env=initialized_db)
             assert rc_l == 0, f"snapshot list failed: {out_l} {err_l}"
             list_page1: dict[str, Any] = json.loads(out_l)
             assert len(list_page1["snapshots"]) == 1
             assert list_page1["next_after"] is not None
             list_page2 = snapshots.listing(limit=1, after=str(list_page1["next_after"]))
             assert len(list_page2["snapshots"]) == 1
-            assert (
-                list_page2["snapshots"][0]["id"]
-                != list_page1["snapshots"][0]["id"]
-            )
+            assert list_page2["snapshots"][0]["id"] != list_page1["snapshots"][0]["id"]
 
             dup_file = tmp_path / "dup-overrides.json"
             dup_file.write_text(
@@ -503,9 +482,7 @@ storage:
             assert exc_dup.value.code == "duplicate_override_resource"
 
             with pytest.raises(WlhError) as exc_ver:
-                snapshots.create(
-                    [{"resource_id": resource_id, "version_id": str(uuid4())}]
-                )
+                snapshots.create([{"resource_id": resource_id, "version_id": str(uuid4())}])
             assert exc_ver.value.code == "invalid_override_version"
         finally:
             srv.shutdown()
@@ -646,10 +623,11 @@ storage:
             assert rc == 0, f"wlh worker --once failed: {out} {err}"
 
             final_receipt = receipt(run_id)
-            assert final_receipt["status"] == "complete", f"Worker run did not complete: {final_receipt}"
+            assert final_receipt["status"] == "complete", (
+                f"Worker run did not complete: {final_receipt}"
+            )
             assert final_receipt["summary"]["counts"]["resources"] == 1
         finally:
             srv.shutdown()
             thread.join(timeout=2.0)
             srv.server_close()
-

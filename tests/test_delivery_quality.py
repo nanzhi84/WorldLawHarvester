@@ -148,8 +148,7 @@ class TestDeliverySemanticQualityContract:
         )
         assert report_single["passed"] is False
         codes_single = set(
-            report_single.get("violation_codes")
-            or [v["code"] for v in report_single["violations"]]
+            report_single.get("violation_codes") or [v["code"] for v in report_single["violations"]]
         )
         assert "single_resource_in_collection" in codes_single
         assert "boilerplate_or_garbage_title" in codes_single
@@ -236,8 +235,7 @@ class TestDeliverySemanticQualityContract:
         )
         assert report_multi["passed"] is False
         codes_multi = set(
-            report_multi.get("violation_codes")
-            or [v["code"] for v in report_multi["violations"]]
+            report_multi.get("violation_codes") or [v["code"] for v in report_multi["violations"]]
         )
         assert "duplicate_resource_titles" in codes_multi
         assert "boilerplate_or_garbage_title" in codes_multi
@@ -251,16 +249,12 @@ class TestDeliverySemanticQualityContract:
                 "doc_number": "DOC-2026-" + ("X" * 130),
             }
             rep = audit_delivery_rows([bad_title_row], objects=objs, require_multi_resource=False)
-            rep_codes = set(
-                rep.get("violation_codes") or [v["code"] for v in rep["violations"]]
-            )
+            rep_codes = set(rep.get("violation_codes") or [v["code"] for v in rep["violations"]])
             assert "boilerplate_or_garbage_title" in rep_codes
             assert "polluted_or_malformed_doc_number" in rep_codes
 
         with pytest.raises(WlhError) as exc:
-            assert_delivery_quality(
-                multi_defect_rows, objects=objs, require_multi_resource=True
-            )
+            assert_delivery_quality(multi_defect_rows, objects=objs, require_multi_resource=True)
         assert exc.value.code == "delivery_quality_failed"
 
     def test_vietnamese_paywall_placeholder_and_stub_attachment_rows_fail_semantic_quality_audit(
@@ -316,10 +310,7 @@ class TestDeliverySemanticQualityContract:
                 "Vui lòng Đăng nhập để xem chi tiết Nội dung.\n\n"
                 "| Thuộc tính | Giá trị |\n| --- | --- |\n| Số hiệu | 88/2026/QĐ-TTg |"
             ),
-            (
-                "# Nghị quyết 46/2026/QH16\n\n"
-                "Vui lòng xem nội dung chi tiết trong file đính kèm."
-            ),
+            ("# Nghị quyết 46/2026/QH16\n\nVui lòng xem nội dung chi tiết trong file đính kèm."),
         )
         for sample_md in placeholder_samples:
             sample_hash = objs.put(sample_md.encode("utf-8"))
@@ -358,9 +349,7 @@ class TestDeliverySemanticQualityContract:
             "markdown_hash": gazette_stub_hash,
             "original_hash": gazette_stub_hash,
         }
-        rep_att = audit_delivery_rows(
-            [stub_att_row], objects=objs, require_multi_resource=False
-        )
+        rep_att = audit_delivery_rows([stub_att_row], objects=objs, require_multi_resource=False)
         assert rep_att["passed"] is False
         codes_att = set(
             rep_att.get("violation_codes") or [v["code"] for v in rep_att["violations"]]
@@ -381,8 +370,7 @@ class TestDeliverySemanticQualityContract:
             )
             assert rep_title["passed"] is False
             codes_title = set(
-                rep_title.get("violation_codes")
-                or [v["code"] for v in rep_title["violations"]]
+                rep_title.get("violation_codes") or [v["code"] for v in rep_title["violations"]]
             )
             assert "boilerplate_or_garbage_title" in codes_title, (
                 f"Expected boilerplate_or_garbage_title for {polluted_title!r}, got {codes_title}"
@@ -472,9 +460,7 @@ class TestDeliverySemanticQualityContract:
             "表演人對既有著作或民俗創作之表演，以獨立之著作保護之。表演之保護，對原著作之著作權不生影響。"
             "準此，利用人如欲利用他人享有著作權之詞曲著作改作並錄製成錄音著作，應徵得詞曲著作財產權人之同意"
         )
-        overlong_semicolon_doc_number = ";".join(
-            f"環署廢字第110111952{i:02d}號" for i in range(25)
-        )
+        overlong_semicolon_doc_number = ";".join(f"環署廢字第110111952{i:02d}號" for i in range(25))
         for bad_doc_no in (unsegmented_polluted_doc_number, overlong_semicolon_doc_number):
             bad_rows = [
                 {
@@ -483,13 +469,10 @@ class TestDeliverySemanticQualityContract:
                 },
                 rows[1],
             ]
-            bad_report = audit_delivery_rows(
-                bad_rows, objects=objs, require_multi_resource=True
-            )
+            bad_report = audit_delivery_rows(bad_rows, objects=objs, require_multi_resource=True)
             assert bad_report["passed"] is False
             bad_codes = set(
-                bad_report.get("violation_codes")
-                or [v["code"] for v in bad_report["violations"]]
+                bad_report.get("violation_codes") or [v["code"] for v in bad_report["violations"]]
             )
             assert "polluted_or_malformed_doc_number" in bad_codes
 
@@ -515,7 +498,6 @@ class TestDeliverySemanticQualityContract:
         assert "tải file đính kèm" not in us_pack.boilerplate_titles
         assert not (set(vn_pack.placeholder_patterns) & set(us_pack.placeholder_patterns))
         assert not us_pack.salutation_prefix_regexes
-
 
         objs = Objects()
         comparative_md_hash = objs.put(
@@ -585,6 +567,3 @@ class TestDeliverySemanticQualityContract:
         id_only_pack = load_delivery_quality_rules(source_config={"id": "dd-495"})
         assert id_only_pack.language == "vi"
         assert id_only_pack.jurisdiction == "VN"
-
-
-

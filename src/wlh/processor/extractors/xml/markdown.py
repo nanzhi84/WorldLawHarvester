@@ -308,9 +308,7 @@ def xml_to_markdown(data: bytes) -> str:
                 rows.append([text_of(e) for e in row.iter("ENT")])
             if rows:
                 width = max(len(r) for r in rows)
-                rows = [
-                    [c.replace("|", "\\|") for c in r] + [""] * (width - len(r)) for r in rows
-                ]
+                rows = [[c.replace("|", "\\|") for c in r] + [""] * (width - len(r)) for r in rows]
                 lines = ["| " + " | ".join(rows[0]) + " |", "|" + " --- |" * width]
                 lines.extend("| " + " | ".join(r) + " |" for r in rows[1:])
                 caption: Any = node.find("TTITLE")
@@ -365,9 +363,7 @@ def gpo_xml_to_markdown(raw: bytes | str, context: Mapping[str, Any] | None = No
             blocks.append(f"{level} {text}")
         elif tag in ("P", "FP", "EXTRACT"):
             ancestors = {
-                a.tag.upper()
-                for a in list(elem.iterancestors())
-                if isinstance(a.tag, str)
+                a.tag.upper() for a in list(elem.iterancestors()) if isinstance(a.tag, str)
             }
             if tag in ("P", "FP") and "EXTRACT" in ancestors:
                 continue

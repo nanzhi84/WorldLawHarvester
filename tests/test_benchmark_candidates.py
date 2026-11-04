@@ -41,9 +41,7 @@ class TestBenchmarkCandidateExtraction:
             candidates: list[dict[str, Any]] = [json.loads(line) for line in f]
 
         total_count = len(candidates)
-        assert total_count == 721, (
-            f"Expected 721 candidate items, got {total_count}"
-        )
+        assert total_count == 721, f"Expected 721 candidate items, got {total_count}"
 
         source_counts: dict[str, int] = {}
         for item in candidates:
@@ -206,4 +204,3 @@ class TestBenchmarkCandidateExtraction:
         assert (tmp_path / "raw_candidates.jsonl").is_file()
         assert (tmp_path / "candidate_manifest.json").is_file()
         assert not (tmp_path / "representative_samples.jsonl").exists()
-

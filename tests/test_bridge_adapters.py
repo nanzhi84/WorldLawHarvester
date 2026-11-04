@@ -114,10 +114,11 @@ storage:
                     assert len(rows) >= 1, f"Expected document_row for {parser_type}"
                     projected = project_canonical(rows[0])
                     assert projected["doc_type"] == expected_doc_type
-                    assert (
-                        expected_substr in (projected["doc_number"] or "")
-                        or expected_substr in (projected["title"] or "")
-                    ), f"Expected {expected_substr} in {projected}"
+                    assert expected_substr in (
+                        projected["doc_number"] or ""
+                    ) or expected_substr in (projected["title"] or ""), (
+                        f"Expected {expected_substr} in {projected}"
+                    )
 
             rp_run = prepare_run(source_yaml, "reparse")
             rp_res = execute_run(rp_run)

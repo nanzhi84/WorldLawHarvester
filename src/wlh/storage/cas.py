@@ -183,7 +183,11 @@ class Objects:
             finally:
                 stream.close()
         except ClientError as exc:
-            if cast(Any, exc).response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+            if cast(Any, exc).response.get("Error", {}).get("Code") in {
+                "404",
+                "NoSuchKey",
+                "NotFound",
+            }:
                 raise WlhError("archive_missing") from None
             raise WlhError("archive_unreadable") from None
         except (BotoCoreError, OSError):

@@ -108,6 +108,8 @@ class TestEvidenceBackedDocumentTitles:
             config = _config(tmp_path, origin, from_directory=False)
             report, rows = collect_artifact("dd-940", config, initialized_db, name, requests)
             assert PDF in requests
-            assert rows == [], "A numeric filename must not stand in for missing verified title evidence"
+            assert rows == [], (
+                "A numeric filename must not stand in for missing verified title evidence"
+            )
             assert report["result"].get("status") != "complete"
             assert "title" in str(report["result"].get("errors", [])).lower(), report

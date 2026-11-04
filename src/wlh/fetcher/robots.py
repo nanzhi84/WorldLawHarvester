@@ -28,9 +28,7 @@ class Robots:
         self.cache: dict[str, Any] = {}
         self.lock: asyncio.Lock = asyncio.Lock()
 
-    async def check(
-        self, url: str, fetch: Callable[[str], Awaitable[tuple[int, bytes]]]
-    ) -> None:
+    async def check(self, url: str, fetch: Callable[[str], Awaitable[tuple[int, bytes]]]) -> None:
         f_cfg = _fetcher_cfg(self.config)
         robots_enabled = f_cfg.get("robots", self.config.get("robots", True))
         if not robots_enabled:

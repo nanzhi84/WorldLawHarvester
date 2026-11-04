@@ -133,10 +133,7 @@ def _truncate_payload_aligned(
     truncated = False
     for line in cleaned.splitlines():
         vis_line = _visible_chars_only(re.sub(r"<[^>]+>", "", line))
-        if (
-            vis_count + len(vis_line) > target_vis
-            or raw_count + len(line) > max_raw_chars
-        ):
+        if vis_count + len(vis_line) > target_vis or raw_count + len(line) > max_raw_chars:
             remain_vis = target_vis - vis_count
             if remain_vis > 0 and raw_count < max_raw_chars:
                 pos = 0
@@ -256,13 +253,9 @@ def _normalize_item(
             out["effective_at"] = None
     if "quality_route" in item and item.get("quality_route") is not None:
         out["quality_route"] = str(item.get("quality_route")).strip()
-    if "sampling_strata" in item and isinstance(
-        item.get("sampling_strata"), Sequence
-    ):
+    if "sampling_strata" in item and isinstance(item.get("sampling_strata"), Sequence):
         out["sampling_strata"] = [
-            str(s)
-            for s in cast(Sequence[Any], item["sampling_strata"])
-            if str(s).strip()
+            str(s) for s in cast(Sequence[Any], item["sampling_strata"]) if str(s).strip()
         ]
     return out
 
@@ -357,9 +350,7 @@ def format_sample_for_display(
     return out
 
 
-def _resolve_candidate_quality_route(
-    cand: Mapping[str, Any], md_text: str
-) -> str:
+def _resolve_candidate_quality_route(cand: Mapping[str, Any], md_text: str) -> str:
     for key in ("quality_route", "recommended_route"):
         val = cand.get(key)
         if isinstance(val, str) and val.strip():
@@ -380,7 +371,6 @@ def _resolve_candidate_quality_route(
 
 
 resolve_candidate_quality_route = _resolve_candidate_quality_route
-
 
 
 STRATA_BADGE_LABELS: dict[str, tuple[str, str]] = {
@@ -454,9 +444,7 @@ def stratify_verification_samples(
             if candidate_idx not in p95_bucket and candidate_idx not in p5_bucket:
                 p95_bucket.append(candidate_idx)
 
-    warning_bucket = [
-        idx for idx in range(total) if routes[idx] == "accept_with_warning"
-    ]
+    warning_bucket = [idx for idx in range(total) if routes[idx] == "accept_with_warning"]
     missing_doc_number_bucket = sorted(
         (idx for idx in range(total) if missing_doc_nums[idx]),
         key=lambda idx: (0 if missing_eff_dates[idx] else 1, idx),
@@ -517,9 +505,7 @@ def stratify_verification_samples(
         if not progressed:
             break
 
-    baseline_bucket = [
-        idx for idx in range(total) if strata_by_idx[idx] == ["baseline"]
-    ]
+    baseline_bucket = [idx for idx in range(total) if strata_by_idx[idx] == ["baseline"]]
     for idx in (*baseline_bucket, *range(total)):
         if len(selected_indices) >= max_items:
             break
@@ -561,9 +547,7 @@ def render_source_verification_html(
 
         raw_items = src.get("items")
         items_seq: Sequence[Mapping[str, Any]] = (
-            cast(Sequence[Mapping[str, Any]], raw_items)
-            if isinstance(raw_items, Sequence)
-            else []
+            cast(Sequence[Mapping[str, Any]], raw_items) if isinstance(raw_items, Sequence) else []
         )
         already_stratified = bool(items_seq) and all(
             isinstance(it.get("sampling_strata"), Sequence)
@@ -574,16 +558,10 @@ def render_source_verification_html(
         selected_items = (
             list(items_seq)[:max_items_per_source]
             if already_stratified and len(items_seq) <= max_items_per_source
-            else stratify_verification_samples(
-                items_seq, max_items=max_items_per_source
-            )
+            else stratify_verification_samples(items_seq, max_items=max_items_per_source)
         )
-        normalized_items = [
-            _normalize_item(it, include_content=False) for it in selected_items
-        ]
-        cache_map[source_id] = [
-            _compact_cache_item(it) for it in selected_items
-        ]
+        normalized_items = [_normalize_item(it, include_content=False) for it in selected_items]
+        cache_map[source_id] = [_compact_cache_item(it) for it in selected_items]
 
         if continent and continent != current_continent:
             toc_blocks.append(
@@ -623,9 +601,7 @@ def render_source_verification_html(
         seen_section_strata: set[str] = set()
         for idx, item in enumerate(normalized_items, start=1):
             attachment_url_raw = item.get("attachment_url")
-            attachment_url = (
-                str(attachment_url_raw).strip() if attachment_url_raw else ""
-            )
+            attachment_url = str(attachment_url_raw).strip() if attachment_url_raw else ""
             original_file_raw = item.get("original_file")
             original_file = str(original_file_raw).strip() if original_file_raw else ""
             original_media_type_raw = item.get("original_media_type")
@@ -639,15 +615,12 @@ def render_source_verification_html(
             effective_at = str(item.get("effective_at") or "").strip() or "—"
 
             left_parts: list[str] = [
-                f'<span class="sample-index">#{idx}</span>'
-                if idx == 1
-                else f"#{idx}"
+                f'<span class="sample-index">#{idx}</span>' if idx == 1 else f"#{idx}"
             ]
             raw_strata = item.get("sampling_strata")
             strata_tags: list[str] = (
                 [str(s) for s in cast(Sequence[Any], raw_strata) if str(s).strip()]
-                if isinstance(raw_strata, Sequence)
-                and not isinstance(raw_strata, (str, bytes))
+                if isinstance(raw_strata, Sequence) and not isinstance(raw_strata, (str, bytes))
                 else []
             )
             emitted_strata = False
@@ -656,9 +629,7 @@ def render_source_verification_html(
                     continue
                 seen_section_strata.add(tag)
                 emitted_strata = True
-                badge_label, strata_cls = STRATA_BADGE_LABELS.get(
-                    tag, (tag, "strata-baseline")
-                )
+                badge_label, strata_cls = STRATA_BADGE_LABELS.get(tag, (tag, "strata-baseline"))
                 left_parts.append(
                     f'<span class="strata-badge {strata_cls}" data-stratum="{std_html.escape(tag)}">{std_html.escape(badge_label)}</span>'
                 )
@@ -688,9 +659,7 @@ def render_source_verification_html(
                 att_n = (att_entry.get("name") or "").strip()
                 esc_att = std_html.escape(att_u, quote=True)
                 label = std_html.escape(att_n or original_file or "附件")
-                left_parts.append(
-                    f' <a class="attachment-link" href="{esc_att}">{label}</a>'
-                )
+                left_parts.append(f' <a class="attachment-link" href="{esc_att}">{label}</a>')
 
             if not has_att_link:
                 left_parts.append("<pre><code>⏳</code></pre>")
@@ -734,21 +703,21 @@ def render_source_verification_html(
             )
 
         bc_items = [
-            std_html.escape(x)
-            for x in (continent, jurisdiction, subcategory)
-            if x and x != "—"
+            std_html.escape(x) for x in (continent, jurisdiction, subcategory) if x and x != "—"
         ]
         breadcrumb_html = (
-            f'<div class="source-breadcrumb">{" › ".join(bc_items)}</div>'
-            if bc_items
-            else ""
+            f'<div class="source-breadcrumb">{" › ".join(bc_items)}</div>' if bc_items else ""
         )
 
         entry_link_html = ""
         if entry_url:
             raw_urls = [
                 u.strip().rstrip(",")
-                for line in entry_url.replace("<br>", "\n").replace("、", "\n").replace(",", "\n").replace("，", "\n").splitlines()
+                for line in entry_url.replace("<br>", "\n")
+                .replace("、", "\n")
+                .replace(",", "\n")
+                .replace("，", "\n")
+                .splitlines()
                 for u in line.split()
                 if u.strip().rstrip(",").startswith(("http://", "https://"))
             ]
@@ -771,9 +740,9 @@ def render_source_verification_html(
 
     toc_html = "\n        ".join(toc_blocks)
     sections_html = "\n\n      ".join(main_blocks)
-    cache_json = json.dumps(
-        cache_map, ensure_ascii=False, separators=(",", ":")
-    ).replace("</", "<\\/")
+    cache_json = json.dumps(cache_map, ensure_ascii=False, separators=(",", ":")).replace(
+        "</", "<\\/"
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1209,9 +1178,7 @@ def render_html_from_csv(
     existing_items_map = _parse_existing_html_samples(html_path)
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         active_rows = [
-            row
-            for row in csv.DictReader(handle)
-            if row["状态"].strip().startswith(("[x]", "[~]"))
+            row for row in csv.DictReader(handle) if row["状态"].strip().startswith(("[x]", "[~]"))
         ]
 
     sources_payload: list[dict[str, Any]] = []
@@ -1433,15 +1400,12 @@ def _build_hydrated_item_from_resource_rows(
         md_text = preloaded_md_text
     else:
         try:
-            md_text = objs.get(str(primary["markdown_hash"])).decode(
-                "utf-8", errors="replace"
-            )
+            md_text = objs.get(str(primary["markdown_hash"])).decode("utf-8", errors="replace")
             for zip_row in res_rows:
                 if (
                     zip_row is not primary
                     and zip_row.get("role") == "independent_attachment"
-                    and str(zip_row.get("original_media_type") or "").lower()
-                    == "application/zip"
+                    and str(zip_row.get("original_media_type") or "").lower() == "application/zip"
                     and zip_row.get("markdown_hash")
                 ):
                     zip_md = objs.get(str(zip_row["markdown_hash"])).decode(
@@ -1469,8 +1433,7 @@ def _build_hydrated_item_from_resource_rows(
                         {
                             "url": b_u,
                             "name": str(b_att_map.get("name") or "").strip() or None,
-                            "media_type": str(b_att_map.get("media_type") or "").strip()
-                            or None,
+                            "media_type": str(b_att_map.get("media_type") or "").strip() or None,
                         }
                     )
     for ar in att_rows:
@@ -1533,9 +1496,7 @@ def _build_hydrated_item_from_resource_rows(
     inputs_ref = primary.get("inputs_ref")
     if isinstance(inputs_ref, str) and inputs_ref:
         try:
-            inputs_raw: Any = json.loads(
-                objs.get(inputs_ref).decode("utf-8", errors="replace")
-            )
+            inputs_raw: Any = json.loads(objs.get(inputs_ref).decode("utf-8", errors="replace"))
             inputs_list: list[Any] = []
             if isinstance(inputs_raw, dict):
                 raw_in = cast(dict[str, Any], inputs_raw).get("inputs")
@@ -1563,16 +1524,8 @@ def _build_hydrated_item_from_resource_rows(
                     if acq_id
                     else None
                 )
-                mime = (
-                    str(acq_row["mime_type"])
-                    if acq_row and acq_row.get("mime_type")
-                    else None
-                )
-                acq_url = (
-                    str(acq_row["url"])
-                    if acq_row and acq_row.get("url")
-                    else ""
-                )
+                mime = str(acq_row["mime_type"]) if acq_row and acq_row.get("mime_type") else None
+                acq_url = str(acq_row["url"]) if acq_row and acq_row.get("url") else ""
                 target_ref = (
                     arch_ref
                     if isinstance(arch_ref, str) and arch_ref
@@ -1649,9 +1602,7 @@ def _build_hydrated_item_from_resource_rows(
         "original_media_type": original_media_type,
         "attachments": attachments_list,
         "raw_payload": (
-            raw_payload
-            if full
-            else _truncate_payload_aligned(raw_payload, md_text, 1500)
+            raw_payload if full else _truncate_payload_aligned(raw_payload, md_text, 1500)
         ),
         "markdown": md_text if full else md_text[:4000],
         "title": (base_meta or {}).get("title") or primary.get("title"),
@@ -1661,8 +1612,7 @@ def _build_hydrated_item_from_resource_rows(
             else primary.get("doc_number")
         ),
         "issuer": (base_meta or {}).get("issuer") or primary.get("issuer"),
-        "published_at": (base_meta or {}).get("published_at")
-        or primary.get("published_at"),
+        "published_at": (base_meta or {}).get("published_at") or primary.get("published_at"),
         "effective_at": (
             base_meta["effective_at"]
             if base_meta and "effective_at" in base_meta
@@ -1730,9 +1680,7 @@ def _extract_source_items_from_store(
     local_seen_keys: set[tuple[str, str, str]] = set(seen_resource_keys)
 
     for res_rows in selected_res.values():
-        non_att = [
-            r for r in res_rows if r.get("role") != "independent_attachment"
-        ]
+        non_att = [r for r in res_rows if r.get("role") != "independent_attachment"]
         primary = non_att[0] if non_att else res_rows[0]
         detail_url_val = str(primary.get("detail_url") or "").strip()
         resource_dedup_key = (
@@ -1744,15 +1692,12 @@ def _extract_source_items_from_store(
             continue
 
         try:
-            md_text = objs.get(str(primary["markdown_hash"])).decode(
-                "utf-8", errors="replace"
-            )
+            md_text = objs.get(str(primary["markdown_hash"])).decode("utf-8", errors="replace")
             for zip_row in res_rows:
                 if (
                     zip_row is not primary
                     and zip_row.get("role") == "independent_attachment"
-                    and str(zip_row.get("original_media_type") or "").lower()
-                    == "application/zip"
+                    and str(zip_row.get("original_media_type") or "").lower() == "application/zip"
                     and zip_row.get("markdown_hash")
                 ):
                     zip_md = objs.get(str(zip_row["markdown_hash"])).decode(
@@ -1768,29 +1713,18 @@ def _extract_source_items_from_store(
 
         quality_route = _resolve_candidate_quality_route(primary, md_text)
         result_ref = primary.get("result_ref")
-        if (
-            quality_route != "accept_with_warning"
-            and isinstance(result_ref, str)
-            and result_ref
-        ):
+        if quality_route != "accept_with_warning" and isinstance(result_ref, str) and result_ref:
             try:
-                doc_obj: Any = json.loads(
-                    objs.get(result_ref).decode("utf-8", errors="replace")
-                )
+                doc_obj: Any = json.loads(objs.get(result_ref).decode("utf-8", errors="replace"))
                 if isinstance(doc_obj, Mapping):
                     doc_map = cast(Mapping[str, Any], doc_obj)
-                    for d_entry in cast(
-                        Sequence[Any], doc_map.get("deliverables") or ()
-                    ):
+                    for d_entry in cast(Sequence[Any], doc_map.get("deliverables") or ()):
                         if isinstance(d_entry, Mapping):
                             d_map = cast(Mapping[str, Any], d_entry)
                             q_rep = d_map.get("quality_report")
                             if isinstance(q_rep, Mapping):
                                 q_map = cast(Mapping[str, Any], q_rep)
-                                if (
-                                    q_map.get("recommended_route")
-                                    == "accept_with_warning"
-                                ):
+                                if q_map.get("recommended_route") == "accept_with_warning":
                                     quality_route = "accept_with_warning"
                                     break
             except Exception:
@@ -1821,9 +1755,7 @@ def _extract_source_items_from_store(
         if len(items) >= max_items_per_source:
             break
         res_rows = cast(list[dict[str, Any]], cand_entry["_res_rows"])
-        resource_dedup_key = cast(
-            tuple[str, str, str], cand_entry["_resource_dedup_key"]
-        )
+        resource_dedup_key = cast(tuple[str, str, str], cand_entry["_resource_dedup_key"])
         md_text = str(cand_entry["markdown"])
         hydrated = _build_hydrated_item_from_resource_rows(
             conn,
@@ -1904,9 +1836,7 @@ def _hydrate_cached_source_items_from_conn(
             for r in res_rows
         ):
             continue
-        non_att = [
-            r for r in res_rows if r.get("role") != "independent_attachment"
-        ]
+        non_att = [r for r in res_rows if r.get("role") != "independent_attachment"]
         primary = non_att[0] if non_att else res_rows[0]
         u = str(primary.get("detail_url") or "").strip()
         t = str(primary.get("title") or "").strip()
@@ -1956,22 +1886,15 @@ def hydrate_samples_from_store(
     from psycopg.rows import dict_row
 
     target_db_url = (
-        database_url
-        or os.environ.get("WLH_SAMPLES_DATABASE_URL")
-        or DEFAULT_SAMPLES_DATABASE_URL
+        database_url or os.environ.get("WLH_SAMPLES_DATABASE_URL") or DEFAULT_SAMPLES_DATABASE_URL
     )
     target_bucket = (
-        s3_bucket
-        or os.environ.get("WLH_SAMPLES_S3_BUCKET")
-        or DEFAULT_SAMPLES_S3_BUCKET
+        s3_bucket or os.environ.get("WLH_SAMPLES_S3_BUCKET") or DEFAULT_SAMPLES_S3_BUCKET
     )
     prod_db_url = (
         fallback_database_url
         if fallback_database_url is not None
-        else (
-            os.environ.get("WLH_FALLBACK_SAMPLES_DATABASE_URL")
-            or FALLBACK_SAMPLES_DATABASE_URL
-        )
+        else (os.environ.get("WLH_FALLBACK_SAMPLES_DATABASE_URL") or FALLBACK_SAMPLES_DATABASE_URL)
     )
     prod_bucket = (
         fallback_s3_bucket
@@ -1988,15 +1911,11 @@ def hydrate_samples_from_store(
 
     with ExitStack() as stack:
         conn = stack.enter_context(
-            psycopg.Connection[dict[str, Any]].connect(
-                target_db_url, row_factory=dict_row
-            )
+            psycopg.Connection[dict[str, Any]].connect(target_db_url, row_factory=dict_row)
         )
         for source_id, raw_items in sources_map.items():
             cached_seq = list(raw_items)[:max_items_per_source]
-            urls_sig = tuple(
-                str(it.get("detail_url") or "") for it in cached_seq
-            )
+            urls_sig = tuple(str(it.get("detail_url") or "") for it in cached_seq)
             cache_key = (
                 target_db_url,
                 target_bucket,
@@ -2097,9 +2016,7 @@ def hydrate_samples_from_store(
                 hydrated_items = items
 
             if target_db_url == DEFAULT_SAMPLES_DATABASE_URL and hydrated_items:
-                _HYDRATED_SOURCE_CACHE[cache_key] = [
-                    dict(x) for x in hydrated_items
-                ]
+                _HYDRATED_SOURCE_CACHE[cache_key] = [dict(x) for x in hydrated_items]
             out[source_id] = hydrated_items
 
     return out
@@ -2150,22 +2067,15 @@ def generate_verification_samples_from_db(
     from psycopg.rows import dict_row
 
     target_db_url = (
-        database_url
-        or os.environ.get("WLH_SAMPLES_DATABASE_URL")
-        or DEFAULT_SAMPLES_DATABASE_URL
+        database_url or os.environ.get("WLH_SAMPLES_DATABASE_URL") or DEFAULT_SAMPLES_DATABASE_URL
     )
     target_bucket = (
-        s3_bucket
-        or os.environ.get("WLH_SAMPLES_S3_BUCKET")
-        or DEFAULT_SAMPLES_S3_BUCKET
+        s3_bucket or os.environ.get("WLH_SAMPLES_S3_BUCKET") or DEFAULT_SAMPLES_S3_BUCKET
     )
     prod_db_url = (
         fallback_database_url
         if fallback_database_url is not None
-        else (
-            os.environ.get("WLH_FALLBACK_SAMPLES_DATABASE_URL")
-            or FALLBACK_SAMPLES_DATABASE_URL
-        )
+        else (os.environ.get("WLH_FALLBACK_SAMPLES_DATABASE_URL") or FALLBACK_SAMPLES_DATABASE_URL)
     )
     prod_bucket = (
         fallback_s3_bucket
@@ -2177,9 +2087,7 @@ def generate_verification_samples_from_db(
 
     with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
         active_rows = [
-            row
-            for row in csv.DictReader(handle)
-            if row["状态"].strip().startswith(("[x]", "[~]"))
+            row for row in csv.DictReader(handle) if row["状态"].strip().startswith(("[x]", "[~]"))
         ]
 
     existing_items_map = _parse_existing_html_samples(output_path)
@@ -2190,9 +2098,7 @@ def generate_verification_samples_from_db(
 
     with ExitStack() as stack:
         conn = stack.enter_context(
-            psycopg.Connection[dict[str, Any]].connect(
-                target_db_url, row_factory=dict_row
-            )
+            psycopg.Connection[dict[str, Any]].connect(target_db_url, row_factory=dict_row)
         )
         for csv_row in active_rows:
             source_id = csv_row["Source ID"].strip()

@@ -253,4 +253,3 @@ def text_check(
         "legacy_garbled_char_count": garbled,
         "reason_count": len(reasons),
     }
-

@@ -56,9 +56,7 @@ def normalize_semantic_text(value: Any) -> str:
     return text.lower()
 
 
-def evaluate_field_agreement(
-    field: str, val_a: Any, val_b: Any
-) -> tuple[bool, bool]:
+def evaluate_field_agreement(field: str, val_a: Any, val_b: Any) -> tuple[bool, bool]:
     """Evaluate whether Annotator A and B agree on a given field.
 
     Returns:
@@ -220,16 +218,20 @@ def run_arbitration(
         }
         benchmark_records.append(benchmark_record)
 
-        per_item_comparisons.append({
-            "id": cand_id,
-            "source_id": cand["source_id"],
-            "jurisdiction": cand["jurisdiction"],
-            "title": auth_gt["title"],
-            "verification_status": status,
-            "field_comparisons": field_evaluations,
-            "authoritative_ground_truth": auth_gt,
-            "arbitration_ruling": notes if status == "ARBITRATED" else "Full consensus achieved across all fields without dispute.",
-        })
+        per_item_comparisons.append(
+            {
+                "id": cand_id,
+                "source_id": cand["source_id"],
+                "jurisdiction": cand["jurisdiction"],
+                "title": auth_gt["title"],
+                "verification_status": status,
+                "field_comparisons": field_evaluations,
+                "authoritative_ground_truth": auth_gt,
+                "arbitration_ruling": notes
+                if status == "ARBITRATED"
+                else "Full consensus achieved across all fields without dispute.",
+            }
+        )
 
     total_field_decisions = total_samples * len(BENCHMARK_FIELDS)
     overall_exact_rate = round(sum(field_exact_matches.values()) / total_field_decisions, 4)
@@ -377,7 +379,9 @@ def _arbitrate_single_item(
 
     elif cand_id == "cand_11":
         # VN Precedent 86: casing Về vs về
-        auth_gt["title"] = "Án lệ số 86/2026/AL về sự kiện pháp lý làm phát sinh căn cứ để xem xét kháng nghị theo thủ tục tái thẩm"
+        auth_gt["title"] = (
+            "Án lệ số 86/2026/AL về sự kiện pháp lý làm phát sinh căn cứ để xem xét kháng nghị theo thủ tục tái thẩm"
+        )
         status = "ARBITRATED"
         notes = (
             "Arbitrated title orthography: Vietnamese grammar keeps prepositions lowercase in title continuations "
@@ -633,7 +637,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     print("Cross-Verification and Arbitration Complete:")
     print(f"  Total Samples: {verification_log['total_samples']}")
     print(f"  Exact Agreement Rate: {verification_log['overall_agreement_rate'] * 100:.2f}%")
-    print(f"  Semantic Agreement Rate: {verification_log['overall_semantic_agreement_rate'] * 100:.2f}%")
+    print(
+        f"  Semantic Agreement Rate: {verification_log['overall_semantic_agreement_rate'] * 100:.2f}%"
+    )
     print(
         f"  Consensus Items: {summary['consensus_items_count']} "
         f"({summary['consensus_percentage']}%)"
@@ -649,4 +655,3 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-

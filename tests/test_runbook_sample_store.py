@@ -67,9 +67,7 @@ def _seed_source_samples(
                 mime_type = str(item.get("mime_type") or "text/html; charset=utf-8")
                 md_text = str(item["markdown"])
                 doc_type = str(item.get("doc_type") or "政策文件")
-                doc_number = (
-                    str(item["doc_number"]) if item.get("doc_number") is not None else None
-                )
+                doc_number = str(item["doc_number"]) if item.get("doc_number") is not None else None
                 issuer = str(item.get("issuer") or "Official Issuer")
                 published_at = str(item.get("published_at") or "2026-03-01")
                 effective_at = (
@@ -550,9 +548,7 @@ class TestRunbookVerificationSamples:
         assert len(dd580_live) == 5
         for row_idx, item in enumerate(dd580_live, start=1):
             right_text = str(item.get("markdown") or "").strip()
-            assert any(
-                tok in right_text for tok in ("大法官解釋", "憲法法庭", "憲判字")
-            ), (
+            assert any(tok in right_text for tok in ("大法官解釋", "憲法法庭", "憲判字")), (
                 f"dd-580 live item #{row_idx} markdown missing constitutional court header"
             )
             assert any(
@@ -871,8 +867,11 @@ storage:
             str(el.get("data-stratum") or "")
             for el in tree.xpath('//section[@id="dd-906"]//span[@data-stratum]')
         ]
-        assert {"p5_shortest", "p95_longest", "missing_doc_number", "missing_effective_at"}.issubset(
-            set(strata_badges)
-        ), f"Missing expected stratified badges in isolated HTML: {strata_badges}"
-
-
+        assert {
+            "p5_shortest",
+            "p95_longest",
+            "missing_doc_number",
+            "missing_effective_at",
+        }.issubset(set(strata_badges)), (
+            f"Missing expected stratified badges in isolated HTML: {strata_badges}"
+        )

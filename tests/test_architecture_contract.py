@@ -522,7 +522,6 @@ class TestArchitectureContract:
                         f"{test_file}:{node.lineno}"
                     )
 
-
     def test_xml_extractor_converts_legal_and_gpo_xml_to_standard_markdown(self) -> None:
         import lxml.etree as _etree  # type: ignore[import-untyped]
 
@@ -823,10 +822,14 @@ class TestDeclarativePipelineHooks:
         text = "".join(str(t) for t in content_node.itertext())
         assert "分享到微博" not in text
 
-        cleaned_title = clean_title("示例法（檔案下載） - 全国法规库", [r"（檔案下載）", r"\s*-\s*全国法规库$"])
+        cleaned_title = clean_title(
+            "示例法（檔案下載） - 全国法规库", [r"（檔案下載）", r"\s*-\s*全国法规库$"]
+        )
         assert cleaned_title == "示例法"
 
-        cleaned_body = apply_text_cleaners("第一条 本法自公布日施行。【字体：大 中 小】", [r"【字体：大 中 小】"])
+        cleaned_body = apply_text_cleaners(
+            "第一条 本法自公布日施行。【字体：大 中 小】", [r"【字体：大 中 小】"]
+        )
         assert "【字体" not in cleaned_body
         assert infer_effective_date(cleaned_body, published_at="2024-05-01") == "2024-05-01"
 
@@ -974,9 +977,7 @@ class TestDeclarativePipelineHooks:
                             "max_pages_path": "data.pagination.max_page",
                         },
                         "detail_url_template": "https://example.gov/api/v1/laws/{id}",
-                        "attachment_rules": [
-                            {"url_path": "files.pdf_url", "title_path": "title"}
-                        ],
+                        "attachment_rules": [{"url_path": "files.pdf_url", "title_path": "title"}],
                     },
                 }
             },
@@ -1075,10 +1076,10 @@ class TestEphemeralProxyManager:
         monkeypatch.setenv("WLH_ALLOW_LOOPBACK", "0")
         cmd = (
             f"{sys.executable} -c "
-            "\"import socket, time, sys; "
+            '"import socket, time, sys; '
             "s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); "
             "s.bind(('127.0.0.1', int(sys.argv[1]))); s.listen(5); "
-            "time.sleep(60)\" {port}"
+            'time.sleep(60)" {port}'
         )
         monkeypatch.setenv("WLH_PROXY_CMD_TEST", cmd)
 
@@ -1128,9 +1129,9 @@ class TestEphemeralProxyManager:
         assert example_cfg.processor.parser.type == "json"
 
         # 2. Verify html_to_md.py and html/parser.py contain no site-specific selector literals
-        html_to_md_text = (SRC_WLH / "processor" / "extractors" / "html" / "html_to_md.py").read_text(
-            encoding="utf-8"
-        )
+        html_to_md_text = (
+            SRC_WLH / "processor" / "extractors" / "html" / "html_to_md.py"
+        ).read_text(encoding="utf-8")
         for forbidden_literal in ("_sblb", "hmc4Table", "xgxw", "gem-c-print-link", '"dataset"'):
             assert forbidden_literal not in html_to_md_text
 
@@ -1208,9 +1209,9 @@ class TestEphemeralProxyManager:
         counter_file = tmp_path / "attempts.txt"
         fail_cmd = (
             f"{sys.executable} -c "
-            f"\"from pathlib import Path; p = Path({str(counter_file)!r}); "
+            f'"from pathlib import Path; p = Path({str(counter_file)!r}); '
             "n = int(p.read_text()) if p.exists() else 0; "
-            "p.write_text(str(n + 1)); raise SystemExit(1)\" {port}"
+            'p.write_text(str(n + 1)); raise SystemExit(1)" {port}'
         )
         monkeypatch.setenv("WLH_PROXY_CMD_FAILTEST", fail_cmd)
 

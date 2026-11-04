@@ -83,7 +83,9 @@ class TestBenchmarkDatasetSchemaContract:
         self, benchmark_data: list[dict[str, Any]]
     ) -> None:
         """Every record must contain exactly all 9 canonical top-level fields and 7 ground_truth fields."""
-        assert len(benchmark_data) == 721, f"Expected 721 benchmark records, found {len(benchmark_data)}"
+        assert len(benchmark_data) == 721, (
+            f"Expected 721 benchmark records, found {len(benchmark_data)}"
+        )
         assert len({r["source_id"] for r in benchmark_data}) == 73, (
             f"Expected 73 distinct source_ids, found {len({r['source_id'] for r in benchmark_data})}"
         )
@@ -94,7 +96,9 @@ class TestBenchmarkDatasetSchemaContract:
                 f"Record {rec_id} contains deprecated cleanliness_ground_truth field"
             )
             missing_fields = REQUIRED_SCHEMA_FIELDS - record_keys
-            assert not missing_fields, f"Record {rec_id} missing required schema fields: {missing_fields}"
+            assert not missing_fields, (
+                f"Record {rec_id} missing required schema fields: {missing_fields}"
+            )
             extra_fields = record_keys - REQUIRED_SCHEMA_FIELDS
             assert not extra_fields, f"Record {rec_id} has unexpected extra fields: {extra_fields}"
 
@@ -158,7 +162,9 @@ class TestBenchmarkDatasetSchemaContract:
                     try:
                         datetime.date.fromisoformat(val)
                     except ValueError as exc:
-                        pytest.fail(f"{rec_id} {date_field} is not a valid calendar date: {val} ({exc})")
+                        pytest.fail(
+                            f"{rec_id} {date_field} is not a valid calendar date: {val} ({exc})"
+                        )
 
     def test_cleanliness_ground_truth_and_clean_markdown_excerpt_removed_from_models_and_schema(
         self,
@@ -188,7 +194,9 @@ class TestBenchmarkMachineAuditMetadataInvariants:
         for record in benchmark_data:
             rec_id = str(record["id"])
             raw_adj = record.get("adjudication_metadata")
-            assert isinstance(raw_adj, dict), f"{rec_id} adjudication_metadata is missing or not a dictionary"
+            assert isinstance(raw_adj, dict), (
+                f"{rec_id} adjudication_metadata is missing or not a dictionary"
+            )
             adj: dict[str, Any] = cast(dict[str, Any], raw_adj)
 
             present_jev_keys = forbidden_jev_keys & set(adj.keys())
@@ -200,7 +208,9 @@ class TestBenchmarkMachineAuditMetadataInvariants:
             assert len(onboarded_at) > 0, f"{rec_id} adjudication_metadata.onboarded_at is empty"
 
             pipeline_version = str(adj.get("pipeline_version") or "")
-            assert len(pipeline_version) > 0, f"{rec_id} adjudication_metadata.pipeline_version is empty"
+            assert len(pipeline_version) > 0, (
+                f"{rec_id} adjudication_metadata.pipeline_version is empty"
+            )
             assert "path-a" not in pipeline_version, (
                 f"{rec_id} adjudication_metadata.pipeline_version contains Jev path-a version: {pipeline_version}"
             )
@@ -258,10 +268,14 @@ class TestBenchmarkDefectResolutionIntegrity:
         cur = cand["current_extracted"]
         assert cand["source_id"] == "dd-572"
         # Confirm candidate had the file size artifact
-        assert "372.7 KB" in str(cur.get("doc_number")), "Baseline candidate did not have file size artifact"
+        assert "372.7 KB" in str(cur.get("doc_number")), (
+            "Baseline candidate did not have file size artifact"
+        )
         # Confirm ground truth doc_number is cleaned
         doc_num = str(gt.get("doc_number"))
-        assert "372.7 KB" not in doc_num, f"cand_03 ground_truth doc_number still contains file size: '{doc_num}'"
+        assert "372.7 KB" not in doc_num, (
+            f"cand_03 ground_truth doc_number still contains file size: '{doc_num}'"
+        )
         assert "KB" not in doc_num, f"cand_03 ground_truth doc_number contains 'KB': '{doc_num}'"
         assert doc_num == "Western Cape Provincial Gazette 9196"
 
@@ -350,7 +364,9 @@ class TestBenchmarkAdversarialNegativeScenarios:
         )
         assert valid_gt.markdown == "# Test Regulation\n\nSubstantive legal content."
 
-    def test_cleanliness_evaluation_driven_strictly_by_ground_truth_markdown_and_heuristics(self) -> None:
+    def test_cleanliness_evaluation_driven_strictly_by_ground_truth_markdown_and_heuristics(
+        self,
+    ) -> None:
         """Cleanliness evaluation penalizes portal metadata/duplicates and recovers 100.0 on clean match."""
         clean_md = (
             "# 공정거래위원회 고시 제2026-10호\n\n"
@@ -424,9 +440,9 @@ class TestBenchmarkOfflineExecutionPurity:
         assert report.average_cleanliness_score >= 80.0, (
             f"Expected cleanliness >= 80.0, got {report.average_cleanliness_score}"
         )
-        assert report.average_accuracy_score is not None and report.average_accuracy_score >= 60.0, (
-            f"Expected accuracy >= 60.0, got {report.average_accuracy_score}"
-        )
+        assert (
+            report.average_accuracy_score is not None and report.average_accuracy_score >= 60.0
+        ), f"Expected accuracy >= 60.0, got {report.average_accuracy_score}"
 
     def test_benchmark_dataset_evaluation_executes_offline_without_network_sockets(
         self, tmp_path: Path
@@ -455,7 +471,9 @@ class TestBenchmarkOfflineExecutionPurity:
             env=blackhole_env,
             timeout=60,
         )
-        assert proc.returncode == 0, f"Benchmark run attempted network connection! stderr:\n{proc.stderr}"
+        assert proc.returncode == 0, (
+            f"Benchmark run attempted network connection! stderr:\n{proc.stderr}"
+        )
         report_file = out_dir / "benchmark_report.json"
         assert report_file.is_file(), f"Expected {report_file} to exist"
 

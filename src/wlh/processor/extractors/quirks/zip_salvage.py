@@ -21,17 +21,14 @@ def safe_member(name: str) -> str | None:
 def filter_redundant_zip_members(infos: Sequence[zipfile.ZipInfo]) -> list[zipfile.ZipInfo]:
     """Filter out redundant uppercase .PDF members when a .json dataset member is present."""
     has_json_member = any(
-        (sm := safe_member(i.filename)) is not None and sm.lower().endswith(".json")
-        for i in infos
+        (sm := safe_member(i.filename)) is not None and sm.lower().endswith(".json") for i in infos
     )
     if not has_json_member:
         return list(infos)
     return [
         i
         for i in infos
-        if not (
-            (sm := safe_member(i.filename)) is not None and sm.upper().endswith(".PDF")
-        )
+        if not ((sm := safe_member(i.filename)) is not None and sm.upper().endswith(".PDF"))
     ]
 
 
@@ -56,11 +53,7 @@ def salvage_zip_prefix(buf: bytes) -> bytes:
         raw_comp = buf[header_end:entry_end]
         try:
             raw_uncomp = (
-                zlib.decompress(raw_comp, -15)
-                if method == 8
-                else raw_comp
-                if method == 0
-                else b""
+                zlib.decompress(raw_comp, -15) if method == 8 else raw_comp if method == 0 else b""
             )
         except zlib.error:
             break

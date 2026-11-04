@@ -697,6 +697,3 @@ class TestPdfExtractionAndOcrFallback:
         assert info["method"] == "native"
         assert "Core R&D activities" in md
         assert "Systematic, investigative or experimental activities" in md
-
-
-

@@ -38,8 +38,14 @@ def worst(routes: Sequence[str]) -> str:
 def extract(
     path: Path, kind: str, job: dict[str, Any], depth: int = 0
 ) -> tuple[str, dict[str, Any], dict[str, Any], list[str], list[dict[str, Any]]]:
-    parser_cfg = cast(dict[str, Any], job.get("parser")) if isinstance(job.get("parser"), dict) else {}
-    raw_pats = cast(list[Any], parser_cfg.get("invalid_body_patterns")) if isinstance(parser_cfg.get("invalid_body_patterns"), list) else []
+    parser_cfg = (
+        cast(dict[str, Any], job.get("parser")) if isinstance(job.get("parser"), dict) else {}
+    )
+    raw_pats = (
+        cast(list[Any], parser_cfg.get("invalid_body_patterns"))
+        if isinstance(parser_cfg.get("invalid_body_patterns"), list)
+        else []
+    )
     invalid_pats: list[str] = [str(x) for x in raw_pats if x]
     if kind in {"txt", "html", "json", "xml"}:
         try:

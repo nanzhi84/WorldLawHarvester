@@ -186,4 +186,3 @@ def blocked(body: bytes | str, config: Mapping[str, Any] | None = None) -> bool:
     else:
         text = body[:262144]
     return any(re.search(p, text, re.I) for p in (*BLOCKERS, *_blocked_patterns(config)))
-

@@ -166,9 +166,7 @@ def run_benchmark_cli(args: argparse.Namespace) -> dict[str, Any]:
         # Backward compatibility: wlh benchmark --input ...
         return run_benchmark_evaluation(args)
 
-    raise ValueError(
-        "A subcommand (run, sample) or --input must be specified for benchmark."
-    )
+    raise ValueError("A subcommand (run, sample) or --input must be specified for benchmark.")
 
 
 def main(argv: list[str] | None = None) -> int:

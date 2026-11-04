@@ -116,7 +116,9 @@ class TestOfflineReparseArchivedTargetRecovery:
             cfg["processor"]["parser"]["documents"]["content_xpath"] = original_xpath
             config.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
 
-        code, stdout, stderr = run_wlh_cli("reparse", str(config), "--no-progress", env=initialized_db)
+        code, stdout, stderr = run_wlh_cli(
+            "reparse", str(config), "--no-progress", env=initialized_db
+        )
         assert code == 0, (stdout, stderr)
         result: dict[str, Any] = json.loads(stdout)
         assert result["status"] == "complete", result
@@ -149,7 +151,7 @@ class TestJapaneseInlineGlyphAndEmptyAttachmentHandling:
             "</ParagraphSentence>"
             "</Paragraph>"
             "</Article>"
-            "<FigStruct><Fig src=\"\"/></FigStruct>"
+            '<FigStruct><Fig src=""/></FigStruct>'
             "</MainProvision>"
             "</LawBody>"
             "</Law>"
@@ -468,7 +470,10 @@ class TestJapanesePdfRecoveryAndLayoutReconstruction:
         doc = fitz.open()
         page = doc.new_page(width=595, height=842)
         columns = [
-            (340, "上告代理人〇〇の上告理由について。原判決の認定及び判断は正当として是認することができる。"),
+            (
+                340,
+                "上告代理人〇〇の上告理由について。原判決の認定及び判断は正当として是認することができる。",
+            ),
             (380, "理由"),
             (420, "上告費用は上告人の負担とする。"),
             (460, "本件上告を棄却する。"),

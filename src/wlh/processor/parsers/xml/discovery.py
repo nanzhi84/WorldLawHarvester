@@ -173,15 +173,13 @@ def discover(
 
             walk_parts(cast(list[Any], children_root))
             return filter_requests(base, raw_urls)
-        if re.search(br"<!DOCTYPE\s+html\b|<html(?:\s|>)", data[:2048], re.I):
+        if re.search(rb"<!DOCTYPE\s+html\b|<html(?:\s|>)", data[:2048], re.I):
             try:
                 doc = lxml_html.document_fromstring(data.decode("utf-8", errors="replace"))
             except (etree.ParserError, ValueError):
                 return []
             raw_urls = [
-                str(href).strip()
-                for href in doc.xpath("//a[@href]/@href")
-                if str(href).strip()
+                str(href).strip() for href in doc.xpath("//a[@href]/@href") if str(href).strip()
             ]
             return filter_requests(base, raw_urls)
         if b"<!ENTITY" in data.upper():

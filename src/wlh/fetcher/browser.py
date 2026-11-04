@@ -260,12 +260,8 @@ class Browser:
                 ):
                     target = guard(self.config, loopback)
                     await self.transport.robots.check(target, self.transport.fetch_policy)
-                    hop_key = request_key(
-                        {"url": target, "method": "GET", "role": "browser_http"}
-                    )
-                    hop_headers = {
-                        k: v for k, v in req_headers.items() if k.lower() != "cookie"
-                    }
+                    hop_key = request_key({"url": target, "method": "GET", "role": "browser_http"})
+                    hop_headers = {k: v for k, v in req_headers.items() if k.lower() != "cookie"}
                     row = await self._exchange_with_retry(
                         target,
                         "GET",
@@ -456,13 +452,9 @@ class Browser:
                     or ("page_limit_exceeded" if has_more else None)
                 )
                 if page_links or trunc_reason:
-                    trunc_attr = (
-                        f" data-wlh-truncated='{trunc_reason}'" if trunc_reason else ""
-                    )
+                    trunc_attr = f" data-wlh-truncated='{trunc_reason}'" if trunc_reason else ""
                     extra = (
-                        f"<div data-wlh-pages='true'{trunc_attr}>"
-                        + "".join(page_links)
-                        + "</div>"
+                        f"<div data-wlh-pages='true'{trunc_attr}>" + "".join(page_links) + "</div>"
                     )
                     if "</body>" in html:
                         html = html.replace("</body>", f"{extra}</body>", 1)

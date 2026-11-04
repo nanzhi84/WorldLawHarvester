@@ -52,29 +52,41 @@ READ_LINES = r"""input => {
 
 
 def application_lines(page: Page, *, original: bool) -> list[dict[str, Any]]:
-    observed = cast(list[dict[str, Any]], page.evaluate(
-        READ_LINES, {"original": original, "wanted": APPLICATION}
-    ))
+    observed = cast(
+        list[dict[str, Any]],
+        page.evaluate(READ_LINES, {"original": original, "wanted": APPLICATION}),
+    )
     session: Any = page.context.new_cdp_session(page)
     try:
         document = session.send("DOM.getDocument")
         for item, expected in zip(observed, APPLICATION, strict=True):
             markers: list[str] = []
             if item.get("owner") is not None:
-                selected = session.send("DOM.querySelector", {
-                    "nodeId": document["root"]["nodeId"],
-                    "selector": f'[data-literal-owner-{item["owner"]}]',
-                })
-                backend = session.send("DOM.describeNode", {"nodeId": selected["nodeId"]})[
-                    "node"]["backendNodeId"]
-                nodes = session.send("Accessibility.getPartialAXTree", {
-                    "backendNodeId": backend, "fetchRelatives": True,
-                })["nodes"]
+                selected = session.send(
+                    "DOM.querySelector",
+                    {
+                        "nodeId": document["root"]["nodeId"],
+                        "selector": f"[data-literal-owner-{item['owner']}]",
+                    },
+                )
+                backend = session.send("DOM.describeNode", {"nodeId": selected["nodeId"]})["node"][
+                    "backendNodeId"
+                ]
+                nodes = session.send(
+                    "Accessibility.getPartialAXTree",
+                    {
+                        "backendNodeId": backend,
+                        "fetchRelatives": True,
+                    },
+                )["nodes"]
                 owner = next(n for n in nodes if n.get("backendDOMNodeId") == backend)
-                markers = [n.get("name", {}).get("value", "") for n in nodes
-                           if n["nodeId"] in owner.get("childIds", [])
-                           and n.get("role", {}).get("value") == "ListMarker"
-                           and not n["ignored"]]
+                markers = [
+                    n.get("name", {}).get("value", "")
+                    for n in nodes
+                    if n["nodeId"] in owner.get("childIds", [])
+                    and n.get("role", {}).get("value") == "ListMarker"
+                    and not n["ignored"]
+                ]
             item["generated_markers"] = markers
             item["displayed_prefix"] = visible_text(
                 "".join(markers) + item.get("literal_prefix", "")
@@ -90,7 +102,10 @@ def application_lines(page: Page, *, original: bool) -> list[dict[str, Any]]:
 
 
 def subtitle_position(page: Page, *, original: bool) -> dict[str, Any]:
-    return cast(dict[str, Any], page.evaluate(r"""original => {
+    return cast(
+        dict[str, Any],
+        page.evaluate(
+            r"""original => {
       const root = document.querySelector(original ? '#main' : 'body');
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       const matches = []; let node;
@@ -106,7 +121,10 @@ def subtitle_position(page: Page, *, original: bool) -> dict[str, Any]:
         in_table:!!node.parentElement.closest('table'),
         precedes_every_table:tables.every(table => !!(node.compareDocumentPosition(table) & 4)),
         text:node.data, top:rect.top + window.scrollY};
-    }""", original))
+    }""",
+            original,
+        ),
+    )
 
 
 def capture_document(

@@ -133,8 +133,7 @@ class TestRunbookVerificationSamples:
             "Missing GitBook right <main> container in source-verification-samples.html"
         )
         main_ids = [
-            str(sec_id)
-            for sec_id in main_nodes[0].xpath('.//section[starts-with(@id, "dd-")]/@id')
+            str(sec_id) for sec_id in main_nodes[0].xpath('.//section[starts-with(@id, "dd-")]/@id')
         ]
         assert main_ids == md_active_order, (
             "Right main pane section order must match source-adaptation-matrix.md active row order"
@@ -200,11 +199,7 @@ class TestRunbookVerificationSamples:
         )
         for vn_att_id in ("dd-492", "dd-493", "dd-512", "dd-514", "dd-575"):
             rows = source_rows_map.get(vn_att_id, [])
-            hrefs: list[str] = [
-                str(href)
-                for row in rows
-                for href in row.xpath(".//a/@href")
-            ]
+            hrefs: list[str] = [str(href) for row in rows for href in row.xpath(".//a/@href")]
             assert any(att_href_re.search(h) for h in hrefs), (
                 f"{vn_att_id} section must contain clickable .pdf, .docx, or UCM download <a href='https://...'> links"
             )

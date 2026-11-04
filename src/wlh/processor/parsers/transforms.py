@@ -64,9 +64,7 @@ def restore_inline_script_cells(target: Any, context: Mapping[str, Any] | None =
             target.xpath(".//td/script | .//th/script | .//p/script | .//span/script")
         ):
             code = script.text_content() or ""
-            m_var = re.search(
-                r'var\s+([A-Za-z0-9_]+)\s*=\s*(["\'])(.*?)\2\s*;', code, re.DOTALL
-            )
+            m_var = re.search(r'var\s+([A-Za-z0-9_]+)\s*=\s*(["\'])(.*?)\2\s*;', code, re.DOTALL)
             if m_var and "document.write" in code:
                 var_name, val = m_var.group(1), m_var.group(3)
                 for m_rep in re.finditer(
@@ -185,9 +183,7 @@ def verify_zip_attachments(
     return f"{base}/api/2/attachment/{revision_id}" if revision_id else "verified"
 
 
-def commencement_effective_at(
-    root: Any, context: Mapping[str, Any] | None = None
-) -> str | None:
+def commencement_effective_at(root: Any, context: Mapping[str, Any] | None = None) -> str | None:
     """Extract effective date from unamended supplementary provision commencement clause."""
     for suppl in cast(
         list[Any], root.xpath(".//*[local-name()='SupplProvision'][not(@AmendLawNum)]")

@@ -177,25 +177,58 @@ def evaluate_benchmark_dataset(
 
     # Cleanliness dimension breakdown
     clean_dims = {
-        "noise_purity": round(sum(s.cleanliness.sub_scores.noise_purity for s in sample_results) / total_samples, 2),
-        "encoding_purity": round(sum(s.cleanliness.sub_scores.encoding_purity for s in sample_results) / total_samples, 2),
-        "structural_integrity": round(sum(s.cleanliness.sub_scores.structural_integrity for s in sample_results) / total_samples, 2),
-        "boilerplate_freedom": round(sum(s.cleanliness.sub_scores.boilerplate_freedom for s in sample_results) / total_samples, 2),
-        "deduplication_purity": round(sum(s.cleanliness.sub_scores.deduplication_purity for s in sample_results) / total_samples, 2),
+        "noise_purity": round(
+            sum(s.cleanliness.sub_scores.noise_purity for s in sample_results) / total_samples, 2
+        ),
+        "encoding_purity": round(
+            sum(s.cleanliness.sub_scores.encoding_purity for s in sample_results) / total_samples, 2
+        ),
+        "structural_integrity": round(
+            sum(s.cleanliness.sub_scores.structural_integrity for s in sample_results)
+            / total_samples,
+            2,
+        ),
+        "boilerplate_freedom": round(
+            sum(s.cleanliness.sub_scores.boilerplate_freedom for s in sample_results)
+            / total_samples,
+            2,
+        ),
+        "deduplication_purity": round(
+            sum(s.cleanliness.sub_scores.deduplication_purity for s in sample_results)
+            / total_samples,
+            2,
+        ),
     }
 
     # Accuracy dimension breakdown
     samples_with_acc = [s for s in sample_results if s.accuracy is not None]
-    if samples_with_acc:
-        acc_count = len(samples_with_acc)
-        avg_accuracy = round(sum(s.accuracy.score for s in samples_with_acc) / acc_count, 2)  # type: ignore[union-attr]
+    accuracies = [s.accuracy for s in samples_with_acc if s.accuracy is not None]
+    if accuracies:
+        acc_count = len(accuracies)
+        avg_accuracy = round(sum(a.score for a in accuracies) / acc_count, 2)
         acc_dims = {
-            "title_accuracy": round(sum(s.accuracy.sub_scores.title_accuracy for s in samples_with_acc) / acc_count, 2),  # type: ignore[union-attr]
-            "doc_number_accuracy": round(sum(s.accuracy.sub_scores.doc_number_accuracy for s in samples_with_acc) / acc_count, 2),  # type: ignore[union-attr]
-            "published_at_accuracy": round(sum(s.accuracy.sub_scores.published_at_accuracy for s in samples_with_acc) / acc_count, 2),  # type: ignore[union-attr]
-            "effective_at_accuracy": round(sum(s.accuracy.sub_scores.effective_at_accuracy for s in samples_with_acc) / acc_count, 2),  # type: ignore[union-attr]
-            "issuer_accuracy": round(sum(s.accuracy.sub_scores.issuer_accuracy for s in samples_with_acc) / acc_count, 2),  # type: ignore[union-attr]
-            "doc_type_accuracy": round(sum(s.accuracy.sub_scores.doc_type_accuracy for s in samples_with_acc) / acc_count, 2),  # type: ignore[union-attr]
+            "title_accuracy": round(
+                sum(a.sub_scores.title_accuracy for a in accuracies) / acc_count, 2
+            ),
+            "doc_number_accuracy": round(
+                sum(a.sub_scores.doc_number_accuracy for a in accuracies) / acc_count,
+                2,
+            ),
+            "published_at_accuracy": round(
+                sum(a.sub_scores.published_at_accuracy for a in accuracies) / acc_count,
+                2,
+            ),
+            "effective_at_accuracy": round(
+                sum(a.sub_scores.effective_at_accuracy for a in accuracies) / acc_count,
+                2,
+            ),
+            "issuer_accuracy": round(
+                sum(a.sub_scores.issuer_accuracy for a in accuracies) / acc_count, 2
+            ),
+            "doc_type_accuracy": round(
+                sum(a.sub_scores.doc_type_accuracy for a in accuracies) / acc_count,
+                2,
+            ),
         }
     else:
         avg_accuracy = None
@@ -212,8 +245,12 @@ def evaluate_benchmark_dataset(
         cnt = len(group)
         j_overall = round(sum(item.overall_score for item in group) / cnt, 2)
         j_clean = round(sum(item.cleanliness.score for item in group) / cnt, 2)
-        acc_items = [item for item in group if item.accuracy is not None]
-        j_acc = round(sum(item.accuracy.score for item in acc_items) / len(acc_items), 2) if acc_items else 0.0  # type: ignore[union-attr]
+        group_accuracies = [item.accuracy for item in group if item.accuracy is not None]
+        j_acc = (
+            round(sum(a.score for a in group_accuracies) / len(group_accuracies), 2)
+            if group_accuracies
+            else 0.0
+        )
         jur_scores[jur] = {
             "overall": j_overall,
             "cleanliness": j_clean,
@@ -226,17 +263,21 @@ def evaluate_benchmark_dataset(
     worst_samples: list[dict[str, Any]] = []
     for s in sorted_samples[:10]:
         penalties_summary = [p["reason"] for p in s.cleanliness.penalties[:3]]
-        mismatches_summary = [m["reason"] for m in (s.accuracy.mismatches if s.accuracy else [])[:3]]
-        worst_samples.append({
-            "sample_id": s.sample_id,
-            "source_id": s.source_id,
-            "jurisdiction": s.jurisdiction,
-            "overall_score": s.overall_score,
-            "cleanliness_score": s.cleanliness.score,
-            "accuracy_score": s.accuracy.score if s.accuracy else None,
-            "top_penalties": penalties_summary,
-            "top_mismatches": mismatches_summary,
-        })
+        mismatches_summary = [
+            m["reason"] for m in (s.accuracy.mismatches if s.accuracy else [])[:3]
+        ]
+        worst_samples.append(
+            {
+                "sample_id": s.sample_id,
+                "source_id": s.source_id,
+                "jurisdiction": s.jurisdiction,
+                "overall_score": s.overall_score,
+                "cleanliness_score": s.cleanliness.score,
+                "accuracy_score": s.accuracy.score if s.accuracy else None,
+                "top_penalties": penalties_summary,
+                "top_mismatches": mismatches_summary,
+            }
+        )
 
     # Field discrepancy and fill rate analysis vs ground truth
     field_discrepancies: dict[str, dict[str, Any]] = {}

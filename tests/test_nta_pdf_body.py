@@ -51,15 +51,15 @@ def _collect(
     path = urlsplit(str(evidence["url"])).path
     lxml_module: Any = lxml_html
     dom: Any = lxml_module.fromstring(parent.decode(evidence["parent_encoding"]))
-    anchors: list[Any] = dom.xpath('//a[@href=$path]', path=path)
+    anchors: list[Any] = dom.xpath("//a[@href=$path]", path=path)
     assert len(anchors) == 1
     assert normalized(anchors[0].text_content()) == normalized(evidence["official_link_label"])
     catalog = (
         '<!doctype html><html lang="ja"><meta charset="utf-8"><body>'
-        '<!-- Finite one-document protocol fixture; no NTA coverage claim. -->'
+        "<!-- Finite one-document protocol fixture; no NTA coverage claim. -->"
         '<h1>法令等</h1><div id="bodyArea">'
         f'<a href="{html.escape(path)}">{html.escape(evidence["official_link_label"])}</a>'
-        '</div></body></html>'
+        "</div></body></html>"
     ).encode()
     routes = {ENTRY: (catalog, "text/html; charset=utf-8"), path: (payload, "application/pdf")}
     name = f"nta-pdf-body-{case}"
@@ -79,8 +79,8 @@ def _collect(
         assert set(requests) <= {ENTRY, path, "/robots.txt"}, requests
         with psycopg.connect(env["WLH_DATABASE_URL"]) as connection:
             archived = connection.execute(
-                "SELECT archive_ref FROM wlh.acquisition "
-                "WHERE request_url=%s AND state='archived'", (origin + path,)
+                "SELECT archive_ref FROM wlh.acquisition WHERE request_url=%s AND state='archived'",
+                (origin + path,),
             ).fetchall()
         assert (evidence["pdf_sha256"],) in archived, "Complete official PDF was not archived"
         for row in rows:
@@ -134,10 +134,11 @@ def _reparse(config: Path, env: dict[str, str], name: str, blocked: bool) -> Non
         ).fetchone()
     assert count == (0,), "Offline reparse must not turn rejected raw text into a delivered version"
     assert code != 0 and result.get("status") not in {None, "complete"}
-    assert (
-        _blocked({"exit_code": code, "result": result}, [])
-        or "zero_targets_discovered" in result.get("errors", [])
-    ), "Reparse may have no committed resource, but must not silently succeed"
+    assert _blocked(
+        {"exit_code": code, "result": result}, []
+    ) or "zero_targets_discovered" in result.get("errors", []), (
+        "Reparse may have no committed resource, but must not silently succeed"
+    )
 
 
 class TestNtaPdfBody:
@@ -153,7 +154,8 @@ class TestNtaPdfBody:
         blocked = _blocked(report, rows)
         markdown = rows[0]["markdown"] if len(rows) == 1 else ""
         controls = Counter(
-            f"U+{ord(char):04X}" for char in markdown
+            f"U+{ord(char):04X}"
+            for char in markdown
             if (ord(char) < 32 and char not in "\n\r\t") or 127 <= ord(char) <= 159
         )
         anchors = [
@@ -166,15 +168,19 @@ class TestNtaPdfBody:
         ]
         missing = [anchor for anchor in anchors if normalized(anchor) not in normalized(markdown)]
         checks = {
-            "explicitly_blocked": blocked, "row_count": len(rows),
-            "control_characters": dict(controls), "replacement_characters": markdown.count("\ufffd"),
+            "explicitly_blocked": blocked,
+            "row_count": len(rows),
+            "control_characters": dict(controls),
+            "replacement_characters": markdown.count("\ufffd"),
             "missing_visually_verified_anchors": missing,
         }
         _save_checks(name, checks)
         if not blocked:
             assert len(rows) == 1, report
             assert not controls and "\ufffd" not in markdown, checks
-            assert not missing, "Removing bad glyphs cannot replace recovery of the visible Japanese"
+            assert not missing, (
+                "Removing bad glyphs cannot replace recovery of the visible Japanese"
+            )
             assert report["result"]["status"] == "complete", report
         _reparse(config, initialized_db, name, blocked)
 
@@ -203,18 +209,25 @@ class TestNtaPdfBody:
         positions = [body.find(normalized(clause)) for clause in clauses]
         continuation = "リースがファイナンス・リースに該当するかどうかの具体的な判定基準については"
         checks = {
-            "explicitly_blocked": blocked, "row_count": len(rows),
-            "commentary_boundary": boundary, "boxed_clause_positions": positions,
-            "boxed_clauses_before_commentary": all(0 <= position < boundary for position in positions),
+            "explicitly_blocked": blocked,
+            "row_count": len(rows),
+            "commentary_boundary": boundary,
+            "boxed_clause_positions": positions,
+            "boxed_clauses_before_commentary": all(
+                0 <= position < boundary for position in positions
+            ),
             "boxed_clauses_in_order": positions == sorted(positions),
             "commentary_sentence_contiguous": normalized(continuation) in body,
-            "last_page_body_present": normalized("本通達の注書２において明らかにしている。") in body,
+            "last_page_body_present": normalized("本通達の注書２において明らかにしている。")
+            in body,
         }
         _save_checks(name, checks)
         if not blocked:
             assert len(rows) == 1, report
             assert checks["boxed_clauses_before_commentary"], checks
-            assert checks["boxed_clauses_in_order"] and checks["commentary_sentence_contiguous"], checks
+            assert checks["boxed_clauses_in_order"] and checks["commentary_sentence_contiguous"], (
+                checks
+            )
             assert checks["last_page_body_present"], checks
             assert report["result"]["status"] == "complete", report
         _reparse(config, initialized_db, name, blocked)

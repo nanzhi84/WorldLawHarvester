@@ -144,9 +144,7 @@ def _should_prune_candidate_url(
     cand_path = parts.path or "/"
     cand_route = f"{cand_path}?{parts.query}" if parts.query else cand_path
     if cand_path.lower().endswith("/hot/addhotlaw.ashx") and parts.query:
-        m_pcode = re.search(
-            r"(?:^|&)pcode=([A-Za-z0-9]+)", parts.query, flags=re.IGNORECASE
-        )
+        m_pcode = re.search(r"(?:^|&)pcode=([A-Za-z0-9]+)", parts.query, flags=re.IGNORECASE)
         if m_pcode:
             cand_path = "/LawClass/LawAll.aspx"
             cand_route = f"{cand_path}?pcode={m_pcode.group(1)}"
@@ -193,16 +191,13 @@ def _should_prune_candidate_url(
     ):
         return True
     if allowed_prefixes and any(
-        cand_path.startswith(pref) or cand_path == pref.rstrip("/")
-        for pref in allowed_prefixes
+        cand_path.startswith(pref) or cand_path == pref.rstrip("/") for pref in allowed_prefixes
     ):
         return True
     return False
 
 
-def _prune_ecfr_children(
-    nodes: list[Any], exported_part_queries: set[str]
-) -> list[dict[str, Any]]:
+def _prune_ecfr_children(nodes: list[Any], exported_part_queries: set[str]) -> list[dict[str, Any]]:
     kept: list[dict[str, Any]] = []
     for raw_node in nodes:
         if not isinstance(raw_node, dict):
@@ -306,9 +301,8 @@ def _prune_unselected_links(
                         item_json = json.dumps(item_dict, ensure_ascii=False)
                         dec_id = item_dict.get("decision_id")
                         if (
-                            (isinstance(dec_id, str) and f"/api/decisions/{dec_id}" in exported_paths)
-                            or any(tok and tok in item_json for tok in match_tokens)
-                        ):
+                            isinstance(dec_id, str) and f"/api/decisions/{dec_id}" in exported_paths
+                        ) or any(tok and tok in item_json for tok in match_tokens):
                             filtered_results.append(item_dict)
                     if filtered_results:
                         payload_dict["results"] = filtered_results
@@ -349,7 +343,10 @@ def _prune_unselected_links(
                         ]
                         return json.dumps(payload_dict, ensure_ascii=False, indent=2)
 
-                if isinstance(payload_dict.get("children"), list) and payload_dict.get("type") == "title":
+                if (
+                    isinstance(payload_dict.get("children"), list)
+                    and payload_dict.get("type") == "title"
+                ):
                     exported_part_queries = {
                         f"?{urlsplit(p).query}"
                         for p in exported_paths
@@ -620,7 +617,8 @@ def export_source_fixture(
                     )
                     if isinstance(doc_obj, Mapping):
                         for d_entry in cast(
-                            Sequence[Any], cast(Mapping[str, Any], doc_obj).get("deliverables") or ()
+                            Sequence[Any],
+                            cast(Mapping[str, Any], doc_obj).get("deliverables") or (),
                         ):
                             if isinstance(d_entry, Mapping):
                                 q_rep = cast(Mapping[str, Any], d_entry).get("quality_report")
@@ -677,9 +675,7 @@ def export_source_fixture(
         if len(native_pool) >= max_resources:
             candidate_pool = native_pool
 
-        stratified_obs = stratify_verification_samples(
-            candidate_pool, max_items=max_resources
-        )
+        stratified_obs = stratify_verification_samples(candidate_pool, max_items=max_resources)
         selected_obs_ids = {str(item["obs_id"]) for item in stratified_obs}
         samples_meta: list[dict[str, Any]] = []
         sampling_strata: list[str] = []
@@ -835,7 +831,7 @@ def export_source_fixture(
         if "html" not in m_type and "xml" not in m_type:
             continue
         if any(
-             token in m_type
+            token in m_type
             for token in ("officedocument", "openxmlformats", "msword", "ms-excel", "pdf", "zip")
         ):
             continue
@@ -921,9 +917,7 @@ def export_source_fixture(
             and not re.search(att_pat_str, eff_url, re.I)
             and route_path.lower().endswith(".pdf")
             and route_path not in entry_paths
-            and not any(
-                p.search(eff_url) or p.search(route_path) for p in detail_patterns
-            )
+            and not any(p.search(eff_url) or p.search(route_path) for p in detail_patterns)
         ):
             continue
 
@@ -935,9 +929,7 @@ def export_source_fixture(
             or route_path in bfs_selected_paths
         )
         is_unselected_ev = (
-            aid in unselected_acq_ids
-            and not is_selected
-            and route_path not in entry_paths
+            aid in unselected_acq_ids and not is_selected and route_path not in entry_paths
         )
         is_unselected_branch = (
             has_selected_parent_links and not is_selected and route_path not in entry_paths
@@ -968,10 +960,7 @@ def export_source_fixture(
             )
         )
         if selected_obs_ids and (
-            is_unselected_ev
-            or is_unselected_detail
-            or is_unselected_branch
-            or is_unselected_nav
+            is_unselected_ev or is_unselected_detail or is_unselected_branch or is_unselected_nav
         ):
             unselected_paths.add(route_path)
             continue
@@ -1000,7 +989,9 @@ def export_source_fixture(
 
     exported_paths = set(ordered_paths)
     unselected_paths -= exported_paths
-    selected_sample_urls = {str(s.get("public_url") or "") for s in samples_meta if s.get("public_url")}
+    selected_sample_urls = {
+        str(s.get("public_url") or "") for s in samples_meta if s.get("public_url")
+    }
 
     routes: list[dict[str, Any]] = []
     file_index = 1
@@ -1389,4 +1380,3 @@ class FixtureRouter:
                 payload = payload.replace(f"https://{host}".encode("utf-8"), origin_bytes)
                 payload = payload.replace(f"http://{host}".encode("utf-8"), origin_bytes)
         return 200, media, payload
-

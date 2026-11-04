@@ -181,9 +181,8 @@ def ensure_test_db_and_bucket(env: dict[str, str]) -> None:
             ).fetchall()
         ]
         for existing_db in all_dbs:
-            if (
-                existing_db not in ALLOWED_POSTGRES_DATABASES
-                and not _TEST_DB_NAME_RE.match(existing_db)
+            if existing_db not in ALLOWED_POSTGRES_DATABASES and not _TEST_DB_NAME_RE.match(
+                existing_db
             ):
                 conn.execute(
                     sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
@@ -201,10 +200,7 @@ def ensure_test_db_and_bucket(env: dict[str, str]) -> None:
         aws_secret_access_key=env["WLH_S3_SECRET_KEY"],
         region_name=env["WLH_S3_REGION"],
     )
-    existing_buckets = {
-        str(b.get("Name", ""))
-        for b in s3_client.list_buckets().get("Buckets", [])
-    }
+    existing_buckets = {str(b.get("Name", "")) for b in s3_client.list_buckets().get("Buckets", [])}
     for existing_bucket in sorted(existing_buckets):
         if existing_bucket and existing_bucket not in ALLOWED_S3_BUCKETS:
             paginator = s3_client.get_paginator("list_objects_v2")
@@ -351,13 +347,9 @@ def initialized_db(wlh_env: dict[str, str]) -> Generator[dict[str, str], None, N
 
     db_name = urlsplit(wlh_env["WLH_DATABASE_URL"]).path.lstrip("/")
     if not (
-        _TEST_DB_NAME_RE.match(db_name)
-        or db_name.endswith("_test")
-        or db_name.startswith("test_")
+        _TEST_DB_NAME_RE.match(db_name) or db_name.endswith("_test") or db_name.startswith("test_")
     ):
-        raise RuntimeError(
-            f"Refusing to reset schema on non-test database: {db_name!r}"
-        )
+        raise RuntimeError(f"Refusing to reset schema on non-test database: {db_name!r}")
 
     _close_pooled_connections()
     needs_ddl_init = False
@@ -466,4 +458,3 @@ def run_wlh_cli(*args: str, env: dict[str, str] | None = None) -> tuple[int, str
         timeout=120,
     )
     return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
-

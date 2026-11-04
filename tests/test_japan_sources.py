@@ -43,21 +43,32 @@ def _egov_routes(*, truncated: bool = False) -> dict[str, tuple[bytes, str]]:
         "/api/2/laws?offset=0": (json.dumps(first).encode(), "application/json"),
         "/api/2/laws?offset=1": (json.dumps(terminal).encode(), "application/json"),
     }
-    for record, filename in zip(records, ["lawdata-v2-108DF0000000054.json", "lawdata-v2-pending.json"]):
+    for record, filename in zip(
+        records, ["lawdata-v2-108DF0000000054.json", "lawdata-v2-pending.json"]
+    ):
         routes[f"/api/2/law_data/{record['revision_info']['law_revision_id']}"] = (
-            (directory / filename).read_bytes(), "application/json"
+            (directory / filename).read_bytes(),
+            "application/json",
         )
     return routes
 
 
 class TestJapanLegislationCatalog:
-    @pytest.mark.parametrize(("filename", "wrong_word", "legal_word", "reading"), [
-        ("lawdata-v2-ruby-annotation.json", "隧ずい道", "隧道", "ずい"),
-        ("lawdata-v2-school-table.json", "へヽきヽ", "へき", None),
-    ])
+    @pytest.mark.parametrize(
+        ("filename", "wrong_word", "legal_word", "reading"),
+        [
+            ("lawdata-v2-ruby-annotation.json", "隧ずい道", "隧道", "ずい"),
+            ("lawdata-v2-school-table.json", "へヽきヽ", "へき", None),
+        ],
+    )
     def test_reading_annotations_and_amending_law_labels_preserve_legal_meaning(
-        self, initialized_db: dict[str, str], tmp_path: Path,
-        filename: str, wrong_word: str, legal_word: str, reading: str | None,
+        self,
+        initialized_db: dict[str, str],
+        tmp_path: Path,
+        filename: str,
+        wrong_word: str,
+        legal_word: str,
+        reading: str | None,
     ) -> None:
         """Real Ruby readings/emphasis must not be concatenated into legal words.
 
@@ -71,36 +82,62 @@ class TestJapanLegislationCatalog:
         record = {k: official[k] for k in ("law_info", "revision_info")}
         routes = {
             "/": ((directory / "egov-home.html").read_bytes(), "text/html"),
-            "/api/2/laws?offset=0": (json.dumps({"total_count": 1, "count": 1, "laws": [record]}).encode(), "application/json"),
-            f"/api/2/law_data/{record['revision_info']['law_revision_id']}": (payload, "application/json"),
+            "/api/2/laws?offset=0": (
+                json.dumps({"total_count": 1, "count": 1, "laws": [record]}).encode(),
+                "application/json",
+            ),
+            f"/api/2/law_data/{record['revision_info']['law_revision_id']}": (
+                payload,
+                "application/json",
+            ),
         }
         with source_server(routes, ["laws.e-gov.go.jp"]) as (origin, requests):
             config = replay_config("dd-517", origin, tmp_path)
             report, rows = collect_artifact("dd-517", config, initialized_db, name, requests)
             assert len(rows) == 1, report
             markdown = rows[0]["markdown"]
-            assert wrong_word not in markdown, "Ruby annotation was inserted into the operative word"
+            assert wrong_word not in markdown, (
+                "Ruby annotation was inserted into the operative word"
+            )
             base = re.sub(r"<rt[^>]*>.*?</rt>", "", markdown, flags=re.S)
             if reading:
-                assert reading in markdown, "The reading annotation must remain available separately"
+                assert reading in markdown, (
+                    "The reading annotation must remain available separately"
+                )
                 base = base.replace(f"（{reading}）", "").replace(f"({reading})", "")
             base = re.sub(r"<[^>]+>", "", base)
             assert legal_word in normalized(base)
             tree = ElementTree.fromstring(base64.b64decode(official["law_full_text"]))
-            amendments = [p.get("AmendLawNum") for p in tree.findall(".//SupplProvision") if p.get("AmendLawNum")]
+            amendments = [
+                p.get("AmendLawNum")
+                for p in tree.findall(".//SupplProvision")
+                if p.get("AmendLawNum")
+            ]
             lines = markdown.splitlines()
-            contexts = "\n".join("\n".join(lines[i:i + 3]) for i, line in enumerate(lines) if "附則" in normalized(line))
+            contexts = "\n".join(
+                "\n".join(lines[i : i + 3])
+                for i, line in enumerate(lines)
+                if "附則" in normalized(line)
+            )
             assert amendments
             for amendment in amendments:
-                assert amendment is not None and normalized(amendment) in normalized(contexts), amendment
+                assert amendment is not None and normalized(amendment) in normalized(contexts), (
+                    amendment
+                )
             assert report["result"]["status"] == "complete", report
         assert_offline_reparse(config, initialized_db, name)
 
-    @pytest.mark.parametrize(("filename", "clause"), [
-        ("conflicting-enforcement", "この法律は、昭和四十二年六月一日から施行する。"),
-        ("standard-time", "明治二十一年一月一日ヨリ東経百三十五度ノ子午線ノ時ヲ以テ本邦一般ノ標準時ト定ム"),
-        ("gazette-start", "官報本年七月一日ヨリ発行候条此旨相達候事"),
-    ])
+    @pytest.mark.parametrize(
+        ("filename", "clause"),
+        [
+            ("conflicting-enforcement", "この法律は、昭和四十二年六月一日から施行する。"),
+            (
+                "standard-time",
+                "明治二十一年一月一日ヨリ東経百三十五度ノ子午線ノ時ヲ以テ本邦一般ノ標準時ト定ム",
+            ),
+            ("gazette-start", "官報本年七月一日ヨリ発行候条此旨相達候事"),
+        ],
+    )
     def test_law_metadata_conflicting_with_explicit_commencement_clause_leaves_date_unknown(
         self, initialized_db: dict[str, str], tmp_path: Path, filename: str, clause: str
     ) -> None:
@@ -121,7 +158,8 @@ class TestJapanLegislationCatalog:
                 "application/json",
             ),
             f"/api/2/law_data/{record['revision_info']['law_revision_id']}": (
-                payload, "application/json"
+                payload,
+                "application/json",
             ),
         }
         with source_server(routes, ["laws.e-gov.go.jp"]) as (origin, requests):
@@ -129,7 +167,9 @@ class TestJapanLegislationCatalog:
             report, rows = collect_artifact("dd-517", config, initialized_db, name, requests)
             assert len(rows) == 1, report
             assert clause in rows[0]["markdown"]
-            assert rows[0]["effective_at"] is None, "Conflicting metadata cannot certify legal effect"
+            assert rows[0]["effective_at"] is None, (
+                "Conflicting metadata cannot certify legal effect"
+            )
             assert str(rows[0]["published_at"]) == official["law_info"]["promulgation_date"]
             assert report["result"]["status"] == "complete", report
         assert_offline_reparse(config, initialized_db, name)
@@ -160,7 +200,9 @@ class TestJapanLegislationCatalog:
                 assert not missing, f"Official law sentences lost: {missing[:3]}"
                 assert str(law["published_at"]) == official["law_info"]["promulgation_date"]
                 expected_effect = official["revision_info"]["amendment_enforcement_date"]
-                assert (str(law["effective_at"]) if law["effective_at"] else None) == expected_effect
+                assert (
+                    str(law["effective_at"]) if law["effective_at"] else None
+                ) == expected_effect
                 assert "\ufffd" not in law["markdown"]
             assert any("offset=1" in path for path in requests), requests
             assert report["result"]["status"] == "complete", report
@@ -171,7 +213,10 @@ class TestJapanLegislationCatalog:
     ) -> None:
         """A synthetically interrupted catalog preserves count evidence and cannot claim full success."""
         name = "japan-legislation-truncated"
-        with source_server(_egov_routes(truncated=True), ["laws.e-gov.go.jp"]) as (origin, requests):
+        with source_server(_egov_routes(truncated=True), ["laws.e-gov.go.jp"]) as (
+            origin,
+            requests,
+        ):
             config = replay_config("dd-517", origin, tmp_path)
             report, _rows = collect_artifact("dd-517", config, initialized_db, name, requests)
             assert any(path.startswith("/api/2/laws") for path in requests), requests
@@ -192,10 +237,13 @@ class TestJapanTaxAppealCatalog:
         name = "japan-ruling-required-images"
         directory = ROOT / "tests" / "fixtures" / "dd-582"
         base = "/service/JP/55/01/"
-        routes = {base + "index.html": ((directory / "kfs-case-55-01.html").read_bytes(), "text/html")}
+        routes = {
+            base + "index.html": ((directory / "kfs-case-55-01.html").read_bytes(), "text/html")
+        }
         for number in range(1, 5):
             routes[base + f"{number:02}.html"] = (
-                (directory / f"kfs-case-55-01-{number:02}.html").read_bytes(), "text/html"
+                (directory / f"kfs-case-55-01-{number:02}.html").read_bytes(),
+                "text/html",
             )
         with source_server(routes, ["www.kfs.go.jp"]) as (origin, requests):
             config = tmp_path / "dd-946.yaml"
@@ -207,7 +255,12 @@ class TestJapanTaxAppealCatalog:
                     "allowed_hosts": ["127.0.0.1"],
                     "allowed_path_prefixes": [base],
                     "max_depth": 2,
-                    "budget": {"requests": 20, "documents": 10, "seconds": 60, "response_bytes": 10485760},
+                    "budget": {
+                        "requests": 20,
+                        "documents": 10,
+                        "seconds": 60,
+                        "response_bytes": 10485760,
+                    },
                 },
                 "fetcher": {"mode": "http", "delay": 0.0, "retries": 0, "robots": False},
                 "processor": {
@@ -235,7 +288,9 @@ class TestJapanTaxAppealCatalog:
             }
             config.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
             report, rows = collect_artifact("dd-946", config, initialized_db, name, requests)
-            assert {base + "index.html", *(base + f"{n:02}.html" for n in range(1, 5))} <= set(requests)
+            assert {base + "index.html", *(base + f"{n:02}.html" for n in range(1, 5))} <= set(
+                requests
+            )
             assert report["result"].get("status") != "complete", report
             assert rows == [], "Missing substantive figure annexes cannot commit a complete ruling"
             assert "html_images_unverified" in json.dumps(report, ensure_ascii=False)
@@ -250,11 +305,16 @@ class TestJapanTaxAppealCatalog:
         one decision's date as the effect date of a multi-case digest.
         """
         name = "japan-tax-appeal-catalog"
-        with source_server(recorded_scope_routes("dd-582"), ["www.kfs.go.jp"]) as (origin, requests):
+        with source_server(recorded_scope_routes("dd-582"), ["www.kfs.go.jp"]) as (
+            origin,
+            requests,
+        ):
             config = replay_config("dd-582", origin, tmp_path)
             report, rows = collect_artifact("dd-582", config, initialized_db, name, requests)
             suffixes = ["/JP/43/01/index.html", "/JP/142/01/index.html", "/MP/01/0101000000.html"]
-            selected = [next((r for r in rows if r["detail_url"].endswith(s)), None) for s in suffixes]
+            selected = [
+                next((r for r in rows if r["detail_url"].endswith(s)), None) for s in suffixes
+            ]
             assert all(selected), report
             for row in rows:
                 assert row["effective_at"] is None
@@ -265,7 +325,9 @@ class TestJapanTaxAppealCatalog:
             assert early is not None and recent is not None and digest is not None
             assert str(early["published_at"]) == "1992-02-24"
             assert str(recent["published_at"]) == "2026-03-04"
-            assert "当審判所の調査によってもこれを不相当とする理由は認められない" in early["markdown"]
+            assert (
+                "当審判所の調査によってもこれを不相当とする理由は認められない" in early["markdown"]
+            )
             assert "ロードサービス業" in recent["markdown"]
             assert "要旨" in digest["title"]
             assert digest["published_at"] is None
@@ -291,8 +353,13 @@ class TestJapanTaxGuidanceCatalog:
         """
         name = "japan-vertical-tax-form"
         path = "/law/jimu-unei/shotoku/shinkoku/170331/besshi04.pdf"
-        payload = (ROOT / "tests" / "fixtures" / "dd-520" / "nta-jimu-attachment-04.pdf").read_bytes()
-        with source_server({path: (payload, "application/pdf")}, ["www.nta.go.jp"]) as (origin, requests):
+        payload = (
+            ROOT / "tests" / "fixtures" / "dd-520" / "nta-jimu-attachment-04.pdf"
+        ).read_bytes()
+        with source_server({path: (payload, "application/pdf")}, ["www.nta.go.jp"]) as (
+            origin,
+            requests,
+        ):
             config = tmp_path / "dd-945.yaml"
             cfg = {
                 "id": "dd-945",
@@ -302,7 +369,12 @@ class TestJapanTaxGuidanceCatalog:
                     "allowed_hosts": ["127.0.0.1"],
                     "allowed_path_prefixes": ["/law/"],
                     "max_depth": 1,
-                    "budget": {"requests": 4, "documents": 2, "seconds": 60, "response_bytes": 10485760},
+                    "budget": {
+                        "requests": 4,
+                        "documents": 2,
+                        "seconds": 60,
+                        "response_bytes": 10485760,
+                    },
                 },
                 "fetcher": {"mode": "http", "delay": 0.0, "retries": 0, "robots": False},
                 "processor": {
@@ -327,7 +399,9 @@ class TestJapanTaxGuidanceCatalog:
             assert path in requests, report
             assert report["result"].get("status") != "complete", report
             assert rows == [], "Unverified form layout must not become the current legal document"
-            assert {"pdf_layout_unverified", "pdf_images_unverified"}.intersection(report["result"].get("errors", [])), report
+            assert {"pdf_layout_unverified", "pdf_images_unverified"}.intersection(
+                report["result"].get("errors", [])
+            ), report
 
     def test_official_tax_guidance_branches_preserve_answers_tables_and_referenced_text(
         self, initialized_db: dict[str, str], tmp_path: Path
@@ -338,24 +412,39 @@ class TestJapanTaxGuidanceCatalog:
         table cells and final qualifications are externally visible contract content.
         """
         name = "japan-tax-guidance-catalog"
-        with source_server(recorded_scope_routes("dd-520"), ["www.nta.go.jp"]) as (origin, requests):
+        with source_server(recorded_scope_routes("dd-520"), ["www.nta.go.jp"]) as (
+            origin,
+            requests,
+        ):
             config = replay_config("dd-520", origin, tmp_path)
             report, rows = collect_artifact("dd-520", config, initialized_db, name, requests)
             directory_paths = {
-                "/law/index.htm", "/law/tsutatsu/menu.htm",
-                "/law/bunshokaito/01.htm", "/law/shitsugi/01.htm",
+                "/law/index.htm",
+                "/law/tsutatsu/menu.htm",
+                "/law/bunshokaito/01.htm",
+                "/law/shitsugi/01.htm",
                 "/about/organization/tokyo/bunshokaito/index.htm",
-                "/law/tsutatsu/kihon/shotoku/01.htm", "/law/tsutatsu/kihon/kihatsu/01.htm",
+                "/law/tsutatsu/kihon/shotoku/01.htm",
+                "/law/tsutatsu/kihon/kihatsu/01.htm",
                 "/law/joho-zeikaishaku/sonota/sonota.htm",
                 "/law/joho-zeikaishaku/shotoku/shinkoku/shinkoku.htm",
-                "/law/jimu-unei/jimu.htm", "/law/kokuji/kokuji.htm",
-                "/law/bunshokaito/shotoku/02.htm", "/law/bunshokaito/gensen/03.htm",
+                "/law/jimu-unei/jimu.htm",
+                "/law/kokuji/kokuji.htm",
+                "/law/bunshokaito/shotoku/02.htm",
+                "/law/bunshokaito/gensen/03.htm",
                 "/law/shitsugi/shotoku/01.htm",
             }
-            assert not directory_paths.intersection(urlsplit(str(row["detail_url"])).path for row in rows), (
-                "Tax navigation and case directories cannot be delivered as substantive guidance"
-            )
-            branches = ["/tsutatsu/", "/jimu-unei/", "/kokuji/", "/bunshokaito/", "/shitsugi/", "/joho-zeikaishaku/"]
+            assert not directory_paths.intersection(
+                urlsplit(str(row["detail_url"])).path for row in rows
+            ), "Tax navigation and case directories cannot be delivered as substantive guidance"
+            branches = [
+                "/tsutatsu/",
+                "/jimu-unei/",
+                "/kokuji/",
+                "/bunshokaito/",
+                "/shitsugi/",
+                "/joho-zeikaishaku/",
+            ]
             for branch in branches:
                 assert any(branch in row["detail_url"] for row in rows), (branch, report)
             joined = "\n".join(row["markdown"] for row in rows)
@@ -368,23 +457,31 @@ class TestJapanTaxGuidanceCatalog:
             assert "外交官として国内に居住していた期間も含めて判定" in answer["markdown"]
             notice = next(row for row in rows if "/kokuji/r0810/02.htm" in row["detail_url"])
             assert "岡崎税務署" in notice["markdown"]
-            assert normalized("愛知県岡崎市羽根二丁目2番地1岡崎合同庁舎") in normalized(notice["markdown"])
+            assert normalized("愛知県岡崎市羽根二丁目2番地1岡崎合同庁舎") in normalized(
+                notice["markdown"]
+            )
             table = rendered_table_rows(
                 notice["markdown"],
                 lambda cell: normalized(unescape(re.sub(r"<[^>]+>", "", cell))),
             )
-            assert any(len(row) == 8 and row[2] == normalized("愛知県岡崎市羽根二丁目2番地1岡崎合同庁舎")
-                       and row[6] == normalized("愛知県岡崎市羽根町字北乾地50‐1岡崎合同庁舎") for row in table), (
-                "The new address belongs under 改正後 and the old address under 改正前"
-            )
+            assert any(
+                len(row) == 8
+                and row[2] == normalized("愛知県岡崎市羽根二丁目2番地1岡崎合同庁舎")
+                and row[6] == normalized("愛知県岡崎市羽根町字北乾地50‐1岡崎合同庁舎")
+                for row in table
+            ), "The new address belongs under 改正後 and the old address under 改正前"
             assert "この回答内容は国税庁としての見解" in joined
             assert "産科医療特別給付事業" in joined
-            assert any("another.htm" in path for path in requests), "Referenced written question was not fetched"
+            assert any("another.htm" in path for path in requests), (
+                "Referenced written question was not fetched"
+            )
             assert any("/tokyo/bunshokaito/" in row["detail_url"] for row in rows)
             assert not any(row["detail_url"].endswith("170331/index.htm") for row in rows), (
                 "The parent guidance cannot deliver successfully when its required form is unverified"
             )
-            assert {"pdf_layout_unverified", "pdf_images_unverified"}.intersection(report["result"].get("errors", [])), report
+            assert {"pdf_layout_unverified", "pdf_images_unverified"}.intersection(
+                report["result"].get("errors", [])
+            ), report
             assert report["result"]["status"] != "complete", report
             assert not report["result"]["report"]["counts"].get("request_failed"), report
         assert_offline_reparse(config, initialized_db, name)
@@ -547,7 +644,9 @@ class TestJapanOfficialGazetteAndTaxPdfContracts:
         assert "0.7" in markdown
         assert "375.70" in markdown
         assert "368.90" in markdown
-        assert markdown.index("【条件】") < markdown.index("イ 無議決権株式及び議決権のある株式の評価")
+        assert markdown.index("【条件】") < markdown.index(
+            "イ 無議決権株式及び議決権のある株式の評価"
+        )
 
     def test_small_scale_residential_land_pdf_orders_inheritance_diagram_before_answer_and_keeps_cross_page_sentence(
         self, tmp_path: Path
@@ -592,14 +691,17 @@ class TestJapanOfficialGazetteAndTaxPdfContracts:
         rows = rendered_table_rows(markdown, normalized)
         assert len(rows) >= 6
         first_period_rows = [
-            idx for idx, row in enumerate(rows)
-            if any("5年以下のもの" in cell for cell in row) and any("100分の10" in cell for cell in row)
+            idx
+            for idx, row in enumerate(rows)
+            if any("5年以下のもの" in cell for cell in row)
+            and any("100分の10" in cell for cell in row)
         ]
         later_period_rows = [
-            idx for idx, row in enumerate(rows)
-            if any("25年を超え30年以下のもの" in cell for cell in row) and any("100分の35" in cell for cell in row)
+            idx
+            for idx, row in enumerate(rows)
+            if any("25年を超え30年以下のもの" in cell for cell in row)
+            and any("100分の35" in cell for cell in row)
         ]
         assert first_period_rows
         assert later_period_rows
         assert set(first_period_rows).isdisjoint(later_period_rows)
-

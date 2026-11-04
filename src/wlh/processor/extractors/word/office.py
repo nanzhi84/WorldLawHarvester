@@ -265,7 +265,8 @@ def extract_excel(path: str | Path, kind: str) -> tuple[str, str]:
                 try:
                     for sheet in workbook.worksheets:
                         rows = [
-                            [excel_value(v) for v in row] for row in sheet.iter_rows(values_only=True)
+                            [excel_value(v) for v in row]
+                            for row in sheet.iter_rows(values_only=True)
                         ]
                         sheets.append((sheet.title, rows))
                 finally:
@@ -352,9 +353,7 @@ def unpack_zip(
         with zipfile.ZipFile(path) as archive:
             raw_infos = [i for i in archive.infolist() if not i.is_dir()]
             infos = (
-                filter_redundant_zip_members(raw_infos)
-                if "zip_salvage" in quirks
-                else raw_infos
+                filter_redundant_zip_members(raw_infos) if "zip_salvage" in quirks else raw_infos
             )
             if len(infos) > MAX_ZIP_MEMBERS:
                 raise WlhError("zip_member_limit_exceeded")
@@ -458,7 +457,10 @@ def extract_office(
                         import pymupdf as _fitz  # type: ignore[import-untyped]
 
                         fitz_mod: Any = _fitz
-                        with normalized_office_archive(path) as handle, zipfile.ZipFile(handle) as zf:
+                        with (
+                            normalized_office_archive(path) as handle,
+                            zipfile.ZipFile(handle) as zf,
+                        ):
                             media_names = sorted(
                                 name
                                 for name in zf.namelist()

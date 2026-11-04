@@ -172,10 +172,7 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
                             and float(r.y1) <= float(rect.height) * 0.30
                         ):
                             continue
-                        if is_kanpo_pua_page and (
-                            cov < 0.35
-                            or native >= 500
-                        ):
+                        if is_kanpo_pua_page and (cov < 0.35 or native >= 500):
                             continue
                         if is_kanpo_pua_page:
                             if xref not in overlay_xrefs:
@@ -238,10 +235,7 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
             and float(p["ink_ratio"]) >= SIGNATURE_PAGE_MIN_INK
         )
         suspected = (
-            is_pure_scan
-            or is_signature_scan
-            or is_full_page_appendix_scan
-            or unreadable_body
+            is_pure_scan or is_signature_scan or is_full_page_appendix_scan or unreadable_body
         )
         page_entry: dict[str, Any] = dict(p, suspected_scan=suspected)
         if overlay_xrefs:
@@ -333,20 +327,17 @@ def extract_pdf(
                     for page_no, p_list in ov_pngs_by_page.items()
                     for png_bytes in p_list
                 ]
+
                 def _ocr_overlay(item: tuple[int, bytes]) -> tuple[int, str]:
                     return (
                         item[0],
-                        tesseract_image_bytes(
-                            item[1], languages=ocr_langs, timeout=120.0
-                        ),
+                        tesseract_image_bytes(item[1], languages=ocr_langs, timeout=120.0),
                     )
 
                 with concurrent.futures.ThreadPoolExecutor(
                     max_workers=min(4, len(all_tasks))
                 ) as pool:
-                    ov_results: list[tuple[int, str]] = list(
-                        pool.map(_ocr_overlay, all_tasks)
-                    )
+                    ov_results: list[tuple[int, str]] = list(pool.map(_ocr_overlay, all_tasks))
                 by_p: dict[int, list[str]] = {}
                 for page_no, ov_txt in ov_results:
                     if ov_txt:
@@ -429,4 +420,3 @@ def extract_pdf(
         invalid_body_patterns=invalid_body_patterns,
     )
     return markdown, info, report, parsers
-

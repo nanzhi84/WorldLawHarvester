@@ -56,7 +56,7 @@ def _missing_text(fixture: str, markdown: str, *, ordered: bool = False) -> list
     position = 0
     for node in original.xpath(
         '//*[@id="main"]//text()[not(ancestor::*[@id="pankuzu" or @class="pagetop"])'
-        ' and not(ancestor::script or ancestor::style)]'
+        " and not(ancestor::script or ancestor::style)]"
     ):
         expected = normalized(str(node))
         if not expected:
@@ -98,15 +98,21 @@ def _label_value_representation(cell: Any, expected: list[list[str]]) -> str | N
     """Accept a rendered subtable or explicit equivalent label/value blocks."""
     for table in cell.xpath(".//table"):
         rows = table.xpath("./tr | ./thead/tr | ./tbody/tr | ./tfoot/tr")
-        observed = [[_display_text(c.text_content()) for c in row.xpath("./th | ./td")]
-                    for row in rows]
+        observed = [
+            [_display_text(c.text_content()) for c in row.xpath("./th | ./td")] for row in rows
+        ]
         if observed == expected:
             return "table"
     for definition in cell.xpath(".//dl"):
         entries = definition.xpath("./dt | ./dd")
         if len(entries) == 4 and [e.tag for e in entries] == ["dt", "dd", "dt", "dd"]:
-            observed = [[_display_text(entries[i].text_content()),
-                         _display_text(entries[i + 1].text_content())] for i in (0, 2)]
+            observed = [
+                [
+                    _display_text(entries[i].text_content()),
+                    _display_text(entries[i + 1].text_content()),
+                ]
+                for i in (0, 2)
+            ]
             if observed == expected:
                 return "definition-list"
     for listing in cell.xpath(".//ol | .//ul"):
@@ -134,45 +140,65 @@ class TestKfsContentFidelity:
         outer_tables: list[Any] = []
         for table in rendered.xpath(".//table[not(ancestor::table)]"):
             table_rows = table.xpath("./tr | ./thead/tr | ./tbody/tr")
-            if table_rows and [_display_text(c.text_content())
-                               for c in table_rows[0].xpath("./th | ./td")] == ["請求人", "原処分庁"]:
+            if table_rows and [
+                _display_text(c.text_content()) for c in table_rows[0].xpath("./th | ./td")
+            ] == ["請求人", "原処分庁"]:
                 outer_tables.append(table)
         owners: list[Any] = []
-        left_claim = _display_text("(2) 上記に基づき、請求人の本件猶予申請時における純資産を算定すると")
+        left_claim = _display_text(
+            "(2) 上記に基づき、請求人の本件猶予申請時における純資産を算定すると"
+        )
         for table in outer_tables:
             for row in table.xpath("./tr | ./thead/tr | ./tbody/tr"):
                 cells = row.xpath("./th | ./td")
                 if len(cells) == 2 and left_claim in _display_text(cells[0].text_content()):
                     owners.append(cells[1])
-        expected = [[_display_text(label), _display_text(value)] for label, value in [
-            ("(イ)", "生活維持費等の額 ○○○○円 (○○○○円－○○○○円)"),
-            ("(ロ)", "所要資金の額 ０円 (イ)＋(ロ)＝○○○○円"),
-        ]]
-        representation = _label_value_representation(owners[0], expected) if len(owners) == 1 else None
+        expected = [
+            [_display_text(label), _display_text(value)]
+            for label, value in [
+                ("(イ)", "生活維持費等の額 ○○○○円 (○○○○円－○○○○円)"),
+                ("(ロ)", "所要資金の額 ０円 (イ)＋(ロ)＝○○○○円"),
+            ]
+        ]
+        representation = (
+            _label_value_representation(owners[0], expected) if len(owners) == 1 else None
+        )
         owner_text = _display_text(owners[0].text_content()) if len(owners) == 1 else ""
         markers = [
             "(3) 以上の事実に基づき、猶予取扱要領に従って計算すると",
-            "イ 当座資金の額 ○○○○円", "ロ つなぎ資金の額",
+            "イ 当座資金の額 ○○○○円",
+            "ロ つなぎ資金の額",
             *["".join(pair) for pair in expected],
             "ハ 現在納付可能資金額（イ－ロ）○○○○円",
-            "ニ 本件猶予申請に係る国税の額○○○○円及び未確定延滞税", "ホ 納付困難な額（ニ－ハ）０円",
+            "ニ 本件猶予申請に係る国税の額○○○○円及び未確定延滞税",
+            "ホ 納付困難な額（ニ－ハ）０円",
         ]
         positions = [owner_text.find(_display_text(marker)) for marker in markers]
         missing = _missing_text("JP-137-08-index.html", markdown, ordered=True)
-        checks.update({
-            "complete_original_delivered_successfully": report["exit_code"] == 0 and len(rows) == 1,
-            "offline_reparse_successful": report["offline"]["exit_code"] == 0,
-            "outer_party_comparison_kept": len(outer_tables) == 1,
-            "calculation_belongs_to_original_authority_claim_cell": len(owners) == 1,
-            "both_inner_label_value_rows_explicitly_structured": representation is not None,
-            "calculation_order_keeps_inner_rows_between_ro_and_ha": all(p >= 0 for p in positions)
-            and positions == sorted(positions),
-            "no_table_delimiters_masquerade_as_legal_text": "|" not in owner_text,
-            "all_original_body_words_preserved_in_order": not missing,
-        })
-        _receipt(name, checks, accepted_representation=representation,
-                 expected_inner_rows=expected, calculation_positions=positions,
-                 missing_or_reordered_body_text=missing)
+        checks.update(
+            {
+                "complete_original_delivered_successfully": report["exit_code"] == 0
+                and len(rows) == 1,
+                "offline_reparse_successful": report["offline"]["exit_code"] == 0,
+                "outer_party_comparison_kept": len(outer_tables) == 1,
+                "calculation_belongs_to_original_authority_claim_cell": len(owners) == 1,
+                "both_inner_label_value_rows_explicitly_structured": representation is not None,
+                "calculation_order_keeps_inner_rows_between_ro_and_ha": all(
+                    p >= 0 for p in positions
+                )
+                and positions == sorted(positions),
+                "no_table_delimiters_masquerade_as_legal_text": "|" not in owner_text,
+                "all_original_body_words_preserved_in_order": not missing,
+            }
+        )
+        _receipt(
+            name,
+            checks,
+            accepted_representation=representation,
+            expected_inner_rows=expected,
+            calculation_positions=positions,
+            missing_or_reordered_body_text=missing,
+        )
 
     def test_required_direct_child_figure_with_text_sibling_blocks_entire_parent(
         self, initialized_db: dict[str, str], tmp_path: Path
@@ -180,17 +206,20 @@ class TestKfsContentFidelity:
         """The title/alt and successful legal-text annex cannot replace a land diagram."""
         name = "required-figure"
         report, rows, checks = _run("113/13", name, initialized_db, tmp_path)
-        checks.update({
-            "collect_rejects_unverified_figure": report["exit_code"] != 0
-            and report["result"].get("status") != "complete",
-            "entire_parent_has_no_current_rows": not rows,
-            "failure_identifies_unverified_html_image": "html_images_unverified"
-            in json.dumps(report["result"]),
-            "offline_reparse_also_rejects_figure": report["offline"]["exit_code"] != 0
-            and report["offline"]["result"].get("status") != "complete",
-        })
-        _receipt(name, checks, actual_delivered_rows=len(rows),
-                 errors=report["result"].get("errors", []))
+        checks.update(
+            {
+                "collect_rejects_unverified_figure": report["exit_code"] != 0
+                and report["result"].get("status") != "complete",
+                "entire_parent_has_no_current_rows": not rows,
+                "failure_identifies_unverified_html_image": "html_images_unverified"
+                in json.dumps(report["result"]),
+                "offline_reparse_also_rejects_figure": report["offline"]["exit_code"] != 0
+                and report["offline"]["result"].get("status") != "complete",
+            }
+        )
+        _receipt(
+            name, checks, actual_delivered_rows=len(rows), errors=report["result"].get("errors", [])
+        )
 
     def test_caption_and_merged_decision_cells_preserve_each_year_and_tax_item_relationship(
         self, initialized_db: dict[str, str], tmp_path: Path
@@ -208,18 +237,28 @@ class TestKfsContentFidelity:
         tables = [_table_grid(table) for table in rendered.xpath(".//table")]
         title = normalized("審査請求に至る経緯等")
         unit = normalized("（単位：円）")
-        checks.update({
-            "parent_and_annex_delivered_successfully": report["exit_code"] == 0 and len(rows) == 2,
-            "offline_reparse_successful": report["offline"]["exit_code"] == 0,
-            "table_title_preserved": title in normalized(rendered.text_content()),
-            "yen_unit_caption_preserved": unit in normalized(rendered.text_content()),
-            "one_structured_table_delivered": len(tables) == 1,
-        })
+        checks.update(
+            {
+                "parent_and_annex_delivered_successfully": report["exit_code"] == 0
+                and len(rows) == 2,
+                "offline_reparse_successful": report["offline"]["exit_code"] == 0,
+                "table_title_preserved": title in normalized(rendered.text_content()),
+                "yen_unit_caption_preserved": unit in normalized(rendered.text_content()),
+                "one_structured_table_delivered": len(tables) == 1,
+            }
+        )
         grid = tables[0] if len(tables) == 1 else []
-        expected_columns = ["確定申告", "修正申告", "加算税の賦課決定処分",
-                            "更正処分及び賦課決定処分", "異議申立て", "異議決定"]
+        expected_columns = [
+            "確定申告",
+            "修正申告",
+            "加算税の賦課決定処分",
+            "更正処分及び賦課決定処分",
+            "異議申立て",
+            "異議決定",
+        ]
         checks["shared_item_heading_and_decision_columns_preserved"] = bool(grid) and (
-            grid[0][0] == "年分" and grid[0][1:-6] in (["区分項目"], ["区分項目", "区分項目"])
+            grid[0][0] == "年分"
+            and grid[0][1:-6] in (["区分項目"], ["区分項目", "区分項目"])
             and grid[0][-6:] == expected_columns
         )
         relationships: list[dict[str, Any]] = []
@@ -231,8 +270,14 @@ class TestKfsContentFidelity:
                 checks[f"{year}_{item}_shared_item_columns_explicit"] = len(matching) == 1 and (
                     matching[0][1:-6] in ([normalized(item)], [normalized(item), normalized(item)])
                 )
-                relationships.append({"year": year, "item": item, "observed_rows": matching,
-                                      "expected_last_columns": ["全部取り消し", "棄却"]})
+                relationships.append(
+                    {
+                        "year": year,
+                        "item": item,
+                        "observed_rows": matching,
+                        "expected_last_columns": ["全部取り消し", "棄却"],
+                    }
+                )
         _receipt(name, checks, rendered_grid=grid, relationships=relationships)
 
     @pytest.mark.parametrize("body_control", [False, True], ids=["original", "body-word-control"])
@@ -241,20 +286,33 @@ class TestKfsContentFidelity:
     ) -> None:
         """The control adds one disclosed ordinary paragraph; original body remains full."""
         name = "navigation-body-control" if body_control else "navigation"
-        report, rows, checks = _run("106/06", name, initialized_db, tmp_path, body_control=body_control)
+        report, rows, checks = _run(
+            "106/06", name, initialized_db, tmp_path, body_control=body_control
+        )
         markdown = _annex(rows, "/106/06/bessi.html")
         actual = normalized(_dom(markdown).text_content())
         missing = _missing_text("JP-106-06-bessi.html", markdown)
         parent = _annex(rows, "/106/06/index.html")
         missing_parent = _missing_text("JP-106-06-index.html", parent)
-        checks.update({
-            "parent_and_annex_delivered_successfully": report["exit_code"] == 0 and len(rows) == 2,
-            "offline_reparse_successful": report["offline"]["exit_code"] == 0,
-            "original_annex_body_words_preserved": not missing,
-            "original_parent_body_words_preserved": not missing_parent,
-            "only_substantive_occurrence_of_return_words_remains": actual.count(
-                normalized("トップに戻る")) == int(body_control),
-            "synthetic_body_phrase_preserved": not body_control or normalized(BODY_CONTROL) in actual,
-        })
-        _receipt(name, checks, missing_annex_text=missing, missing_parent_text=missing_parent,
-                 return_word_occurrences=actual.count(normalized("トップに戻る")))
+        checks.update(
+            {
+                "parent_and_annex_delivered_successfully": report["exit_code"] == 0
+                and len(rows) == 2,
+                "offline_reparse_successful": report["offline"]["exit_code"] == 0,
+                "original_annex_body_words_preserved": not missing,
+                "original_parent_body_words_preserved": not missing_parent,
+                "only_substantive_occurrence_of_return_words_remains": actual.count(
+                    normalized("トップに戻る")
+                )
+                == int(body_control),
+                "synthetic_body_phrase_preserved": not body_control
+                or normalized(BODY_CONTROL) in actual,
+            }
+        )
+        _receipt(
+            name,
+            checks,
+            missing_annex_text=missing,
+            missing_parent_text=missing_parent,
+            return_word_occurrences=actual.count(normalized("トップに戻る")),
+        )

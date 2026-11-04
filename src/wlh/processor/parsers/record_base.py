@@ -128,9 +128,7 @@ def _budget_response_bytes(config: Mapping[str, Any]) -> int:
     if isinstance(sched, Mapping):
         sched_map = cast(Mapping[str, Any], sched)
         if isinstance(sched_map.get("budget"), Mapping):
-            return int(
-                cast(Mapping[str, Any], sched_map["budget"]).get("response_bytes", 15000000)
-            )
+            return int(cast(Mapping[str, Any], sched_map["budget"]).get("response_bytes", 15000000))
     budget = config.get("budget")
     if isinstance(budget, Mapping):
         return int(cast(Mapping[str, Any], budget).get("response_bytes", 15000000))
@@ -268,7 +266,9 @@ class RecordAdapter(Base):
             raise WlhError("bridge_record_identity_ambiguous")
         index, record = matches[0]
         url: str = target["identity"]["public_url"]
-        ns: str = str(record.get("namespace") or target["identity"].get("namespace") or self.NAMESPACE)
+        ns: str = str(
+            record.get("namespace") or target["identity"].get("namespace") or self.NAMESPACE
+        )
         lineage: list[dict[str, Any]] = [
             {
                 "acquisition_id": acquisition["id"],
@@ -293,11 +293,7 @@ class RecordAdapter(Base):
             != "inline_attachment_zip"
         ]
         req_att_srcs = record.get("required_attachment_srcs")
-        if (
-            isinstance(req_att_srcs, list)
-            and req_att_srcs
-            and not record.get("attachment_zip_b64")
-        ):
+        if isinstance(req_att_srcs, list) and req_att_srcs and not record.get("attachment_zip_b64"):
             if not inline_zip_inputs:
                 raise WlhError("egov_attachments_unverified")
             zip_acq: Mapping[str, Any] = inline_zip_inputs[0]["acquisition"]
@@ -323,9 +319,7 @@ class RecordAdapter(Base):
         cleaners_map: Mapping[str, Any] = (
             cast(Mapping[str, Any], cleaners_cfg) if isinstance(cleaners_cfg, Mapping) else {}
         )
-        raw_strip = cleaners_map.get("strip_text_regexes") or self.config.get(
-            "strip_text_regexes"
-        )
+        raw_strip = cleaners_map.get("strip_text_regexes") or self.config.get("strip_text_regexes")
         strip_pats: Sequence[str] = (
             [str(x) for x in cast(Sequence[Any], raw_strip) if x]
             if isinstance(raw_strip, Sequence) and not isinstance(raw_strip, (str, bytes))
@@ -469,9 +463,7 @@ def html_records(
         body: list[Any] = node.xpath(
             './/*[contains(concat(" ",normalize-space(@class)," ")," tenor ") or contains(concat(" ",normalize-space(@class)," ")," body ")]'
         )
-        fragment: str = etree.tostring(
-            body[0] if body else node, encoding="unicode", method="html"
-        )
+        fragment: str = etree.tostring(body[0] if body else node, encoding="unicode", method="html")
         records.append(
             {
                 **values,

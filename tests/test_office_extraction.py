@@ -244,4 +244,3 @@ class TestLegacyVietnameseAndDisguisedOfficeExtraction:
         repaired_path.write_bytes(repaired)
         members = unpack_zip(repaired_path, tmp_path / "out", max_bytes=10 * 1024 * 1024)
         assert [m["path"] for m in members] == ["大法官解釋-釋字第793號.json"]
-

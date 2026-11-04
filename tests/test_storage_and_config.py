@@ -179,8 +179,7 @@ storage:
 
             row = matrix_rows[cfg.id]
             csv_adapters = {
-                part.strip()
-                for part in row["推荐适配器"].split("（")[0].split("(")[0].split("/")
+                part.strip() for part in row["推荐适配器"].split("（")[0].split("(")[0].split("/")
             }
             assert cfg.processor.parser.type in csv_adapters, (
                 f"{cfg.id} parser mismatch between YAML ({cfg.processor.parser.type}) and CSV ({row['推荐适配器']})"
@@ -205,9 +204,7 @@ storage:
         from wlh.runbook_samples import FORBIDDEN_PLACEHOLDERS, STRATA_BADGE_LABELS
 
         fixtures_root = repo_root / "tests" / "fixtures"
-        test_fn = (
-            TestAdaptedSourceConfigReplayAndZeroTargetGuard.test_adapted_production_source_configs_collect_and_reparse_against_local_samples
-        )
+        test_fn = TestAdaptedSourceConfigReplayAndZeroTargetGuard.test_adapted_production_source_configs_collect_and_reparse_against_local_samples
         marks = getattr(test_fn, "pytestmark", [])
         param_mark = next(m for m in marks if m.name == "parametrize")
         registered_replay_ids = {str(entry[0]) for entry in param_mark.args[1]}
@@ -220,14 +217,14 @@ storage:
             strata_raw = manifest.get("sampling_strata")
             assert isinstance(strata_raw, list)
             strata = [str(s) for s in cast(list[Any], strata_raw)]
-            assert len(strata) >= 1, (
-                f"{sid} fixture manifest missing sampling_strata"
-            )
+            assert len(strata) >= 1, f"{sid} fixture manifest missing sampling_strata"
             assert set(strata).issubset(set(STRATA_BADGE_LABELS.keys())), (
                 f"{sid} fixture manifest has unknown sampling_strata: {strata}"
             )
             expectations_raw = manifest.get("expectations")
-            assert isinstance(expectations_raw, dict), f"{sid} fixture manifest missing expectations"
+            assert isinstance(expectations_raw, dict), (
+                f"{sid} fixture manifest missing expectations"
+            )
             expectations = cast(dict[str, Any], expectations_raw)
             assert expectations.get("require_multi_resource") == (sid != "dd-375")
             for route in manifest["routes"]:
@@ -264,9 +261,7 @@ storage:
         assert "| [~] |" in partial_line
         assert "**部分跑通（公开样本 5/10 篇）**：部分文件需登录会员下载。" in partial_line
 
-    def test_matrix_multi_entry_urls_render_distinct_markdown_links(
-        self, tmp_path: Path
-    ) -> None:
+    def test_matrix_multi_entry_urls_render_distinct_markdown_links(self, tmp_path: Path) -> None:
         """Matrix CSV rows with multiple entry URLs render distinct Markdown links separated by <br>."""
         from wlh.matrix import render_markdown_from_csv
 
@@ -281,8 +276,14 @@ storage:
         multi_lines = [line for line in rendered.splitlines() if 'id="dd-509"' in line]
         assert len(multi_lines) == 1
         line = multi_lines[0]
-        assert "[全国法规资料库（LawBank Taiwan）（法规检索）](https://law.moj.gov.tw/ENG/Law/LawSearchLaw.aspx)" in line
-        assert "[全国法规资料库（LawBank Taiwan）（条约协定）](https://law.moj.gov.tw/ENG/Law/LawSearchAgree.aspx)" in line
+        assert (
+            "[全国法规资料库（LawBank Taiwan）（法规检索）](https://law.moj.gov.tw/ENG/Law/LawSearchLaw.aspx)"
+            in line
+        )
+        assert (
+            "[全国法规资料库（LawBank Taiwan）（条约协定）](https://law.moj.gov.tw/ENG/Law/LawSearchAgree.aspx)"
+            in line
+        )
         assert "<br>" in line
 
     def test_collection_sources_prohibit_single_document_reward_hacking_shortcuts(
@@ -350,8 +351,7 @@ storage:
             candidate_triplets: list[tuple[str, str, str]] = []
             for host in cfg.scheduler.allowed_hosts:
                 prefixes = (
-                    cfg.scheduler.host_path_scopes.get(host)
-                    or cfg.scheduler.allowed_path_prefixes
+                    cfg.scheduler.host_path_scopes.get(host) or cfg.scheduler.allowed_path_prefixes
                 )
                 for prefix in prefixes:
                     base = f"https://{host}{prefix.rstrip('/')}"
@@ -407,10 +407,7 @@ storage:
                     )
 
             if parser_type == "html":
-                assert (
-                    bool(docs.detail_url_patterns)
-                    or docs.detail_body == "never"
-                ), (
+                assert bool(docs.detail_url_patterns) or docs.detail_body == "never", (
                     f"{cfg.id} ({parser_type}) must declare detail_url_patterns unless detail_body == 'never'"
                 )
 
@@ -582,9 +579,7 @@ storage:
                 if 6 <= row_idx <= 50:
                     cells: dict[str, str] = {}
                     for cell_el in row_el.findall("main:c", ns):
-                        col_letters = "".join(
-                            ch for ch in cell_el.attrib["r"] if ch.isalpha()
-                        )
+                        col_letters = "".join(ch for ch in cell_el.attrib["r"] if ch.isalpha())
                         val_el = cell_el.find("main:v", ns)
                         cell_val = ""
                         if val_el is not None and val_el.text is not None:
@@ -604,9 +599,7 @@ storage:
                     )
 
         assert len(excel_items) == 45
-        excel_by_code = {
-            code: (inst, col, entry_url) for code, inst, col, entry_url in excel_items
-        }
+        excel_by_code = {code: (inst, col, entry_url) for code, inst, col, entry_url in excel_items}
 
         tracked_p0_source_ids = [
             "dd-504",  # D01
@@ -639,20 +632,14 @@ storage:
 
         matrix_by_id = {row["Source ID"].strip(): row for row in matrix_rows}
         urgent_p0_rows = [
-            row
-            for row in matrix_rows
-            if "【业务紧急P0｜" in row.get("备注与实测结论", "")
+            row for row in matrix_rows if "【业务紧急P0｜" in row.get("备注与实测结论", "")
         ]
         downgraded_p2_rows = [
-            row
-            for row in matrix_rows
-            if "【业务清单P2｜" in row.get("备注与实测结论", "")
+            row for row in matrix_rows if "【业务清单P2｜" in row.get("备注与实测结论", "")
         ]
         assert len(urgent_p0_rows) == 21
         assert len(downgraded_p2_rows) == 24
-        assert {r["Source ID"].strip() for r in urgent_p0_rows} == set(
-            tracked_p0_source_ids
-        )
+        assert {r["Source ID"].strip() for r in urgent_p0_rows} == set(tracked_p0_source_ids)
         for row in urgent_p0_rows:
             assert row["优先级"].strip() == "P0"
         for row in downgraded_p2_rows:
@@ -673,14 +660,12 @@ storage:
             assert matching[0]["官方入口 URL"].strip() == entry_url
 
         # 3. One-Way Sub-Table Export & Hook Sync Contract
-        assert DEFAULT_TAX_SUBTABLE_CSV_PATH == Path(
-            "docs/runbooks/tax-p0-delivery-matrix.csv"
-        )
+        assert DEFAULT_TAX_SUBTABLE_CSV_PATH == Path("docs/runbooks/tax-p0-delivery-matrix.csv")
         subtable_path = repo_root / DEFAULT_TAX_SUBTABLE_CSV_PATH
         assert subtable_path.is_file(), f"Missing sub-table CSV: {subtable_path}"
-        assert subtable_path.read_text(
-            encoding="utf-8-sig"
-        ) == render_tax_subtable_from_csv(matrix_csv).lstrip("\ufeff")
+        assert subtable_path.read_text(encoding="utf-8-sig") == render_tax_subtable_from_csv(
+            matrix_csv
+        ).lstrip("\ufeff")
 
         expected_fieldnames = [
             "业务编号",

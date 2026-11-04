@@ -31,7 +31,9 @@ ARTIFACTS = Path(os.environ.get("WLH_TEST_ARTIFACTS_DIR", str(DEFAULT_TEST_ARTIF
 Route = tuple[bytes, str]
 
 KFS_FIXTURES = ROOT / "tests" / "fixtures" / "dd-582" / "content"
-KFS_OUTPUT = ARTIFACTS / "kfs-content-contract" / os.environ.get("WLH_KFS_ACCEPTANCE_STAGE", "latest")
+KFS_OUTPUT = (
+    ARTIFACTS / "kfs-content-contract" / os.environ.get("WLH_KFS_ACCEPTANCE_STAGE", "latest")
+)
 _HREF = re.compile(r"(<a\b[^>]*?\bhref\s*=\s*)([\"'])(.*?)(\2)", re.I | re.S)
 _BODY_CONTROL = "本文中の引用語句「トップに戻る」は原文の内容として保持する。"
 
@@ -75,8 +77,9 @@ def rendered_table_rows(markdown: str, cell_text: Callable[[str], str]) -> list[
                         grid[row_index + dy, column + dx] = value if dx == dy == 0 else ""
                 column += width
         width = max((column for _, column in grid), default=-1) + 1
-        output.extend([[grid.get((row, column), "") for column in range(width)]
-                       for row in range(len(rows))])
+        output.extend(
+            [[grid.get((row, column), "") for column in range(width)] for row in range(len(rows))]
+        )
     return output
 
 
@@ -205,14 +208,17 @@ def collect_artifact(
                 "SELECT r.id AS resource_id, d.* FROM wlh.document_row d JOIN wlh.resource r "
                 "ON r.current_version_id=d.version_id JOIN wlh.frontier f "
                 "ON f.id=r.frontier_id WHERE f.source_id=%s "
-                "ORDER BY d.detail_url, d.row_index", (source_id,)
+                "ORDER BY d.detail_url, d.row_index",
+                (source_id,),
             ).fetchall()
     objects = Objects()
     for index, row in enumerate(rows, start=1):
         row["markdown"] = objects.get(row["markdown_hash"]).decode("utf-8")
         (directory / f"{index}.md").write_text(row["markdown"])
     (directory / "collect.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))
-    (directory / "rows.json").write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+    (directory / "rows.json").write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2, default=str)
+    )
     (directory / "requests.json").write_text(json.dumps(requests, indent=2))
     return report, rows
 
@@ -342,11 +348,11 @@ def create_test_run(
             "response_bytes": 10485760,
         }
         config.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
-        report, rows = collect_artifact(
-            "dd-582", config, env, name, requests, output_dir=base_out
-        )
+        report, rows = collect_artifact("dd-582", config, env, name, requests, output_dir=base_out)
         required = {path for path in routes if path.endswith(".html")}
-        transport_ok = required <= set(requests) and not (set(requests) - set(routes) - {"/robots.txt"})
+        transport_ok = required <= set(requests) and not (
+            set(requests) - set(routes) - {"/robots.txt"}
+        )
     before = compute_test_signature(env)
     code, stdout, stderr = run_wlh_cli("reparse", str(config), "--no-progress", env=env)
     offline: dict[str, Any] = {"exit_code": code, "stderr": stderr}
@@ -389,4 +395,3 @@ _signature = compute_test_signature
 _run = create_test_run
 _receipt = create_test_receipt
 _routes = kfs_case_routes
-

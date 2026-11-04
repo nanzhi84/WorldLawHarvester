@@ -129,9 +129,7 @@ class TestRunbookVerificationSamples:
             assert "raw_payload" not in cached_item, (
                 "#wlh-samples-cache must not hardcode raw_payload"
             )
-            assert "markdown" not in cached_item, (
-                "#wlh-samples-cache must not hardcode markdown"
-            )
+            assert "markdown" not in cached_item, "#wlh-samples-cache must not hardcode markdown"
 
     def test_csv_to_html_one_way_sync_updates_gitbook_toc_and_preserves_samples(
         self, tmp_path: Path
@@ -233,7 +231,9 @@ class TestRunbookVerificationSamples:
         assert "LuatVietnam 法规库（已更新名称）" in synced_text
         assert "1.4.1 越南核心法规" in synced_text
         assert "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd.signed.pdf" in synced_text
-        assert "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd-phu-luc.docx" in synced_text
+        assert (
+            "https://vanban.chinhphu.vn/cpp/files/vbpq/2026/04/105-nd-phu-luc.docx" in synced_text
+        )
         assert "Phụ lục Nghị định 105.docx" in synced_text
         assert "Nghị định 105/2026/NĐ-CP" in synced_text
         assert "Thông tư 12/2026/TT-BTC" in synced_text
@@ -724,7 +724,9 @@ class TestRunbookVerificationSamples:
             },
             {
                 "detail_url": "https://fgk.chinatax.gov.cn/zcfgk/p95.html",
-                "raw_payload": "<div class='law'><p>" + ("第一条 超长实施细则正文内容。\n" * 40) + "</p></div>",
+                "raw_payload": "<div class='law'><p>"
+                + ("第一条 超长实施细则正文内容。\n" * 40)
+                + "</p></div>",
                 "markdown": "# 超长实施细则\n\n" + ("第一条 超长实施细则正文内容。\n\n" * 40),
                 "title": "国家税务总局超长实施细则",
                 "doc_number": "税总发〔2026〕2号",
@@ -846,9 +848,9 @@ class TestRunbookVerificationSamples:
         )
 
         style_text = "\n".join(str(s.text_content() or "") for s in tree.xpath("//style"))
-        assert re.search(
-            r"\.source-section\s*\{[^}]*display\s*:\s*none", style_text, re.S
-        ), "Expected CSS rule setting .source-section to display: none by default"
+        assert re.search(r"\.source-section\s*\{[^}]*display\s*:\s*none", style_text, re.S), (
+            "Expected CSS rule setting .source-section to display: none by default"
+        )
         assert re.search(
             r"\.source-section\.is-active\s*\{[^}]*display\s*:\s*block", style_text, re.S
         ), "Expected CSS rule setting .source-section.is-active to display: block"
@@ -874,7 +876,9 @@ class TestRunbookVerificationSamples:
             r"(?:pre|\.payload-box|\.markdown-box)[^{]*\{[^}]*flex\s*:\s*1\b",
             style_text,
             re.S,
-        ), "Expected pre / .payload-box / .markdown-box to set flex: 1 so both columns stretch evenly"
+        ), (
+            "Expected pre / .payload-box / .markdown-box to set flex: 1 so both columns stretch evenly"
+        )
         assert re.search(
             r"(?:pre|\.payload-box|\.markdown-box)[^{]*\{[^}]*overflow\s*:\s*hidden",
             style_text,
@@ -956,7 +960,9 @@ class TestRunbookVerificationSamples:
             "baseline": "strata-baseline",
         }
         observed_stratum_classes: dict[str, set[str]] = {}
-        for badge in sec_501.xpath('.//td[contains(@class, "col-left")]//*[contains(@class, "strata-badge")]'):
+        for badge in sec_501.xpath(
+            './/td[contains(@class, "col-left")]//*[contains(@class, "strata-badge")]'
+        ):
             stratum_key = str(badge.get("data-stratum") or "")
             badge_classes = set(str(badge.get("class") or "").split())
             observed_stratum_classes.setdefault(stratum_key, set()).update(badge_classes)
@@ -1010,6 +1016,3 @@ class TestRunbookVerificationSamples:
         assert meta_pos.start() < md_pre_pos.start(), (
             "JSON document metadata block must appear above the .markdown-box preview container"
         )
-
-
-

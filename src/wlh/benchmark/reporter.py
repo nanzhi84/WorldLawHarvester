@@ -66,13 +66,15 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
         weighted = score * w
         lines.append(f"| `{dim}` | {label} | {score:.2f} | {w:.0%} | {weighted:.2f} |")
 
-    lines.extend([
-        "",
-        "### 2.2 Field Accuracy Dimensions (准确度六维)",
-        "",
-        "| Field Dimension | Target Field | Score | Weight | Weighted Score |",
-        "| :--- | :--- | :---: | :---: | :---: |",
-    ])
+    lines.extend(
+        [
+            "",
+            "### 2.2 Field Accuracy Dimensions (准确度六维)",
+            "",
+            "| Field Dimension | Target Field | Score | Weight | Weighted Score |",
+            "| :--- | :--- | :---: | :---: | :---: |",
+        ]
+    )
 
     acc_weights = {
         "title_accuracy": (0.20, "Document Title (with CJK support)"),
@@ -88,15 +90,17 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
         weighted = score * w
         lines.append(f"| `{dim}` | {label} | {score:.2f} | {w:.0%} | {weighted:.2f} |")
 
-    lines.extend([
-        "",
-        "---",
-        "",
-        "## 3. Jurisdiction Breakdown",
-        "",
-        "| Jurisdiction | Sample Count | Cleanliness | Accuracy | Overall Score |",
-        "| :---: | :---: | :---: | :---: | :---: |",
-    ])
+    lines.extend(
+        [
+            "",
+            "---",
+            "",
+            "## 3. Jurisdiction Breakdown",
+            "",
+            "| Jurisdiction | Sample Count | Cleanliness | Accuracy | Overall Score |",
+            "| :---: | :---: | :---: | :---: | :---: |",
+        ]
+    )
 
     for jur, data in sorted(report.jurisdiction_scores.items()):
         cnt = int(data.get("sample_count", 0))
@@ -105,21 +109,25 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
         j_ovr = data.get("overall", 0.0)
         lines.append(f"| **{jur}** | {cnt} | {j_clean:.2f} | {j_acc:.2f} | **{j_ovr:.2f}** |")
 
-    lines.extend([
-        "",
-        "---",
-        "",
-        "## 4. Worst-Performing Error Cases & Defect Diagnostics",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "---",
+            "",
+            "## 4. Worst-Performing Error Cases & Defect Diagnostics",
+            "",
+        ]
+    )
 
     if report.field_discrepancies:
-        lines.extend([
-            "### 4.1 Field Discrepancies & Extraction Fill Rates (vs Ground Truth)",
-            "",
-            "| Target Field | Ground Truth Fill Rate | Prediction Fill Rate | Fill Rate Gap | Accuracy Score | Key Diagnostic Finding |",
-            "| :--- | :---: | :---: | :---: | :---: | :--- |",
-        ])
+        lines.extend(
+            [
+                "### 4.1 Field Discrepancies & Extraction Fill Rates (vs Ground Truth)",
+                "",
+                "| Target Field | Ground Truth Fill Rate | Prediction Fill Rate | Fill Rate Gap | Accuracy Score | Key Diagnostic Finding |",
+                "| :--- | :---: | :---: | :---: | :---: | :--- |",
+            ]
+        )
         eff_stats = report.field_discrepancies.get("effective_at", {})
         eff_gt_rate = eff_stats.get("ground_truth_fill_rate", 0.0)
         eff_pred_rate = eff_stats.get("prediction_fill_rate", 0.0)
@@ -141,17 +149,23 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
             gap_str = f"{gap:+.1f}%" if gap != 0 else "0.0%"
             f_score = stats.get("accuracy_score", 0.0)
             note = diagnostic_notes.get(fld, "")
-            lines.append(f"| `{fld}` | {gt_str} | {pred_str} | {gap_str} | {f_score:.2f} | {note} |")
-        lines.extend([
-            "",
-            "### 4.2 Top Defect Diagnostics & Worst-Performing Samples",
-            "",
-        ])
+            lines.append(
+                f"| `{fld}` | {gt_str} | {pred_str} | {gap_str} | {f_score:.2f} | {note} |"
+            )
+        lines.extend(
+            [
+                "",
+                "### 4.2 Top Defect Diagnostics & Worst-Performing Samples",
+                "",
+            ]
+        )
 
-    lines.extend([
-        "| Sample ID | Source ID | Jurisdiction | Overall Score | Cleanliness | Accuracy | Primary Defects & Mismatches |",
-        "| :--- | :--- | :---: | :---: | :---: | :---: | :--- |",
-    ])
+    lines.extend(
+        [
+            "| Sample ID | Source ID | Jurisdiction | Overall Score | Cleanliness | Accuracy | Primary Defects & Mismatches |",
+            "| :--- | :--- | :---: | :---: | :---: | :---: | :--- |",
+        ]
+    )
 
     for s in report.worst_performing_samples:
         sid = s.get("sample_id")
@@ -171,7 +185,9 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
             defects.append(f"[Mismatch] {m}")
         defect_str = "<br>".join(defects[:2]) if defects else "No critical defects"
 
-        lines.append(f"| `{sid}` | `{src}` | {jur} | **{ovr:.2f}** | {cln:.2f} | {acc_str} | {defect_str} |")
+        lines.append(
+            f"| `{sid}` | `{src}` | {jur} | **{ovr:.2f}** | {cln:.2f} | {acc_str} | {defect_str} |"
+        )
 
     lines.append("")
     return "\n".join(lines)

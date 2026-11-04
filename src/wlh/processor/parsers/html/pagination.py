@@ -42,9 +42,7 @@ def aspnet_next_page(
     form = forms[0]
     events: list[tuple[str, ...]] = []
     for href in form.xpath(".//a/@href"):
-        match: re.Match[str] | None = re.search(
-            r"__doPostBack\('([^']+)','(Page\$[^']+)'\)", href
-        )
+        match: re.Match[str] | None = re.search(r"__doPostBack\('([^']+)','(Page\$[^']+)'\)", href)
         if match:
             events.append(match.groups())
     following: tuple[str, ...] | None = next(
@@ -80,14 +78,13 @@ def aspnet_next_page(
     }, None
 
 
-def pagination_requests(
-    adapter: Any, tree: Any, base_url: str, depth: int
-) -> list[dict[str, Any]]:
-    opts_raw = (
-        adapter.config.get("processor", {}).get("parser", {}).get("options")
-        or adapter.config.get("adapter_options")
+def pagination_requests(adapter: Any, tree: Any, base_url: str, depth: int) -> list[dict[str, Any]]:
+    opts_raw = adapter.config.get("processor", {}).get("parser", {}).get(
+        "options"
+    ) or adapter.config.get("adapter_options")
+    opts: Mapping[str, Any] = (
+        cast(Mapping[str, Any], opts_raw) if isinstance(opts_raw, Mapping) else {}
     )
-    opts: Mapping[str, Any] = cast(Mapping[str, Any], opts_raw) if isinstance(opts_raw, Mapping) else {}
     max_pages = int(opts.get("max_pages", 1))
     if max_pages <= 1:
         return []
@@ -95,7 +92,9 @@ def pagination_requests(
     seen: set[tuple[str, str, tuple[tuple[str, str], ...]]] = set()
     for req in _pagination_candidates(adapter, tree, base_url, depth, max_pages):
         form_raw = req.get("form")
-        form: Mapping[str, Any] = cast(Mapping[str, Any], form_raw) if isinstance(form_raw, Mapping) else {}
+        form: Mapping[str, Any] = (
+            cast(Mapping[str, Any], form_raw) if isinstance(form_raw, Mapping) else {}
+        )
         sig: tuple[str, str, tuple[tuple[str, str], ...]] = (
             str(req.get("method", "GET")),
             str(req["url"]),
@@ -183,15 +182,16 @@ def _aspnet_postback_request(
 
     current_page = 1
     for key, val in fields.items():
-        if any(p in key.lower() for p in ("page", "curpage", "pageindex", "pagenum")) and val.isdigit():
+        if (
+            any(p in key.lower() for p in ("page", "curpage", "pageindex", "pagenum"))
+            and val.isdigit()
+        ):
             current_page = max(current_page, int(val))
     if current_page >= max_pages:
         return None
 
     href = (node.get("href") or "") + " " + (node.get("onclick") or "")
-    pb = re.search(
-        r"__doPostBack\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]*)['\"]\s*\)", href
-    )
+    pb = re.search(r"__doPostBack\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]*)['\"]\s*\)", href)
     if pb:
         fields["__EVENTTARGET"] = pb.group(1)
         fields["__EVENTARGUMENT"] = pb.group(2)

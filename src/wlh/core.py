@@ -137,7 +137,9 @@ def _sched_scope_dict(config: Mapping[str, Any]) -> Mapping[str, Any]:
 
 def paths_for(config: Mapping[str, Any], host: str | None, path: str) -> bool:
     sched = _sched_scope_dict(config)
-    allowed_hosts: list[str] = [str(h) for h in cast(Iterable[Any], sched.get("allowed_hosts") or ())]
+    allowed_hosts: list[str] = [
+        str(h) for h in cast(Iterable[Any], sched.get("allowed_hosts") or ())
+    ]
     if not host or host not in allowed_hosts:
         return False
     scopes_raw = sched.get("host_path_scopes")
@@ -173,7 +175,9 @@ def guard(config: Mapping[str, Any], url: str, *, policy: bool = False) -> str:
     if policy and url in redirect_urls:
         return url
     allowed_policy = policy and parsed.path == "/robots.txt" and not parsed.query
-    allowed_hosts: list[str] = [str(h) for h in cast(Iterable[Any], sched.get("allowed_hosts") or ())]
+    allowed_hosts: list[str] = [
+        str(h) for h in cast(Iterable[Any], sched.get("allowed_hosts") or ())
+    ]
     if parsed.hostname not in allowed_hosts or not (
         allowed_policy or paths_for(sched, parsed.hostname, parsed.path)
     ):

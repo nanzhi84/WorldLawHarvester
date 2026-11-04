@@ -32,7 +32,10 @@ def clear_identity_cache() -> None:
 
 def _find_binary_signature(root: Path) -> tuple[str, int, int] | None:
     for candidate in root.rglob("*"):
-        if candidate.name in {"chrome-headless-shell", "chrome-headless-shell.exe"} and candidate.is_file():
+        if (
+            candidate.name in {"chrome-headless-shell", "chrome-headless-shell.exe"}
+            and candidate.is_file()
+        ):
             if not os.access(candidate, os.X_OK):
                 return None
             st = candidate.stat()

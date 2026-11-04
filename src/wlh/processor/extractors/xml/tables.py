@@ -24,11 +24,7 @@ def _tag(node: Any) -> str:
 
 def _is_borderless_table(tbl: Any) -> bool:
     cells = [
-        cell
-        for row in tbl
-        if _tag(row) in ROW_TAGS
-        for cell in row
-        if _tag(cell) in CELL_TAGS
+        cell for row in tbl if _tag(row) in ROW_TAGS for cell in row if _tag(cell) in CELL_TAGS
     ]
     return bool(cells) and all(
         cell.get("Border" + side) == "none"
@@ -68,10 +64,7 @@ def table_markdown(node: Any) -> str | None:
             ]
         )
     raw_rows = [
-        [
-            (text, colspan, min(rowspan, len(raw_rows) - r_idx))
-            for text, colspan, rowspan in row
-        ]
+        [(text, colspan, min(rowspan, len(raw_rows) - r_idx)) for text, colspan, rowspan in row]
         for r_idx, row in enumerate(raw_rows)
     ]
     rows = expand_rows(raw_rows)

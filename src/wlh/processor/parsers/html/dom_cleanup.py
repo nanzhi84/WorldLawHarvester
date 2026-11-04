@@ -14,9 +14,7 @@ _ATTACHMENT_TITLE_SUFFIX_RE = re.compile(
 )
 
 
-def clean_attachment_title_attr(
-    raw_title: str, extra_strip_regexes: Sequence[str] = ()
-) -> str:
+def clean_attachment_title_attr(raw_title: str, extra_strip_regexes: Sequence[str] = ()) -> str:
     """Strip common download/new-window suffixes and configured title_strip_regexes."""
     cleaned = _ATTACHMENT_TITLE_SUFFIX_RE.sub("", raw_title.strip()).strip()
     for pat in extra_strip_regexes:

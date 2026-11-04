@@ -65,8 +65,12 @@ DOC_TYPE_TAXONOMY_MAP: dict[str, str] = {
 
 # UI navigation, buttons, and boilerplate phrases
 UI_BOILERPLATE_PATTERNS = [
-    re.compile(r"【?(?:打印|打印本页|关闭|关闭窗口|分享|分享到|分享到微信|返回顶部|收藏本页|纠错)】?"),
-    re.compile(r"字体\s*[:：]?\s*\[?\s*(?:大\s*[｜|/\s]*中\s*[｜|/\s]*小|小\s*[｜|/\s]*中\s*[｜|/\s]*大)\s*\]?"),
+    re.compile(
+        r"【?(?:打印|打印本页|关闭|关闭窗口|分享|分享到|分享到微信|返回顶部|收藏本页|纠错)】?"
+    ),
+    re.compile(
+        r"字体\s*[:：]?\s*\[?\s*(?:大\s*[｜|/\s]*中\s*[｜|/\s]*小|小\s*[｜|/\s]*中\s*[｜|/\s]*大)\s*\]?"
+    ),
     re.compile(
         r"正文字体|浏览次数\s*[:：]?|点击量\s*[:：]?|點閱次數\s*[:：]?|阅读量\s*[:：]?|来源\s*[:：]|"
         r"网站标识码\s*\d+|公网安备\d+号|相关链接\s*[:：]?|相关文档\b|담당부서|조회수|微信\s*\*\*X\*\*|扫一扫在手机打开当前页"
@@ -103,7 +107,9 @@ CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 # Mojibake & legacy font corruption patterns
 MOJIBAKE_PATTERNS = [
-    re.compile(r"[\u00a7\u00a9\u00ae\u00b5\u00b6\u00b8\u00b9\u00ba\u00bb\u00bf]{3,}"),  # Legacy TCVN3 corruption cluster
+    re.compile(
+        r"[\u00a7\u00a9\u00ae\u00b5\u00b6\u00b8\u00b9\u00ba\u00bb\u00bf]{3,}"
+    ),  # Legacy TCVN3 corruption cluster
     re.compile(r"(?:Ã[©¼¤±]|â[€\u0080-\u009f]|ï¿½|dáº«n|Ãch)"),  # Corrupted UTF-8 as Latin-1
 ]
 
@@ -201,27 +207,33 @@ def evaluate_cleanliness(
     if html_tags:
         deduction = min(80.0, len(html_tags) * 12.0)
         noise_deduction += deduction
-        penalties.append({
-            "dimension": "noise_purity",
-            "reason": f"Found {len(html_tags)} unescaped HTML tags (e.g. {html_tags[:3]})",
-            "deduction": round(deduction, 2),
-        })
+        penalties.append(
+            {
+                "dimension": "noise_purity",
+                "reason": f"Found {len(html_tags)} unescaped HTML tags (e.g. {html_tags[:3]})",
+                "deduction": round(deduction, 2),
+            }
+        )
     if html_entities:
         deduction = min(50.0, len(html_entities) * 5.0)
         noise_deduction += deduction
-        penalties.append({
-            "dimension": "noise_purity",
-            "reason": f"Found {len(html_entities)} raw HTML entities",
-            "deduction": round(deduction, 2),
-        })
+        penalties.append(
+            {
+                "dimension": "noise_purity",
+                "reason": f"Found {len(html_entities)} raw HTML entities",
+                "deduction": round(deduction, 2),
+            }
+        )
     if control_chars:
         deduction = min(60.0, len(control_chars) * 15.0)
         noise_deduction += deduction
-        penalties.append({
-            "dimension": "noise_purity",
-            "reason": f"Found {len(control_chars)} non-printable control characters",
-            "deduction": round(deduction, 2),
-        })
+        penalties.append(
+            {
+                "dimension": "noise_purity",
+                "reason": f"Found {len(control_chars)} non-printable control characters",
+                "deduction": round(deduction, 2),
+            }
+        )
     noise_score = round(max(0.0, 100.0 - noise_deduction), 2)
 
     # 2. Encoding Purity (\ufffd replacement chars, PUA, mojibake sequences)
@@ -236,27 +248,33 @@ def evaluate_cleanliness(
     if ufffd_count > 0:
         deduction = min(100.0, ufffd_count * 25.0)
         encoding_deduction += deduction
-        penalties.append({
-            "dimension": "encoding_purity",
-            "reason": f"Found {ufffd_count} Unicode replacement characters (\\ufffd)",
-            "deduction": round(deduction, 2),
-        })
+        penalties.append(
+            {
+                "dimension": "encoding_purity",
+                "reason": f"Found {ufffd_count} Unicode replacement characters (\\ufffd)",
+                "deduction": round(deduction, 2),
+            }
+        )
     if pua_count > 0:
         deduction = min(70.0, pua_count * 8.0)
         encoding_deduction += deduction
-        penalties.append({
-            "dimension": "encoding_purity",
-            "reason": f"Found {pua_count} Private Use Area (PUA) characters",
-            "deduction": round(deduction, 2),
-        })
+        penalties.append(
+            {
+                "dimension": "encoding_purity",
+                "reason": f"Found {pua_count} Private Use Area (PUA) characters",
+                "deduction": round(deduction, 2),
+            }
+        )
     if mojibake_matches:
         deduction = min(80.0, len(mojibake_matches) * 25.0)
         encoding_deduction += deduction
-        penalties.append({
-            "dimension": "encoding_purity",
-            "reason": f"Detected {len(mojibake_matches)} mojibake/corrupted encoding sequences",
-            "deduction": round(deduction, 2),
-        })
+        penalties.append(
+            {
+                "dimension": "encoding_purity",
+                "reason": f"Detected {len(mojibake_matches)} mojibake/corrupted encoding sequences",
+                "deduction": round(deduction, 2),
+            }
+        )
     encoding_score = round(max(0.0, 100.0 - encoding_deduction), 2)
 
     # 3. Structural Integrity (Graceful zero-table handling, broken tables, heading hierarchy)
@@ -287,18 +305,22 @@ def evaluate_cleanliness(
         suffix = f" (table block {block_idx})" if len(table_blocks) > 1 else ""
         if not block_has_separator:
             structural_deduction += 20.0
-            penalties.append({
-                "dimension": "structural_integrity",
-                "reason": f"Markdown table missing standard header separator line (|---|){suffix}",
-                "deduction": 20.0,
-            })
+            penalties.append(
+                {
+                    "dimension": "structural_integrity",
+                    "reason": f"Markdown table missing standard header separator line (|---|){suffix}",
+                    "deduction": 20.0,
+                }
+            )
         if block_col_counts and len(set(block_col_counts)) > 1:
             structural_deduction += 25.0
-            penalties.append({
-                "dimension": "structural_integrity",
-                "reason": f"Table column count mismatch across rows: {set(block_col_counts)}{suffix}",
-                "deduction": 25.0,
-            })
+            penalties.append(
+                {
+                    "dimension": "structural_integrity",
+                    "reason": f"Table column count mismatch across rows: {set(block_col_counts)}{suffix}",
+                    "deduction": 25.0,
+                }
+            )
     # If table_blocks is empty, no table deduction is made (graceful zero-table handling per M2 recommendation).
 
     # Heading hierarchy check
@@ -316,21 +338,25 @@ def evaluate_cleanliness(
     if heading_skips > 0:
         deduction = min(30.0, heading_skips * 15.0)
         structural_deduction += deduction
-        penalties.append({
-            "dimension": "structural_integrity",
-            "reason": f"Detected {heading_skips} drastic heading level jump(s) (e.g. h1 to h4+)",
-            "deduction": round(deduction, 2),
-        })
+        penalties.append(
+            {
+                "dimension": "structural_integrity",
+                "reason": f"Detected {heading_skips} drastic heading level jump(s) (e.g. h1 to h4+)",
+                "deduction": round(deduction, 2),
+            }
+        )
 
     # Unclosed code blocks check
     code_fence_count = len(re.findall(r"^```", text_content, re.MULTILINE))
     if code_fence_count % 2 != 0:
         structural_deduction += 20.0
-        penalties.append({
-            "dimension": "structural_integrity",
-            "reason": "Unclosed markdown code fence (odd number of ``` markers)",
-            "deduction": 20.0,
-        })
+        penalties.append(
+            {
+                "dimension": "structural_integrity",
+                "reason": "Unclosed markdown code fence (odd number of ``` markers)",
+                "deduction": 20.0,
+            }
+        )
 
     structural_score = round(max(0.0, 100.0 - structural_deduction), 2)
 
@@ -345,20 +371,24 @@ def evaluate_cleanliness(
     if ui_match_count > 0:
         deduction = min(75.0, ui_match_count * 15.0)
         boilerplate_deduction += deduction
-        penalties.append({
-            "dimension": "boilerplate_freedom",
-            "reason": f"Detected {ui_match_count} UI action/navigation boilerplate elements",
-            "deduction": round(deduction, 2),
-        })
+        penalties.append(
+            {
+                "dimension": "boilerplate_freedom",
+                "reason": f"Detected {ui_match_count} UI action/navigation boilerplate elements",
+                "deduction": round(deduction, 2),
+            }
+        )
 
     if uuid_matches:
         deduction = min(60.0, len(uuid_matches) * 20.0)
         boilerplate_deduction += deduction
-        penalties.append({
-            "dimension": "boilerplate_freedom",
-            "reason": f"Detected {len(uuid_matches)} raw UUID hashes in text/title",
-            "deduction": round(deduction, 2),
-        })
+        penalties.append(
+            {
+                "dimension": "boilerplate_freedom",
+                "reason": f"Detected {len(uuid_matches)} raw UUID hashes in text/title",
+                "deduction": round(deduction, 2),
+            }
+        )
 
     boilerplate_score = round(max(0.0, 100.0 - boilerplate_deduction), 2)
 
@@ -380,7 +410,9 @@ def evaluate_cleanliness(
         if non_sep_lines[i] == non_sep_lines[i - 1]:
             consec_line_dups += 1
     line_counts = Counter(non_sep_lines)
-    repeated_line_excess = sum(cnt - 2 for ln_txt, cnt in line_counts.items() if cnt >= 3 and len(ln_txt) >= 18)
+    repeated_line_excess = sum(
+        cnt - 2 for ln_txt, cnt in line_counts.items() if cnt >= 3 and len(ln_txt) >= 18
+    )
 
     # Ratio of repeated paragraph characters
     seen_paras: set[str] = set()
@@ -397,29 +429,35 @@ def evaluate_cleanliness(
     if consec_dups > 0:
         deduction = min(80.0, consec_dups * 30.0)
         dedup_deduction += deduction
-        penalties.append({
-            "dimension": "deduplication_purity",
-            "reason": f"Detected {consec_dups} consecutive duplicate paragraph(s)",
-            "deduction": round(deduction, 2),
-        })
+        penalties.append(
+            {
+                "dimension": "deduplication_purity",
+                "reason": f"Detected {consec_dups} consecutive duplicate paragraph(s)",
+                "deduction": round(deduction, 2),
+            }
+        )
     elif consec_line_dups > 0 or repeated_line_excess > 0:
         rep_count = max(consec_line_dups, repeated_line_excess)
         deduction = min(70.0, rep_count * 15.0)
         dedup_deduction += deduction
-        penalties.append({
-            "dimension": "deduplication_purity",
-            "reason": f"Detected {rep_count} repeated line/clause block(s)",
-            "deduction": round(deduction, 2),
-        })
+        penalties.append(
+            {
+                "dimension": "deduplication_purity",
+                "reason": f"Detected {rep_count} repeated line/clause block(s)",
+                "deduction": round(deduction, 2),
+            }
+        )
 
     if dup_ratio > 0.12:
         deduction = min(70.0, (dup_ratio - 0.12) * 120.0)
         dedup_deduction += deduction
-        penalties.append({
-            "dimension": "deduplication_purity",
-            "reason": f"High document text duplication ratio: {dup_ratio:.1%}",
-            "deduction": round(deduction, 2),
-        })
+        penalties.append(
+            {
+                "dimension": "deduplication_purity",
+                "reason": f"High document text duplication ratio: {dup_ratio:.1%}",
+                "deduction": round(deduction, 2),
+            }
+        )
 
     dedup_score = round(max(0.0, 100.0 - dedup_deduction), 2)
 
@@ -432,11 +470,13 @@ def evaluate_cleanliness(
             empty_ded = round(structural_score, 2)
             if empty_ded > 0.0:
                 structural_score = 0.0
-                penalties.append({
-                    "dimension": "structural_integrity",
-                    "reason": "Reference ground_truth.markdown comparison: extracted markdown is empty (100.0% recall gap)",
-                    "deduction": empty_ded,
-                })
+                penalties.append(
+                    {
+                        "dimension": "structural_integrity",
+                        "reason": "Reference ground_truth.markdown comparison: extracted markdown is empty (100.0% recall gap)",
+                        "deduction": empty_ded,
+                    }
+                )
         elif ref_md and text_content:
             pred_lines = [ln.strip() for ln in text_content.splitlines() if ln.strip()]
             ref_lines = [ln.strip() for ln in ref_md.splitlines() if ln.strip()]
@@ -454,14 +494,12 @@ def evaluate_cleanliness(
             ]
             full_ref_counts = Counter(full_ref_grams)
             full_pred_counts = Counter(full_pred_grams)
-            raw_prec = (
-                sum(min(cnt, full_ref_counts[g]) for g, cnt in full_pred_counts.items())
-                / max(len(full_pred_grams), 1)
-            )
-            raw_rec = (
-                sum(min(cnt, full_pred_counts[g]) for g, cnt in full_ref_counts.items())
-                / max(len(full_ref_grams), 1)
-            )
+            raw_prec = sum(
+                min(cnt, full_ref_counts[g]) for g, cnt in full_pred_counts.items()
+            ) / max(len(full_pred_grams), 1)
+            raw_rec = sum(
+                min(cnt, full_pred_counts[g]) for g, cnt in full_ref_counts.items()
+            ) / max(len(full_ref_grams), 1)
 
             pred_eval_lines = pred_lines
             ref_eval_lines = ref_lines
@@ -481,7 +519,9 @@ def evaluate_cleanliness(
                         last_pred_idx = idx
                 if last_pred_idx >= 0:
                     tail_noise = [
-                        ln for ln in pred_lines[last_pred_idx + 1 :] if _line_has_ui_or_html_noise(ln)
+                        ln
+                        for ln in pred_lines[last_pred_idx + 1 :]
+                        if _line_has_ui_or_html_noise(ln)
                     ]
                     pred_eval_lines = pred_lines[: last_pred_idx + 1] + tail_noise
 
@@ -522,22 +562,16 @@ def evaluate_cleanliness(
 
             if len(norm_pred) >= gram_k and len(norm_ref) >= gram_k:
                 pred_grams = [
-                    norm_pred[i : i + gram_k]
-                    for i in range(0, len(norm_pred) - gram_k + 1)
+                    norm_pred[i : i + gram_k] for i in range(0, len(norm_pred) - gram_k + 1)
                 ]
-                ref_grams = [
-                    norm_ref[i : i + gram_k]
-                    for i in range(0, len(norm_ref) - gram_k + 1)
-                ]
+                ref_grams = [norm_ref[i : i + gram_k] for i in range(0, len(norm_ref) - gram_k + 1)]
                 pred_counts = Counter(pred_grams)
                 ref_counts = Counter(ref_grams)
-                precision = (
-                    sum(min(cnt, full_ref_counts[g]) for g, cnt in pred_counts.items())
-                    / max(len(pred_grams), 1)
-                )
-                recall = (
-                    sum(min(cnt, full_pred_counts[g]) for g, cnt in ref_counts.items())
-                    / max(len(ref_grams), 1)
+                precision = sum(
+                    min(cnt, full_ref_counts[g]) for g, cnt in pred_counts.items()
+                ) / max(len(pred_grams), 1)
+                recall = sum(min(cnt, full_pred_counts[g]) for g, cnt in ref_counts.items()) / max(
+                    len(ref_grams), 1
                 )
             else:
                 precision = 1.0 if not extra_lines else 0.5
@@ -553,14 +587,16 @@ def evaluate_cleanliness(
                 applied = round(min(extra_ded, boilerplate_score), 2)
                 if applied > 0.0:
                     boilerplate_score = round(max(0.0, boilerplate_score - applied), 2)
-                    penalties.append({
-                        "dimension": "boilerplate_freedom",
-                        "reason": (
-                            f"Reference ground_truth.markdown comparison: {max(len(extra_lines), 1)} unstripped "
-                            f"boilerplate/noise line(s) (precision={precision:.1%}, {extra_ratio:.1%} excess content)"
-                        ),
-                        "deduction": applied,
-                    })
+                    penalties.append(
+                        {
+                            "dimension": "boilerplate_freedom",
+                            "reason": (
+                                f"Reference ground_truth.markdown comparison: {max(len(extra_lines), 1)} unstripped "
+                                f"boilerplate/noise line(s) (precision={precision:.1%}, {extra_ratio:.1%} excess content)"
+                            ),
+                            "deduction": applied,
+                        }
+                    )
 
             if missing_lines or recall < 0.94:
                 missing_chars = sum(len(ln) for ln in missing_lines)
@@ -572,14 +608,16 @@ def evaluate_cleanliness(
                 applied = round(min(miss_ded, structural_score), 2)
                 if applied > 0.0:
                     structural_score = round(max(0.0, structural_score - applied), 2)
-                    penalties.append({
-                        "dimension": "structural_integrity",
-                        "reason": (
-                            f"Reference ground_truth.markdown comparison: {max(len(missing_lines), 1)} substantive "
-                            f"line(s) missing from extracted markdown (recall={recall:.1%}, {missing_ratio:.1%} recall gap)"
-                        ),
-                        "deduction": applied,
-                    })
+                    penalties.append(
+                        {
+                            "dimension": "structural_integrity",
+                            "reason": (
+                                f"Reference ground_truth.markdown comparison: {max(len(missing_lines), 1)} substantive "
+                                f"line(s) missing from extracted markdown (recall={recall:.1%}, {missing_ratio:.1%} recall gap)"
+                            ),
+                            "deduction": applied,
+                        }
+                    )
 
     sub_scores = CleanlinessSubScores(
         noise_purity=noise_score,
@@ -635,9 +673,19 @@ def _score_title_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any] | N
     if (pred is None or str(pred).strip() == "") and (gt is None or str(gt).strip() == ""):
         return 100.0, None
     if pred is None or str(pred).strip() == "":
-        return 0.0, {"field": "title", "reason": "Missing or blank title in prediction", "predicted": None, "ground_truth": gt}
+        return 0.0, {
+            "field": "title",
+            "reason": "Missing or blank title in prediction",
+            "predicted": None,
+            "ground_truth": gt,
+        }
     if gt is None or str(gt).strip() == "":
-        return 0.0, {"field": "title", "reason": "Missing title value in ground truth", "predicted": str(pred).strip(), "ground_truth": None}
+        return 0.0, {
+            "field": "title",
+            "reason": "Missing title value in ground truth",
+            "predicted": str(pred).strip(),
+            "ground_truth": None,
+        }
 
     str_pred = str(pred).strip()
     str_gt = str(gt).strip()
@@ -666,12 +714,16 @@ def _score_title_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any] | N
         score = compute_anls(str_pred, str_gt)
     else:
         score = compute_anls(clean_pred, clean_gt)
-    mismatch = None if score >= 90.0 else {
-        "field": "title",
-        "reason": f"Title divergence (ANLS: {score}%)",
-        "predicted": str_pred,
-        "ground_truth": str_gt,
-    }
+    mismatch = (
+        None
+        if score >= 90.0
+        else {
+            "field": "title",
+            "reason": f"Title divergence (ANLS: {score}%)",
+            "predicted": str_pred,
+            "ground_truth": str_gt,
+        }
+    )
     return score, mismatch
 
 
@@ -681,10 +733,20 @@ def _score_doc_number_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any
         return 100.0, None
 
     if pred is None or str(pred).strip() == "":
-        return 0.0, {"field": "doc_number", "reason": "Missing document number in prediction", "predicted": None, "ground_truth": gt}
+        return 0.0, {
+            "field": "doc_number",
+            "reason": "Missing document number in prediction",
+            "predicted": None,
+            "ground_truth": gt,
+        }
 
     if gt is None or str(gt).strip() == "":
-        return 0.0, {"field": "doc_number", "reason": "Extraneous document number extracted when ground truth is null", "predicted": pred, "ground_truth": None}
+        return 0.0, {
+            "field": "doc_number",
+            "reason": "Extraneous document number extracted when ground truth is null",
+            "predicted": pred,
+            "ground_truth": None,
+        }
 
     str_pred = str(pred).strip()
     str_gt = str(gt).strip()
@@ -719,16 +781,28 @@ def _score_doc_number_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any
     }
 
 
-def _score_date_accuracy(field_name: str, pred: Any, gt: Any) -> tuple[float, dict[str, Any] | None]:
+def _score_date_accuracy(
+    field_name: str, pred: Any, gt: Any
+) -> tuple[float, dict[str, Any] | None]:
     """Score ISO date fields using Strict Normalized Exact Match (EM, 0 or 100)."""
     if (pred is None or str(pred).strip() == "") and (gt is None or str(gt).strip() == ""):
         return 100.0, None
 
     if pred is None or str(pred).strip() == "":
-        return 0.0, {"field": field_name, "reason": f"Missing {field_name} in prediction", "predicted": None, "ground_truth": gt}
+        return 0.0, {
+            "field": field_name,
+            "reason": f"Missing {field_name} in prediction",
+            "predicted": None,
+            "ground_truth": gt,
+        }
 
     if gt is None or str(gt).strip() == "":
-        return 0.0, {"field": field_name, "reason": f"Extraneous {field_name} extracted when ground truth is null", "predicted": pred, "ground_truth": None}
+        return 0.0, {
+            "field": field_name,
+            "reason": f"Extraneous {field_name} extracted when ground truth is null",
+            "predicted": pred,
+            "ground_truth": None,
+        }
 
     str_pred = str(pred).strip()[:10]
     str_gt = str(gt).strip()[:10]
@@ -750,10 +824,20 @@ def _score_issuer_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any] | 
         return 100.0, None
 
     if pred is None or str(pred).strip() == "":
-        return 0.0, {"field": "issuer", "reason": "Missing issuer in prediction", "predicted": None, "ground_truth": gt}
+        return 0.0, {
+            "field": "issuer",
+            "reason": "Missing issuer in prediction",
+            "predicted": None,
+            "ground_truth": gt,
+        }
 
     if gt is None or str(gt).strip() == "":
-        return 0.0, {"field": "issuer", "reason": "Extraneous issuer when ground truth is null", "predicted": pred, "ground_truth": None}
+        return 0.0, {
+            "field": "issuer",
+            "reason": "Extraneous issuer when ground truth is null",
+            "predicted": pred,
+            "ground_truth": None,
+        }
 
     str_pred = str(pred).strip()
     str_gt = str(gt).strip()
@@ -795,7 +879,12 @@ def _score_doc_type_accuracy(pred: Any, gt: Any) -> tuple[float, dict[str, Any] 
     if pred is None and gt is None:
         return 100.0, None
     if pred is None or gt is None:
-        return 0.0, {"field": "doc_type", "reason": "Missing doc_type", "predicted": pred, "ground_truth": gt}
+        return 0.0, {
+            "field": "doc_type",
+            "reason": "Missing doc_type",
+            "predicted": pred,
+            "ground_truth": gt,
+        }
 
     norm_pred = str(pred).strip().lower()
     norm_gt = str(gt).strip().lower()
@@ -833,27 +922,39 @@ def evaluate_accuracy(
     """
     mismatches: list[dict[str, Any]] = []
 
-    title_score, title_mis = _score_title_accuracy(prediction.get("title"), ground_truth.get("title"))
+    title_score, title_mis = _score_title_accuracy(
+        prediction.get("title"), ground_truth.get("title")
+    )
     if title_mis:
         mismatches.append(title_mis)
 
-    doc_num_score, doc_num_mis = _score_doc_number_accuracy(prediction.get("doc_number"), ground_truth.get("doc_number"))
+    doc_num_score, doc_num_mis = _score_doc_number_accuracy(
+        prediction.get("doc_number"), ground_truth.get("doc_number")
+    )
     if doc_num_mis:
         mismatches.append(doc_num_mis)
 
-    pub_score, pub_mis = _score_date_accuracy("published_at", prediction.get("published_at"), ground_truth.get("published_at"))
+    pub_score, pub_mis = _score_date_accuracy(
+        "published_at", prediction.get("published_at"), ground_truth.get("published_at")
+    )
     if pub_mis:
         mismatches.append(pub_mis)
 
-    eff_score, eff_mis = _score_date_accuracy("effective_at", prediction.get("effective_at"), ground_truth.get("effective_at"))
+    eff_score, eff_mis = _score_date_accuracy(
+        "effective_at", prediction.get("effective_at"), ground_truth.get("effective_at")
+    )
     if eff_mis:
         mismatches.append(eff_mis)
 
-    issuer_score, issuer_mis = _score_issuer_accuracy(prediction.get("issuer"), ground_truth.get("issuer"))
+    issuer_score, issuer_mis = _score_issuer_accuracy(
+        prediction.get("issuer"), ground_truth.get("issuer")
+    )
     if issuer_mis:
         mismatches.append(issuer_mis)
 
-    doc_type_score, doc_type_mis = _score_doc_type_accuracy(prediction.get("doc_type"), ground_truth.get("doc_type"))
+    doc_type_score, doc_type_mis = _score_doc_type_accuracy(
+        prediction.get("doc_type"), ground_truth.get("doc_type")
+    )
     if doc_type_mis:
         mismatches.append(doc_type_mis)
 

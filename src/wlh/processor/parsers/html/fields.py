@@ -41,9 +41,7 @@ def clean_url(base: str, href: str | None) -> str | None:
         return None
     cleaned: str = href.strip()
     if cleaned.lower().startswith("javascript:") or re.match(r"^[A-Za-z_][\w.]*\s*\(", cleaned):
-        js_match: re.Match[str] | None = re.search(
-            r"""['"]((?:https?://|/)[^'"]+)['"]""", cleaned
-        )
+        js_match: re.Match[str] | None = re.search(r"""['"]((?:https?://|/)[^'"]+)['"]""", cleaned)
         if not js_match:
             return None
         cleaned = str(js_match.group(1) or "").strip()
@@ -61,9 +59,7 @@ def clean_url(base: str, href: str | None) -> str | None:
             and parts.netloc == base_parts.netloc
             else parts.scheme
         )
-        return public_url(
-            urlunsplit((scheme, parts.netloc, parts.path or "/", parts.query, ""))
-        )
+        return public_url(urlunsplit((scheme, parts.netloc, parts.path or "/", parts.query, "")))
     except (WlhError, ValueError):
         return None
 
@@ -168,9 +164,7 @@ def field_value(
         match = re.search(cast(str, rule["regex"]), value)
         if not match:
             return None
-        value = match.groupdict().get("value") or (
-            match.group(1) if match.groups() else match[0]
-        )
+        value = match.groupdict().get("value") or (match.group(1) if match.groups() else match[0])
     if not value.strip():
         return None
     if rule.get("date_format") or is_date:
@@ -199,7 +193,12 @@ def extract_label_value_fields(
         label_xpath = str(rule.get("label_xpath") or ".//dt | .//th")
         value_xpath = str(rule.get("value_xpath") or ".//dd | .//td")
         mapping_raw = rule.get("mapping") or rule.get("label_map")
-        if not row_xpath or not label_xpath or not value_xpath or not isinstance(mapping_raw, Mapping):
+        if (
+            not row_xpath
+            or not label_xpath
+            or not value_xpath
+            or not isinstance(mapping_raw, Mapping)
+        ):
             continue
         mapping = cast(Mapping[str, Any], mapping_raw)
         try:
@@ -238,7 +237,6 @@ def extract_label_value_fields(
                     if clean_label == norm_map_label or label.rstrip(":") == map_label.rstrip(":"):
                         extracted.setdefault(str(target_field), value)
     return extracted
-
 
 
 def extract_detail_fields(

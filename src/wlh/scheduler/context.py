@@ -146,8 +146,9 @@ class Context:
         )
 
     def follow_links(self, task: Mapping[str, Any]) -> bool:
-        return self.runtime.mode == "collect" and task["depth"] < self.config["scheduler"]["max_depth"]
+        return (
+            self.runtime.mode == "collect" and task["depth"] < self.config["scheduler"]["max_depth"]
+        )
 
 
 __all__ = ["Context", "adapter_error", "target_key"]
-

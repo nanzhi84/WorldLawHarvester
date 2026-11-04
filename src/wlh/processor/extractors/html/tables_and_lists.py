@@ -61,9 +61,15 @@ def expand_rows(rows: Sequence[Sequence[tuple[str, int, int]]]) -> list[list[str
 
 def ordered_marker(node: Any) -> str:
     parent = node.getparent()
-    if any(re.search(r"(?:^|;)\s*list-style(?:-type)?\s*:\s*none\s*(?:!important\s*)?(?:;|$)",
-                     element.get("style") or "", re.I)
-           for element in (node, parent) if element is not None):
+    if any(
+        re.search(
+            r"(?:^|;)\s*list-style(?:-type)?\s*:\s*none\s*(?:!important\s*)?(?:;|$)",
+            element.get("style") or "",
+            re.I,
+        )
+        for element in (node, parent)
+        if element is not None
+    ):
         return ""
     if parent is None or str(parent.tag).lower() != "ol":
         return "- "
@@ -86,9 +92,21 @@ def ordered_marker(node: Any) -> str:
     label = str(number)
     if kind in {"i", "I"} and 0 < number < 4000:
         label = ""
-        for value, digits in ((1000, "M"), (900, "CM"), (500, "D"), (400, "CD"),
-                              (100, "C"), (90, "XC"), (50, "L"), (40, "XL"),
-                              (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")):
+        for value, digits in (
+            (1000, "M"),
+            (900, "CM"),
+            (500, "D"),
+            (400, "CD"),
+            (100, "C"),
+            (90, "XC"),
+            (50, "L"),
+            (40, "XL"),
+            (10, "X"),
+            (9, "IX"),
+            (5, "V"),
+            (4, "IV"),
+            (1, "I"),
+        ):
             count, number = divmod(number, value)
             label += digits * count
         if kind == "i":
@@ -105,9 +123,31 @@ def ordered_marker(node: Any) -> str:
 
 def spanning_table(node: Any, base_url: str | None, ui_labels: set[str]) -> str:
     """Preserve original scope without duplicating text or copying unsafe attributes."""
-    allowed = {"table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td",
-               "p", "div", "br", "strong", "b", "em", "i", "sup", "sub", "u", "del",
-               "s", "ul", "li", "a"}
+    allowed = {
+        "table",
+        "caption",
+        "thead",
+        "tbody",
+        "tfoot",
+        "tr",
+        "th",
+        "td",
+        "p",
+        "div",
+        "br",
+        "strong",
+        "b",
+        "em",
+        "i",
+        "sup",
+        "sub",
+        "u",
+        "del",
+        "s",
+        "ul",
+        "li",
+        "a",
+    }
 
     def text(value: str | None) -> str:
         return html.escape(re.sub(r"\s+", " ", value or ""))

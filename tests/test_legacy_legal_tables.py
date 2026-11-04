@@ -65,18 +65,28 @@ class TestLegacyLegalTables:
         affected = base + case.affected_file
         manifest: dict[str, Any] = json.loads((FIXTURES / "manifest.json").read_text())
         originals: dict[str, dict[str, Any]] = {}
-        specs = [s for s in manifest["routes"] if s["path"].startswith(base)
-                 and s["role"] == "original_full_document"]
+        specs = [
+            s
+            for s in manifest["routes"]
+            if s["path"].startswith(base) and s["role"] == "original_full_document"
+        ]
         with html5_reader() as browser:
             for spec in specs:
                 payload = (FIXTURES / spec["fixture"]).read_bytes()
                 assert hashlib.sha256(payload).hexdigest() == spec["sha256"]
                 originals[spec["path"]] = browser.original(payload, spec["encoding"])
             source_focus = originals[affected]
-            source_shapes = tuple((len(t["meaningful_grid"]), len(t["meaningful_grid"][0]))
-                                  for t in source_focus["tables"] if t["meaningful_grid"])
-            assert source_shapes == case.meaningful_shapes, "The declared source browser baseline changed"
-            assert len(originals) == case.complete_rows, "Complete parent inputs must remain in replay"
+            source_shapes = tuple(
+                (len(t["meaningful_grid"]), len(t["meaningful_grid"][0]))
+                for t in source_focus["tables"]
+                if t["meaningful_grid"]
+            )
+            assert source_shapes == case.meaningful_shapes, (
+                "The declared source browser baseline changed"
+            )
+            assert len(originals) == case.complete_rows, (
+                "Complete parent inputs must remain in replay"
+            )
             report, rows, checks = run_complete_case(case.case, name, initialized_db, tmp_path)
             delivered: dict[str, dict[str, Any]] = {}
             for row in rows:
@@ -89,26 +99,45 @@ class TestLegacyLegalTables:
                 for path, source in originals.items()
             }
             comparison = compare_tables(
-                source_focus, delivered.get(affected, empty_output), case.textual_tables,
+                source_focus,
+                delivered.get(affected, empty_output),
+                case.textual_tables,
                 compare_data=case.compare_data,
             )
             browser_version = browser.version
-        checks.update({
-            "complete_parent_and_all_annex_rows_delivered": report["exit_code"] == 0
-            and len(rows) == case.complete_rows and set(delivered) == set(originals),
-            "offline_reparse_successful": report["offline"]["exit_code"] == 0,
-            "all_original_browser_body_fragments_preserved_in_order": not any(missing.values()),
-            "browser_visible_table_relationships_and_declarations_preserved": comparison[
-                "all_relationships_preserved"],
-            "delivered_tables_have_no_overlapping_cells": not any(
-                table["overlaps"] for document in delivered.values() for table in document["tables"]
-            ),
-        })
+        checks.update(
+            {
+                "complete_parent_and_all_annex_rows_delivered": report["exit_code"] == 0
+                and len(rows) == case.complete_rows
+                and set(delivered) == set(originals),
+                "offline_reparse_successful": report["offline"]["exit_code"] == 0,
+                "all_original_browser_body_fragments_preserved_in_order": not any(missing.values()),
+                "browser_visible_table_relationships_and_declarations_preserved": comparison[
+                    "all_relationships_preserved"
+                ],
+                "delivered_tables_have_no_overlapping_cells": not any(
+                    table["overlaps"]
+                    for document in delivered.values()
+                    for table in document["tables"]
+                ),
+            }
+        )
         directory = OUTPUT / name
-        evidence = {"browser": f"Chromium {browser_version}", "raw_fixture_bytes_unchanged": True,
-                    "originals": originals, "delivered": delivered, "affected_document": affected}
+        evidence = {
+            "browser": f"Chromium {browser_version}",
+            "raw_fixture_bytes_unchanged": True,
+            "originals": originals,
+            "delivered": delivered,
+            "affected_document": affected,
+        }
         (directory / "browser-dom-evidence.json").write_text(
             json.dumps(evidence, ensure_ascii=False, indent=2)
         )
-        write_receipt(name, checks, comparison=comparison, source_meaningful_shapes=source_shapes,
-                      missing_or_reordered_full_case_body=missing, browser=browser_version)
+        write_receipt(
+            name,
+            checks,
+            comparison=comparison,
+            source_meaningful_shapes=source_shapes,
+            missing_or_reordered_full_case_body=missing,
+            browser=browser_version,
+        )

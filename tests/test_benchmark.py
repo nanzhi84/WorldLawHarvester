@@ -60,7 +60,9 @@ class TestCleanlinessMetrics:
             "### 第三条 机构职责\n\n"
             "各级气象主管机构负责本行政区域内预警信号发布、更新、传播、解除的管理工作。\n"
         )
-        result = evaluate_cleanliness(pristine_markdown, title="河南省气象灾害预警信号发布与传播办法")
+        result = evaluate_cleanliness(
+            pristine_markdown, title="河南省气象灾害预警信号发布与传播办法"
+        )
 
         assert isinstance(result, CleanlinessResult)
         assert isinstance(result.sub_scores, CleanlinessSubScores)
@@ -87,7 +89,7 @@ class TestCleanlinessMetrics:
     def test_raw_html_tags_and_entities_trigger_noise_purity_penalty(self) -> None:
         """Unescaped HTML tags (div, span, script) and raw entities trigger noise purity deductions."""
         polluted_markdown = (
-            "<div class=\"content-wrapper\"><p><span>Notice content</span></p>"
+            '<div class="content-wrapper"><p><span>Notice content</span></p>'
             "<script type=\"text/javascript\">alert('tracking');</script>"
             "Some text with &nbsp;&nbsp;&nbsp; raw entities &#160; and <br/> breaks.</div>"
         )
@@ -169,7 +171,9 @@ class TestCleanlinessMetrics:
             2,
         )
 
-    def test_multi_table_document_with_different_column_counts_incurs_zero_structural_penalty(self) -> None:
+    def test_multi_table_document_with_different_column_counts_incurs_zero_structural_penalty(
+        self,
+    ) -> None:
         """Documents containing multiple valid tables with distinct column counts receive zero penalty."""
         multi_table_markdown = (
             "# Multi-Table Administrative Document\n\n"
@@ -185,13 +189,19 @@ class TestCleanlinessMetrics:
             "| Judicial | $4.2M | $1.1M | $0.8M | $6.1M |\n"
             "| Enforcement | $3.5M | $2.0M | $1.2M | $6.7M |\n"
         )
-        result = evaluate_cleanliness(multi_table_markdown, title="Multi-Table Administrative Document")
+        result = evaluate_cleanliness(
+            multi_table_markdown, title="Multi-Table Administrative Document"
+        )
 
         assert result.sub_scores.structural_integrity == 100.0
-        assert not any("Table column count mismatch" in p.get("reason", "") for p in result.penalties)
+        assert not any(
+            "Table column count mismatch" in p.get("reason", "") for p in result.penalties
+        )
         assert len(result.penalties) == 0
 
-    def test_reference_ground_truth_markdown_comparison_penalizes_extra_noise_and_missing_lines(self) -> None:
+    def test_reference_ground_truth_markdown_comparison_penalizes_extra_noise_and_missing_lines(
+        self,
+    ) -> None:
         """Comparing extracted markdown against ground_truth.markdown penalizes unstripped boilerplate and missing substantive lines."""
         ref_md = (
             "# 国家发展改革委令第45号\n\n"
@@ -215,10 +225,14 @@ class TestCleanlinessMetrics:
         )
         assert result.sub_scores.boilerplate_freedom < 100.0
         assert result.sub_scores.structural_integrity < 100.0
-        assert any("unstripped boilerplate/noise line(s)" in p.get("reason", "") for p in result.penalties)
+        assert any(
+            "unstripped boilerplate/noise line(s)" in p.get("reason", "") for p in result.penalties
+        )
         assert any("substantive line(s) missing" in p.get("reason", "") for p in result.penalties)
 
-    def test_portal_metadata_headers_and_korean_chinese_sharing_controls_trigger_boilerplate_penalty(self) -> None:
+    def test_portal_metadata_headers_and_korean_chinese_sharing_controls_trigger_boilerplate_penalty(
+        self,
+    ) -> None:
         """Portal metadata lines (e.g. 字体：[ 大 中 小 ], 담당부서, 조회수, 微信 **X**, 点击量) are strictly penalized."""
         portal_polluted_markdown = (
             "字体：[ 大 中 小 ] 微信 **X**\n"
@@ -244,12 +258,16 @@ class TestCleanlinessMetrics:
             "[Repealed, 1997, c. 20, s. 45]\n"
             "[Repealed, 1997, c. 20, s. 45]\n"
         )
-        result = evaluate_cleanliness(repeated_repeal_markdown, title="Export and Import Permits Act")
+        result = evaluate_cleanliness(
+            repeated_repeal_markdown, title="Export and Import Permits Act"
+        )
 
         assert result.sub_scores.deduplication_purity < 95.0
         assert any(p["dimension"] == "deduplication_purity" for p in result.penalties)
 
-    def test_candidate_matching_clean_ground_truth_markdown_achieves_perfect_cleanliness_score(self) -> None:
+    def test_candidate_matching_clean_ground_truth_markdown_achieves_perfect_cleanliness_score(
+        self,
+    ) -> None:
         """When candidate markdown matches clean ground_truth.markdown, cleanliness score recovers to 100.0 without flag capping."""
         clean_gt_md = (
             "# 国家发展改革委关于修改、废止一批规章和行政规范性文件的决定\n\n"
@@ -289,7 +307,9 @@ class TestCleanlinessMetrics:
         )
         assert result.sub_scores.structural_integrity == 0.0
         assert result.score < 90.0
-        assert any("extracted markdown is empty" in p.get("reason", "").lower() for p in result.penalties)
+        assert any(
+            "extracted markdown is empty" in p.get("reason", "").lower() for p in result.penalties
+        )
 
     def test_severe_recall_and_precision_gaps_against_ground_truth_markdown_scale_without_artificial_caps(
         self,
@@ -382,7 +402,9 @@ class TestCleanlinessMetrics:
             metadata={"ground_truth": {"markdown": ref_md}},
         )
         assert result.sub_scores.boilerplate_freedom < 100.0
-        assert any("unstripped boilerplate/noise line(s)" in p.get("reason", "") for p in result.penalties)
+        assert any(
+            "unstripped boilerplate/noise line(s)" in p.get("reason", "") for p in result.penalties
+        )
 
 
 # ==============================================================================
@@ -448,7 +470,9 @@ class TestAccuracyMetrics:
 
     def test_doc_number_polluted_with_file_size_receives_partial_credit(self) -> None:
         """A doc_number that contains the ground truth but has extraneous bytes (e.g. 372.7 KB) receives partial score."""
-        prediction = {"doc_number": "Western Cape Provincial Gazette 9196 on 18 February 2026 (372.7 KB)"}
+        prediction = {
+            "doc_number": "Western Cape Provincial Gazette 9196 on 18 February 2026 (372.7 KB)"
+        }
         ground_truth = {"doc_number": "Western Cape Provincial Gazette 9196"}
         result = evaluate_accuracy(prediction, ground_truth)
         assert 50.0 <= result.sub_scores.doc_number_accuracy < 90.0
@@ -490,19 +514,27 @@ class TestAccuracyMetrics:
         composite_notice = evaluate_accuracy({"doc_type": "通知公告"}, {"doc_type": "notice"})
         assert composite_notice.sub_scores.doc_type_accuracy == 85.0
 
-    def test_empty_or_whitespace_title_prediction_yields_zero_accuracy_and_records_mismatch(self) -> None:
+    def test_empty_or_whitespace_title_prediction_yields_zero_accuracy_and_records_mismatch(
+        self,
+    ) -> None:
         """Empty or whitespace-only predicted titles must score 0.0 accuracy and record a mismatch."""
         ground_truth = {"title": "Constitution of the Republic of South Africa"}
 
         # Empty string prediction
         result_empty = evaluate_accuracy({"title": ""}, ground_truth)
         assert result_empty.sub_scores.title_accuracy == 0.0
-        assert any(m["field"] == "title" and "Missing or blank title" in m["reason"] for m in result_empty.mismatches)
+        assert any(
+            m["field"] == "title" and "Missing or blank title" in m["reason"]
+            for m in result_empty.mismatches
+        )
 
         # Whitespace-only prediction
         result_ws = evaluate_accuracy({"title": "   \n\t  "}, ground_truth)
         assert result_ws.sub_scores.title_accuracy == 0.0
-        assert any(m["field"] == "title" and "Missing or blank title" in m["reason"] for m in result_ws.mismatches)
+        assert any(
+            m["field"] == "title" and "Missing or blank title" in m["reason"]
+            for m in result_ws.mismatches
+        )
 
         # None prediction
         result_none = evaluate_accuracy({"title": None}, ground_truth)
@@ -640,11 +672,24 @@ class TestBenchmarkEvaluator:
         assert 0.0 <= report.average_accuracy_score <= 100.0
 
         # Dimension scores
-        for dim in ("noise_purity", "encoding_purity", "structural_integrity", "boilerplate_freedom", "deduplication_purity"):
+        for dim in (
+            "noise_purity",
+            "encoding_purity",
+            "structural_integrity",
+            "boilerplate_freedom",
+            "deduplication_purity",
+        ):
             assert dim in report.cleanliness_dimension_scores
             assert 0.0 <= report.cleanliness_dimension_scores[dim] <= 100.0
 
-        for field in ("title_accuracy", "doc_number_accuracy", "published_at_accuracy", "effective_at_accuracy", "issuer_accuracy", "doc_type_accuracy"):
+        for field in (
+            "title_accuracy",
+            "doc_number_accuracy",
+            "published_at_accuracy",
+            "effective_at_accuracy",
+            "issuer_accuracy",
+            "doc_type_accuracy",
+        ):
             assert field in report.accuracy_dimension_scores
             assert 0.0 <= report.accuracy_dimension_scores[field] <= 100.0
 
@@ -669,7 +714,9 @@ class TestBenchmarkEvaluator:
         assert SampleScoreReport is SampleEvaluationResult
         assert report.total_samples == 3
 
-    def test_json_array_with_leading_whitespace_or_newlines_loads_successfully(self, tmp_path: Path) -> None:
+    def test_json_array_with_leading_whitespace_or_newlines_loads_successfully(
+        self, tmp_path: Path
+    ) -> None:
         """JSON array files with leading whitespace or newlines must load cleanly without JSONDecodeError."""
         json_content = (
             "   \n\n"
@@ -692,17 +739,26 @@ class TestBenchmarkEvaluator:
 
     def test_external_ground_truth_takes_precedence_over_embedded_ground_truth(self) -> None:
         """Explicit external ground truth must take precedence over embedded ground truth in candidate items."""
-        candidate_records = [{
-            "id": "cand_override_01",
-            "current_extracted": {"title": "Candidate Prediction Title", "markdown": "# Candidate Prediction Title"},
-            "ground_truth": {"title": "Embedded Ground Truth Title"},
-        }]
-        external_gt_records = [{
-            "id": "cand_override_01",
-            "ground_truth": {"title": "External Override Ground Truth Title"},
-        }]
+        candidate_records = [
+            {
+                "id": "cand_override_01",
+                "current_extracted": {
+                    "title": "Candidate Prediction Title",
+                    "markdown": "# Candidate Prediction Title",
+                },
+                "ground_truth": {"title": "Embedded Ground Truth Title"},
+            }
+        ]
+        external_gt_records = [
+            {
+                "id": "cand_override_01",
+                "ground_truth": {"title": "External Override Ground Truth Title"},
+            }
+        ]
 
-        report = evaluate_benchmark_dataset(candidate_records, ground_truth_path_or_records=external_gt_records)
+        report = evaluate_benchmark_dataset(
+            candidate_records, ground_truth_path_or_records=external_gt_records
+        )
         assert report.total_samples == 1
         sample_res = report.sample_results[0]
         assert sample_res.accuracy is not None
@@ -721,7 +777,9 @@ class TestBenchmarkEvaluator:
 class TestBenchmarkReporter:
     """Generates structured JSON and human-readable Markdown score reports."""
 
-    def test_json_and_markdown_reports_contain_required_score_cards_and_tables(self, tmp_path: Path) -> None:
+    def test_json_and_markdown_reports_contain_required_score_cards_and_tables(
+        self, tmp_path: Path
+    ) -> None:
         """Reporter generates complete, parseable JSON and informative Markdown artifacts."""
         report = evaluate_benchmark_dataset(BENCHMARK_GROUND_TRUTH_PATH)
 
@@ -743,8 +801,14 @@ class TestBenchmarkReporter:
         assert "| >= 91.5 |" in md_str
         assert "| >= 95.0 |" in md_str
         assert "| >= 90.0 |" in md_str
-        assert any("| `boilerplate_freedom` |" in line and "| 25% |" in line for line in md_str.splitlines())
-        assert any("| `deduplication_purity` |" in line and "| 10% |" in line for line in md_str.splitlines())
+        assert any(
+            "| `boilerplate_freedom` |" in line and "| 25% |" in line
+            for line in md_str.splitlines()
+        )
+        assert any(
+            "| `deduplication_purity` |" in line and "| 10% |" in line
+            for line in md_str.splitlines()
+        )
 
         json_out, md_out = write_benchmark_reports(report, tmp_path)
         assert json_out.is_file()
@@ -761,7 +825,9 @@ class TestBenchmarkReporter:
 class TestBenchmarkCommandLineInterface:
     """CLI execution via python -m wlh.benchmark and wlh benchmark."""
 
-    def test_standalone_module_execution_with_valid_arguments_exits_zero(self, tmp_path: Path) -> None:
+    def test_standalone_module_execution_with_valid_arguments_exits_zero(
+        self, tmp_path: Path
+    ) -> None:
         """Executing python -m wlh.benchmark against benchmark dataset generates outputs and exits 0."""
         cmd = [
             sys.executable,
@@ -773,7 +839,9 @@ class TestBenchmarkCommandLineInterface:
             str(tmp_path),
         ]
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
-        assert proc.returncode == 0, f"CLI failed with stderr:\n{proc.stderr}\nstdout:\n{proc.stdout}"
+        assert proc.returncode == 0, (
+            f"CLI failed with stderr:\n{proc.stderr}\nstdout:\n{proc.stdout}"
+        )
 
         json_file = tmp_path / "benchmark_report.json"
         md_file = tmp_path / "benchmark_report.md"

@@ -81,7 +81,10 @@ def normalize(overrides: Any) -> list[dict[str, str]]:
         raise WlhError("invalid_version_overrides")
     result: dict[str, str] = {}
     for item in cast(list[Any], overrides):
-        if not isinstance(item, dict) or set(cast(dict[str, Any], item)) != {"resource_id", "version_id"}:
+        if not isinstance(item, dict) or set(cast(dict[str, Any], item)) != {
+            "resource_id",
+            "version_id",
+        }:
             raise WlhError("invalid_version_overrides")
         resource_id, version_id = uuid(item["resource_id"]), uuid(item["version_id"])
         if resource_id in result:

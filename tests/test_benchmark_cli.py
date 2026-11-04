@@ -24,22 +24,30 @@ SAMPLE_CANDIDATES_PATH = (
 )
 
 
-def run_wlh_cli(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run_wlh_cli(
+    args: list[str], env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """Execute wlh CLI as a clean separate subprocess."""
     merged_env = os.environ.copy()
     if env:
         merged_env.update(env)
     cmd = [sys.executable, "-m", "wlh", *args]
-    return subprocess.run(cmd, capture_output=True, text=True, check=False, env=merged_env, timeout=60)
+    return subprocess.run(
+        cmd, capture_output=True, text=True, check=False, env=merged_env, timeout=60
+    )
 
 
-def run_benchmark_module(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def run_benchmark_module(
+    args: list[str], env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """Execute standalone python -m wlh.benchmark as a clean separate subprocess."""
     merged_env = os.environ.copy()
     if env:
         merged_env.update(env)
     cmd = [sys.executable, "-m", "wlh.benchmark", *args]
-    return subprocess.run(cmd, capture_output=True, text=True, check=False, env=merged_env, timeout=60)
+    return subprocess.run(
+        cmd, capture_output=True, text=True, check=False, env=merged_env, timeout=60
+    )
 
 
 def _create_sample_candidate(
@@ -95,7 +103,9 @@ class TestBenchmarkCliParser:
         assert "--html" in proc.stdout
         assert "--csv" in proc.stdout
 
-    def test_wlh_benchmark_run_help_flag_displays_evaluation_parameters_and_exits_zero(self) -> None:
+    def test_wlh_benchmark_run_help_flag_displays_evaluation_parameters_and_exits_zero(
+        self,
+    ) -> None:
         """Invoking wlh benchmark run --help displays evaluation flags."""
         proc = run_wlh_cli(["benchmark", "run", "--help"])
         assert proc.returncode == 0
@@ -107,7 +117,11 @@ class TestBenchmarkCliParser:
         """Providing an unknown subcommand to wlh benchmark returns exit code 2."""
         proc = run_wlh_cli(["benchmark", "invalid_sub"])
         assert proc.returncode == 2
-        assert "invalid_arguments" in proc.stdout or "invalid" in proc.stderr or "unrecognized" in proc.stderr
+        assert (
+            "invalid_arguments" in proc.stdout
+            or "invalid" in proc.stderr
+            or "unrecognized" in proc.stderr
+        )
 
     def test_wlh_benchmark_invalid_option_flag_returns_exit_code_two(self) -> None:
         """Providing an unrecognized option flag returns exit code 2."""
@@ -155,16 +169,18 @@ class TestBenchmarkCliRunExecution:
         }
         gt_file.write_text(json.dumps(gt_record) + "\n", encoding="utf-8")
 
-        proc = run_wlh_cli([
-            "benchmark",
-            "run",
-            "--input",
-            str(in_file),
-            "--ground-truth",
-            str(gt_file),
-            "--output-dir",
-            str(out_dir),
-        ])
+        proc = run_wlh_cli(
+            [
+                "benchmark",
+                "run",
+                "--input",
+                str(in_file),
+                "--ground-truth",
+                str(gt_file),
+                "--output-dir",
+                str(out_dir),
+            ]
+        )
         assert proc.returncode == 0
         assert (out_dir / "benchmark_report.json").is_file()
         assert (out_dir / "benchmark_report.md").is_file()
@@ -174,14 +190,16 @@ class TestBenchmarkCliRunExecution:
     ) -> None:
         """Run subcommand writes reports to custom --output-dir path."""
         custom_out = tmp_path / "deeply" / "nested" / "reports"
-        proc = run_wlh_cli([
-            "benchmark",
-            "run",
-            "--input",
-            str(SAMPLE_CANDIDATES_PATH),
-            "--output-dir",
-            str(custom_out),
-        ])
+        proc = run_wlh_cli(
+            [
+                "benchmark",
+                "run",
+                "--input",
+                str(SAMPLE_CANDIDATES_PATH),
+                "--output-dir",
+                str(custom_out),
+            ]
+        )
         assert proc.returncode == 0
         assert (custom_out / "benchmark_report.json").is_file()
         assert (custom_out / "benchmark_report.md").is_file()
@@ -191,14 +209,16 @@ class TestBenchmarkCliRunExecution:
     ) -> None:
         """Run subcommand uses data/benchmark/ground_truth_benchmark.jsonl when --ground-truth is omitted."""
         out_dir = tmp_path / "reports_default_gt"
-        proc = run_wlh_cli([
-            "benchmark",
-            "run",
-            "--input",
-            str(SAMPLE_CANDIDATES_PATH),
-            "--output-dir",
-            str(out_dir),
-        ])
+        proc = run_wlh_cli(
+            [
+                "benchmark",
+                "run",
+                "--input",
+                str(SAMPLE_CANDIDATES_PATH),
+                "--output-dir",
+                str(out_dir),
+            ]
+        )
         assert proc.returncode == 0
         report_json = out_dir / "benchmark_report.json"
         assert report_json.is_file()
@@ -206,17 +226,17 @@ class TestBenchmarkCliRunExecution:
         assert report_data["total_samples"] == 2
         assert report_data["average_accuracy_score"] is not None
 
-    def test_sample_subcommand_extracts_candidates_and_manifest(
-        self, tmp_path: Path
-    ) -> None:
+    def test_sample_subcommand_extracts_candidates_and_manifest(self, tmp_path: Path) -> None:
         """Sample subcommand extracts all 721 candidates and writes raw_candidates.jsonl and candidate_manifest.json."""
         out_dir = tmp_path / "sampled_candidates"
-        proc = run_wlh_cli([
-            "benchmark",
-            "sample",
-            "--output-dir",
-            str(out_dir),
-        ])
+        proc = run_wlh_cli(
+            [
+                "benchmark",
+                "sample",
+                "--output-dir",
+                str(out_dir),
+            ]
+        )
         assert proc.returncode == 0
         raw_cands = out_dir / "raw_candidates.jsonl"
         manifest = out_dir / "candidate_manifest.json"
@@ -230,13 +250,15 @@ class TestBenchmarkCliRunExecution:
     ) -> None:
         """Backwards compatibility: wlh benchmark --input ... defaults to evaluation workflow."""
         out_dir = tmp_path / "reports_compat"
-        proc = run_wlh_cli([
-            "benchmark",
-            "--input",
-            str(SAMPLE_CANDIDATES_PATH),
-            "--output-dir",
-            str(out_dir),
-        ])
+        proc = run_wlh_cli(
+            [
+                "benchmark",
+                "--input",
+                str(SAMPLE_CANDIDATES_PATH),
+                "--output-dir",
+                str(out_dir),
+            ]
+        )
         assert proc.returncode == 0
         assert (out_dir / "benchmark_report.json").is_file()
         assert (out_dir / "benchmark_report.md").is_file()
@@ -246,13 +268,15 @@ class TestBenchmarkCliRunExecution:
     ) -> None:
         """Standalone module execution via python -m wlh.benchmark run executes evaluation."""
         out_dir = tmp_path / "reports_module"
-        proc = run_benchmark_module([
-            "run",
-            "--input",
-            str(SAMPLE_CANDIDATES_PATH),
-            "--output-dir",
-            str(out_dir),
-        ])
+        proc = run_benchmark_module(
+            [
+                "run",
+                "--input",
+                str(SAMPLE_CANDIDATES_PATH),
+                "--output-dir",
+                str(out_dir),
+            ]
+        )
         assert proc.returncode == 0
         assert (out_dir / "benchmark_report.json").is_file()
 
@@ -265,9 +289,7 @@ class TestBenchmarkCliRunExecution:
 class TestBenchmarkCliOfflineIsolation:
     """Verifies that evaluation runs 100% locally and initiates zero network requests."""
 
-    def test_run_subcommand_succeeds_with_unreachable_blackhole_proxy(
-        self, tmp_path: Path
-    ) -> None:
+    def test_run_subcommand_succeeds_with_unreachable_blackhole_proxy(self, tmp_path: Path) -> None:
         """Evaluation succeeds cleanly when pointing to unreachable blackhole proxy."""
         out_dir = tmp_path / "reports_offline"
         blackhole_env = {
@@ -285,7 +307,9 @@ class TestBenchmarkCliOfflineIsolation:
             ],
             env=blackhole_env,
         )
-        assert proc.returncode == 0, f"Benchmark run attempted network connection! stderr:\n{proc.stderr}"
+        assert proc.returncode == 0, (
+            f"Benchmark run attempted network connection! stderr:\n{proc.stderr}"
+        )
         assert (out_dir / "benchmark_report.json").is_file()
 
 
@@ -308,14 +332,16 @@ class TestBenchmarkCliEdgeCasesAndErrors:
         """Run with non-existent ground truth file returns exit code 2."""
         in_file = tmp_path / "candidates.jsonl"
         in_file.write_text(json.dumps(_create_sample_candidate("cand_01")) + "\n", encoding="utf-8")
-        proc = run_wlh_cli([
-            "benchmark",
-            "run",
-            "--input",
-            str(in_file),
-            "--ground-truth",
-            "non_existent_gt.jsonl",
-        ])
+        proc = run_wlh_cli(
+            [
+                "benchmark",
+                "run",
+                "--input",
+                str(in_file),
+                "--ground-truth",
+                "non_existent_gt.jsonl",
+            ]
+        )
         assert proc.returncode == 2
 
     def test_benchmark_without_subcommand_or_input_returns_clean_exit_code_two(self) -> None:

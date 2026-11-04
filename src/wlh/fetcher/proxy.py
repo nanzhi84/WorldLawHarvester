@@ -209,9 +209,7 @@ class EphemeralProxy:
             last_err: WlhError | None = None
             for _ in range(3):
                 port = _free_loopback_port()
-                rendered_cmd = cmd_template.format(
-                    port=port, profile=self.profile or "default"
-                )
+                rendered_cmd = cmd_template.format(port=port, profile=self.profile or "default")
                 argv = shlex.split(rendered_cmd)
                 self.process = await asyncio.create_subprocess_exec(
                     *argv,
@@ -224,9 +222,7 @@ class EphemeralProxy:
                     last_err = exc
             raise last_err or WlhError("ephemeral_proxy_startup_failed")
 
-        sub_env = str(
-            self.proxy_cfg.get("subscription_env") or "WLH_PROXY_SUBSCRIPTION_URL"
-        )
+        sub_env = str(self.proxy_cfg.get("subscription_env") or "WLH_PROXY_SUBSCRIPTION_URL")
         fallback_env = str(self.proxy_cfg.get("fallback_uri_env") or "WLH_PROXY_URI")
         region_regex = str(self.proxy_cfg.get("region_regex") or self.profile or ".*")
 

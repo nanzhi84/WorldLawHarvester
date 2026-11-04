@@ -75,14 +75,20 @@ class Html5Reader:
         self.version = version
 
     def original(self, payload: bytes, encoding: str) -> dict[str, Any]:
-        return cast(dict[str, Any], self.page.evaluate(
-            BROWSER_READ, {"markup": payload.decode(encoding), "original": True}
-        ))
+        return cast(
+            dict[str, Any],
+            self.page.evaluate(
+                BROWSER_READ, {"markup": payload.decode(encoding), "original": True}
+            ),
+        )
 
     def markdown(self, markdown: str) -> dict[str, Any]:
-        return cast(dict[str, Any], self.page.evaluate(
-            BROWSER_READ, {"markup": RENDERER.render(markdown), "original": False}
-        ))
+        return cast(
+            dict[str, Any],
+            self.page.evaluate(
+                BROWSER_READ, {"markup": RENDERER.render(markdown), "original": False}
+            ),
+        )
 
 
 @contextmanager
@@ -115,33 +121,53 @@ def missing_fragments(original: dict[str, Any], delivered: dict[str, Any]) -> li
 
 
 def compare_tables(
-    original: dict[str, Any], delivered: dict[str, Any], textual_tables: frozenset[int],
-    *, compare_data: bool = True,
+    original: dict[str, Any],
+    delivered: dict[str, Any],
+    textual_tables: frozenset[int],
+    *,
+    compare_data: bool = True,
 ) -> dict[str, Any]:
     """Compare meaningful visible coordinates; empty layout rows are not legal data."""
     source: list[dict[str, Any]] = original["tables"]
     actual: list[dict[str, Any]] = delivered["tables"]
-    declarations = ["".join(value for row in source[i]["meaningful_grid"] for value in row)
-                    for i in sorted(textual_tables)]
+    declarations = [
+        "".join(value for row in source[i]["meaningful_grid"] for value in row)
+        for i in sorted(textual_tables)
+    ]
     expected = [t for i, t in enumerate(source) if i not in textual_tables and t["meaningful_grid"]]
-    observed = [t for t in actual if t["meaningful_grid"] and
-                "".join(value for row in t["meaningful_grid"] for value in row) not in declarations]
+    observed = [
+        t
+        for t in actual
+        if t["meaningful_grid"]
+        and "".join(value for row in t["meaningful_grid"] for value in row) not in declarations
+    ]
     if not compare_data:
         expected, observed = [], []
     differences: list[dict[str, Any]] = []
     for index, wanted in enumerate(expected):
         got = observed[index] if index < len(observed) else None
         if got is None or wanted["meaningful_grid"] != got["meaningful_grid"]:
-            differences.append({"table": index, "expected_grid": wanted["meaningful_grid"],
-                                "actual_grid": got["meaningful_grid"] if got else None})
+            differences.append(
+                {
+                    "table": index,
+                    "expected_grid": wanted["meaningful_grid"],
+                    "actual_grid": got["meaningful_grid"] if got else None,
+                }
+            )
         if got is not None:
             for caption in wanted["captions"]:
                 if caption not in got["captions"] and caption not in got["preceding_text"]:
                     differences.append({"table": index, "caption_missing_or_unassociated": caption})
     if len(observed) != len(expected):
-        differences.append({"expected_data_tables": len(expected), "actual_data_tables": len(observed)})
+        differences.append(
+            {"expected_data_tables": len(expected), "actual_data_tables": len(observed)}
+        )
     missing_declarations = [s for s in declarations if s not in delivered["text"]]
-    return {"differences": differences, "missing_declarations": missing_declarations,
-            "all_relationships_preserved": not differences and not missing_declarations,
-            "data_table_comparison_in_scope": compare_data,
-            "original_data_tables": len(expected), "delivered_data_tables": len(observed)}
+    return {
+        "differences": differences,
+        "missing_declarations": missing_declarations,
+        "all_relationships_preserved": not differences and not missing_declarations,
+        "data_table_comparison_in_scope": compare_data,
+        "original_data_tables": len(expected),
+        "delivered_data_tables": len(observed),
+    }

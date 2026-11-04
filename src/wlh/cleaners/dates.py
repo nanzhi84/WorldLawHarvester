@@ -330,11 +330,7 @@ def infer_effective_date(
         m_s = m_greg.group(2) or m_greg.group(5)
         d_s = m_greg.group(3) or m_greg.group(6)
         try:
-            explicit_dates.append(
-                datetime(
-                    int(y_s), int(m_s), int(d_s)
-                ).date().isoformat()
-            )
+            explicit_dates.append(datetime(int(y_s), int(m_s), int(d_s)).date().isoformat())
         except ValueError:
             continue
 
@@ -463,9 +459,22 @@ def infer_missing_dates(
 
 
 _ZH_NUM_MAP_MOJ: dict[str, int] = {
-    "零": 0, "○": 0, "０": 0, "Ｏ": 0,
-    "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
-    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10, "百": 100, "元": 1,
+    "零": 0,
+    "○": 0,
+    "０": 0,
+    "Ｏ": 0,
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+    "百": 100,
+    "元": 1,
 }
 _ROC_YMD_RE_MOJ = re.compile(
     r"(?:中華民國|民國)?\s*"
@@ -656,15 +665,9 @@ def resolve_moj_law_dates_and_meta(node: Any) -> dict[str, str | None]:
     is_abolished = bool(raw_aban and raw_aban.strip())
     is_pending = bool(raw_eff and raw_eff.strip() == "99991231")
 
-    status: str | None = (
-        "已廢止" if is_abolished else ("尚未生效" if is_pending else "現行有效")
-    )
+    status: str | None = "已廢止" if is_abolished else ("尚未生效" if is_pending else "現行有效")
 
-    hist_items = [
-        part.strip()
-        for part in re.split(r"(?:^|\s)\d+\.", hist)
-        if part.strip()
-    ]
+    hist_items = [part.strip() for part in re.split(r"(?:^|\s)\d+\.", hist) if part.strip()]
     non_abolish_items: list[str] = []
     non_abolish_dates: list[str] = []
     abolish_dates: list[str] = []
@@ -744,4 +747,3 @@ def resolve_moj_law_dates_and_meta(node: Any) -> dict[str, str | None]:
         "issuer": normalize_moj_law_category_issuer(raw_cat),
         "effective_tier": effective_tier,
     }
-

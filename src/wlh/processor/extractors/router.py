@@ -223,9 +223,7 @@ def _extract_job_params(
             ),
         }
     ocr_cfg: dict[str, Any] = (
-        _as_dict(config.get("ocr"))
-        or _as_dict(ext_cfg.get("ocr"))
-        or _as_dict(proc_cfg.get("ocr"))
+        _as_dict(config.get("ocr")) or _as_dict(ext_cfg.get("ocr")) or _as_dict(proc_cfg.get("ocr"))
     )
     sched_cfg = _as_dict(config.get("scheduler"))
     fetch_cfg = _as_dict(config.get("fetcher"))
@@ -256,9 +254,7 @@ def run_extraction(
         "profile": profile,
         "max_bytes": max_bytes,
     }
-    timeout: float = (
-        ocr_cfg["timeout_seconds"] + parser_cfg["libreoffice_timeout_seconds"] * 2
-    )
+    timeout: float = ocr_cfg["timeout_seconds"] + parser_cfg["libreoffice_timeout_seconds"] * 2
     slots = PDFSlots()
     slot = slots.acquire_blocking(active)
     folder = Path(tempfile.mkdtemp(prefix="wlh-extract-", dir=work_directory()))

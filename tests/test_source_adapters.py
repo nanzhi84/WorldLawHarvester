@@ -27,7 +27,11 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-040", "政策文件", "2026年第2号"),
             ("dd-041", "案例", "第六十批指导性案例"),
             ("dd-102", "通知公告", "京汇罚〔2026〕27号"),
-            ("dd-183", "政策文件", "推进政府债务信息公开 筑牢风险防控底线——财政部印发《地方政府债务信息公开办法》"),
+            (
+                "dd-183",
+                "政策文件",
+                "推进政府债务信息公开 筑牢风险防控底线——财政部印发《地方政府债务信息公开办法》",
+            ),
             ("dd-375", "行业标准", "国统字〔2019〕66号"),
             ("dd-448", "通知公告", "影剧备字〔2026〕第1133号"),
             ("dd-455", "通知公告", "2026年进口网络游戏审批信息"),
@@ -57,12 +61,20 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             ("dd-564", "法律法规", "C-49"),
             ("dd-565", "案例", "2026 SCC 30"),
             ("dd-570", "法律法规", "2026 No 74"),
-            ("dd-572", "法律法规", "Western Cape Provincial Gazette 9196 on 18 February 2026 (372.7 KB)"),
+            (
+                "dd-572",
+                "法律法规",
+                "Western Cape Provincial Gazette 9196 on 18 February 2026 (372.7 KB)",
+            ),
             ("dd-506", "案例", "CACV 382/2024"),
             ("dd-507", "税务资料", "dipn03"),
             ("dd-512", "法律法规", "35/2026/QH16"),
             ("dd-514", "案例", "81/2025/AL"),
-            ("dd-516", "税务资料", "Công ty chúng tôi có dự kiến điều chỉnh tiến độ thực hiện dự án"),
+            (
+                "dd-516",
+                "税务资料",
+                "Công ty chúng tôi có dự kiến điều chỉnh tiến độ thực hiện dự án",
+            ),
             ("dd-517", "法律法规", "明治八年太政官布告第五十四号"),
             ("dd-575", "法律法规", "Luật sửa đổi, bổ sung Điều 6 và Phụ lục IV về"),
             ("dd-525", "法律法规", "Accountants Act 2004"),
@@ -98,7 +110,11 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                 "吉林省桦甸市半截沟区金多金属矿勘查探矿权挂牌出让成交结果公示",
             ),
             ("dd-324", "通知公告", "李强主持召开国务院常务会议"),
-            ("dd-327", "通知公告", "《浙江省自然资源厅关于建立健全国土空间详细规划体系的通知》政策解读"),
+            (
+                "dd-327",
+                "通知公告",
+                "《浙江省自然资源厅关于建立健全国土空间详细规划体系的通知》政策解读",
+            ),
             ("dd-337", "通知公告", "2026年第6期自贸港机关讲坛开讲"),
             ("dd-132", "其他", "商標規費收費標準"),
             ("dd-162", "财务报告", "外籍員工持股信託"),
@@ -135,7 +151,9 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             src_yaml_path = repo_root / "sources" / f"{source_id}.yaml"
             fixture_manifest_path = repo_root / "tests" / "fixtures" / source_id / "manifest.json"
             assert src_yaml_path.is_file(), f"Missing source config {src_yaml_path}"
-            assert fixture_manifest_path.is_file(), f"Missing fixture manifest {fixture_manifest_path}"
+            assert fixture_manifest_path.is_file(), (
+                f"Missing fixture manifest {fixture_manifest_path}"
+            )
 
             from wlh.fixtures import load_fixture_manifest
             from wlh.runbook_samples import STRATA_BADGE_LABELS, stratify_verification_samples
@@ -153,14 +171,10 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
             expectations = cast(dict[str, Any], manifest.get("expectations") or {})
             assert expectations.get("doc_type") == expected_doc_type
             assert expectations.get("substr") == expected_substr
-            require_multi = bool(
-                expectations.get("require_multi_resource", source_id != "dd-375")
-            )
+            require_multi = bool(expectations.get("require_multi_resource", source_id != "dd-375"))
             assert require_multi == (source_id != "dd-375")
 
-            raw_cfg: dict[str, Any] = yaml.safe_load(
-                src_yaml_path.read_text(encoding="utf-8")
-            )
+            raw_cfg: dict[str, Any] = yaml.safe_load(src_yaml_path.read_text(encoding="utf-8"))
             sched: dict[str, Any] = raw_cfg["scheduler"]
             fetcher: dict[str, Any] = raw_cfg.setdefault("fetcher", {})
             parser: dict[str, Any] = raw_cfg.get("processor", {}).get("parser", {})
@@ -306,9 +320,7 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                     )
                     assert len(stratified_replay) == len(strat_candidates)
                     observed_strata = {
-                        tag
-                        for item in stratified_replay
-                        for tag in item.get("sampling_strata", [])
+                        tag for item in stratified_replay for tag in item.get("sampling_strata", [])
                     }
                     assert observed_strata.issubset(set(STRATA_BADGE_LABELS.keys()))
                     assert "p5_shortest" in observed_strata
@@ -326,10 +338,11 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         projected_rows[0],
                     )
                     assert projected["doc_type"] == expected_doc_type
-                    assert (
-                        expected_substr in (projected["doc_number"] or "")
-                        or expected_substr in (projected["title"] or "")
-                    ), f"Expected {expected_substr} in {projected}"
+                    assert expected_substr in (
+                        projected["doc_number"] or ""
+                    ) or expected_substr in (projected["title"] or ""), (
+                        f"Expected {expected_substr} in {projected}"
+                    )
 
                     if expectations.get("require_original_for_all_resources"):
                         assert {
@@ -499,4 +512,3 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
         assert fields_606["issuer"]["value"] == "中国注册税务师协会"
         for req_field in ("title", "document_number", "published_at"):
             assert req_field in fields_606, f"Missing required field {req_field} in dd-606.yaml"
-

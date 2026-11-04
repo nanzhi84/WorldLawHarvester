@@ -133,12 +133,7 @@ def _strip_md_note_to_csv(md_note: str) -> str:
 
 def _extract_entry_urls(raw_url: str) -> list[str]:
     """Split multi-line or delimiter-separated entry URLs."""
-    raw = (
-        raw_url.replace("<br>", "\n")
-        .replace("、", "\n")
-        .replace(",", "\n")
-        .replace("，", "\n")
-    )
+    raw = raw_url.replace("<br>", "\n").replace("、", "\n").replace(",", "\n").replace("，", "\n")
     urls: list[str] = []
     for line in raw.splitlines():
         line = line.strip()
@@ -165,25 +160,13 @@ def _strip_md_name_url(md_cell: str) -> tuple[str, str]:
     """Extract (source_name, url) from MD cell `[Name](URL)` or multiple links."""
     matches = re.findall(r"\[(.*?)\]\((https?://[^)]+)\)", md_cell.strip())
     if len(matches) == 1:
-        name = (
-            matches[0][0]
-            .replace("&amp;", "&")
-            .replace("&gt;", ">")
-            .replace("&lt;", "<")
-            .strip()
-        )
+        name = matches[0][0].replace("&amp;", "&").replace("&gt;", ">").replace("&lt;", "<").strip()
         return name, matches[0][1].strip()
     if len(matches) > 1:
         urls = [m[1].strip() for m in matches]
         base_names: list[str] = []
         for m in matches:
-            raw_n = (
-                m[0]
-                .replace("&amp;", "&")
-                .replace("&gt;", ">")
-                .replace("&lt;", "<")
-                .strip()
-            )
+            raw_n = m[0].replace("&amp;", "&").replace("&gt;", ">").replace("&lt;", "<").strip()
             base_n = re.sub(r"（(?:法规检索|条约协定|入口\s*\d+)）$", "", raw_n).strip()
             base_names.append(base_n)
         common_name = (
@@ -192,12 +175,7 @@ def _strip_md_name_url(md_cell: str) -> tuple[str, str]:
             else "<br>".join(m[0] for m in matches)
         )
         return common_name, "\n".join(urls)
-    name = (
-        md_cell.replace("&amp;", "&")
-        .replace("&gt;", ">")
-        .replace("&lt;", "<")
-        .strip()
-    )
+    name = md_cell.replace("&amp;", "&").replace("&gt;", ">").replace("&lt;", "<").strip()
     return name, ""
 
 
@@ -237,9 +215,7 @@ def _format_status_md(csv_status: str) -> str:
     return "[ ]"
 
 
-def _format_name_url_md(
-    name: str, url: str, existing_md_cell: str | None = None
-) -> str:
+def _format_name_url_md(name: str, url: str, existing_md_cell: str | None = None) -> str:
     clean_name = name.strip()
     urls = _extract_entry_urls(url)
     if not urls:
@@ -250,10 +226,7 @@ def _format_name_url_md(
             return existing_md_cell
     if len(urls) == 1:
         return f"[{clean_name}]({urls[0]})"
-    links = [
-        f"[{_derive_entry_label(clean_name, u, idx)}]({u})"
-        for idx, u in enumerate(urls, 1)
-    ]
+    links = [f"[{_derive_entry_label(clean_name, u, idx)}]({u})" for idx, u in enumerate(urls, 1)]
     return "<br>".join(links)
 
 
@@ -356,17 +329,11 @@ def render_markdown_from_csv(csv_path: Path, md_path: Path) -> str:
         ex = existing_rows.get(sid)
         col_id = f'<a id="{sid}"></a>{sid}'
         col_type = r["资料类型"].strip()
-        col_name_url = _format_name_url_md(
-            r["来源名称"], r["官方入口 URL"], ex[2] if ex else None
-        )
+        col_name_url = _format_name_url_md(r["来源名称"], r["官方入口 URL"], ex[2] if ex else None)
         col_prio = r["优先级"].strip()
-        col_adapter = _format_adapter_md(
-            r["推荐适配器"], ex[4] if ex else None
-        )
+        col_adapter = _format_adapter_md(r["推荐适配器"], ex[4] if ex else None)
         col_status = _format_status_md(r["状态"])
-        col_note = _format_note_md(
-            r["备注与实测结论"], ex[6] if ex else None
-        )
+        col_note = _format_note_md(r["备注与实测结论"], ex[6] if ex else None)
 
         out_lines.append(
             f"| {col_id} | {col_type} | {col_name_url} | {col_prio} | {col_adapter} | {col_status} | {col_note} |"
@@ -375,9 +342,7 @@ def render_markdown_from_csv(csv_path: Path, md_path: Path) -> str:
     return "\n".join(out_lines) + "\n"
 
 
-def sync_csv_to_md(
-    csv_path: Path = DEFAULT_CSV_PATH, md_path: Path = DEFAULT_MD_PATH
-) -> bool:
+def sync_csv_to_md(csv_path: Path = DEFAULT_CSV_PATH, md_path: Path = DEFAULT_MD_PATH) -> bool:
     """Synchronize CSV to MD if resulting content differs. Returns True if MD was updated."""
     lock_path = md_path.with_suffix(".md.lock")
     with lock_path.open("w", encoding="utf-8") as lock_file:
@@ -460,9 +425,7 @@ def render_tax_subtable_from_csv(csv_path: Path = DEFAULT_CSV_PATH) -> str:
 
     extracted.sort(key=lambda item: (item[0], item[1]))
     buf = io.StringIO()
-    writer = csv.DictWriter(
-        buf, fieldnames=list(TAX_SUBTABLE_FIELDNAMES), lineterminator="\n"
-    )
+    writer = csv.DictWriter(buf, fieldnames=list(TAX_SUBTABLE_FIELDNAMES), lineterminator="\n")
     writer.writeheader()
     for _, _, item_row in extracted:
         writer.writerow(item_row)
@@ -481,9 +444,7 @@ def sync_csv_to_tax_subtable(
         try:
             rendered = render_tax_subtable_from_csv(csv_path)
             current = (
-                subtable_path.read_text(encoding="utf-8-sig")
-                if subtable_path.exists()
-                else ""
+                subtable_path.read_text(encoding="utf-8-sig") if subtable_path.exists() else ""
             )
             if rendered == current:
                 return False
@@ -575,7 +536,10 @@ def watch_csv(
             fired = kq.control(reg_events, 1, None)
             reg_events = []
             for ev in fired:
-                if ev.fflags & (select.KQ_NOTE_DELETE | select.KQ_NOTE_RENAME) or ev.ident == dir_fd:
+                if (
+                    ev.fflags & (select.KQ_NOTE_DELETE | select.KQ_NOTE_RENAME)
+                    or ev.ident == dir_fd
+                ):
                     reg_events = _register_fds()
             digest = _file_digest(csv_path)
             if digest and digest != last_digest:

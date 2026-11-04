@@ -73,14 +73,10 @@ def inline_glyph_text(node: Any) -> str | None:
     lower_src = raw_src.lower()
     width, height = str(node.get("width") or ""), str(node.get("height") or "")
     small_explicit = (
-        width.isdigit()
-        and height.isdigit()
-        and 0 < int(width) <= 32
-        and 0 < int(height) <= 32
+        width.isdigit() and height.isdigit() and 0 < int(width) <= 32 and 0 < int(height) <= 32
     )
-    small_or_unbounded = (
-        (not width or (width.isdigit() and 0 < int(width) <= 64))
-        and (not height or (height.isdigit() and 0 < int(height) <= 64))
+    small_or_unbounded = (not width or (width.isdigit() and 0 < int(width) <= 64)) and (
+        not height or (height.isdigit() and 0 < int(height) <= 64)
     )
     if re.fullmatch(r"[0-9０-９]{1,3}", alt) and small_explicit:
         return alt + " "

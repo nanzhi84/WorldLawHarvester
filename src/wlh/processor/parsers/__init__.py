@@ -78,9 +78,7 @@ def normalize_parser_config(config: Mapping[str, Any]) -> dict[str, Any]:
     # Document rules defaults
     nested_docs.setdefault(
         "attachment_url_pattern",
-        parser_spec.get(
-            "attachment_url_pattern", r"(?i)\.(?:pdf|docx?|rtf|xlsx?|zip)(?:$|[?#])"
-        ),
+        parser_spec.get("attachment_url_pattern", r"(?i)\.(?:pdf|docx?|rtf|xlsx?|zip)(?:$|[?#])"),
     )
     nested_docs.setdefault(
         "volume_pattern",
@@ -97,21 +95,16 @@ def normalize_parser_config(config: Mapping[str, Any]) -> dict[str, Any]:
     nested_docs.setdefault("detail_xpath", parser_spec.get("detail_xpath"))
     nested_docs.setdefault("link_scope_xpath", parser_spec.get("link_scope_xpath"))
     nested_docs.setdefault("next_page_xpath", parser_spec.get("next_page_xpath"))
-    nested_docs.setdefault(
-        "attachment_exclude_xpath", parser_spec.get("attachment_exclude_xpath")
-    )
+    nested_docs.setdefault("attachment_exclude_xpath", parser_spec.get("attachment_exclude_xpath"))
     nested_docs.setdefault("attachment_title_xpath", parser_spec.get("attachment_title_xpath"))
     nested_docs.setdefault("attachment_title", parser_spec.get("attachment_title", "link_text"))
     nested_docs.setdefault("detail_body", parser_spec.get("detail_body", "auto"))
     nested_docs.setdefault("content_xpath", parser_spec.get("content_xpath"))
-    nested_docs.setdefault(
-        "exclude_content_xpath", parser_spec.get("exclude_content_xpath")
-    )
+    nested_docs.setdefault("exclude_content_xpath", parser_spec.get("exclude_content_xpath"))
     nested_docs.setdefault(
         "require_complete_text",
         bool(
-            cleaners.get("require_complete_text")
-            or parser_spec.get("require_complete_text", False)
+            cleaners.get("require_complete_text") or parser_spec.get("require_complete_text", False)
         ),
     )
     nested_docs.setdefault(
@@ -194,7 +187,9 @@ def normalize_parser_config(config: Mapping[str, Any]) -> dict[str, Any]:
     fetcher.setdefault("retries", 2)
     fetcher.setdefault("retry_backoff_seconds", 0.5)
     fetcher.setdefault("page_timeout_ms", 30000)
-    fetcher.setdefault("user_agent", out.get("user_agent", "WLH/0.1 (+authorized archival crawler)"))
+    fetcher.setdefault(
+        "user_agent", out.get("user_agent", "WLH/0.1 (+authorized archival crawler)")
+    )
 
     metadata: dict[str, Any] = (
         _as_dict(storage.get("metadata"))
@@ -316,9 +311,7 @@ class Base:
         """Initial requests and targets for a collect Run; ``state`` is adapter_state."""
         entry_urls = self.config["scheduler"]["entry_urls"]
         return {
-            "requests": [
-                {"url": url, "role": "page", "depth": 0} for url in entry_urls
-            ],
+            "requests": [{"url": url, "role": "page", "depth": 0} for url in entry_urls],
             "targets": [],
             "state": state,
         }

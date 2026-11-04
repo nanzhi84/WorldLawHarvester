@@ -553,7 +553,6 @@ _JUR_PREFIX_MAP: dict[str, str] = {
 }
 
 
-
 def load_cached_samples(html_path: Path) -> dict[str, list[dict[str, Any]]]:
     """Load cached sample items per `source_id` from the verification HTML file."""
     if not html_path.is_file():
@@ -641,9 +640,8 @@ def _build_full_runbook_plan(
                 continue
             seen.add((sid, s_idx))
             strata = ", ".join(str(s) for s in item.get("sampling_strata", []) if str(s).strip())
-            reason = (
-                f"Runbook verification sample ({sid}[{s_idx}]): {sname} ({dtype})"
-                + (f"; strata: {strata}." if strata else ".")
+            reason = f"Runbook verification sample ({sid}[{s_idx}]): {sname} ({dtype})" + (
+                f"; strata: {strata}." if strata else "."
             )
             expanded.append((sid, s_idx, jur_code, reason))
 
@@ -674,11 +672,7 @@ def extract_representative_candidates(
                     by_id[str(row.get("id", ""))] = row
         for idx, (sid, s_idx, _, _) in enumerate(plan, start=1):
             cid = f"cand_{idx:02d}"
-            if (
-                cid in by_id
-                and sid in cached_data
-                and s_idx < len(cached_data[sid])
-            ):
+            if cid in by_id and sid in cached_data and s_idx < len(cached_data[sid]):
                 target = cached_data[sid][s_idx]
                 if not target.get("raw_payload"):
                     target["raw_payload"] = by_id[cid].get("raw_payload", "")
@@ -686,7 +680,11 @@ def extract_representative_candidates(
                     target["markdown"] = by_id[cid].get("markdown", "")
 
     plan_needs_hydration = any(
-        not str(cached_data[sid][s_idx].get("raw_payload") or cached_data[sid][s_idx].get("markdown") or "").strip()
+        not str(
+            cached_data[sid][s_idx].get("raw_payload")
+            or cached_data[sid][s_idx].get("markdown")
+            or ""
+        ).strip()
         for sid, s_idx, _, _ in plan
         if sid in cached_data and s_idx < len(cached_data[sid])
     )
@@ -694,9 +692,7 @@ def extract_representative_candidates(
         from wlh.runbook_samples import hydrate_samples_from_store
 
         try:
-            cached_data = hydrate_samples_from_store(
-                cached_data, full=False, csv_path=csv_path
-            )
+            cached_data = hydrate_samples_from_store(cached_data, full=False, csv_path=csv_path)
         except Exception:
             pass
     source_meta = load_source_metadata(csv_path)
@@ -725,12 +721,12 @@ def extract_representative_candidates(
         # Ensure raw_payload is non-empty (fall back to markdown for PDF-native sources)
         raw_payload = str(raw_item.get("raw_payload") or raw_item.get("markdown") or "").strip()
         if not raw_payload:
-            raise ValueError(f"Candidate {cand_id} ({source_id}[{sample_idx}]) has empty raw_payload")
+            raise ValueError(
+                f"Candidate {cand_id} ({source_id}[{sample_idx}]) has empty raw_payload"
+            )
 
         # Resolve strata and route
-        sampling_strata = [
-            str(s) for s in raw_item.get("sampling_strata", []) if str(s).strip()
-        ]
+        sampling_strata = [str(s) for s in raw_item.get("sampling_strata", []) if str(s).strip()]
         quality_route = str(raw_item.get("quality_route") or "accept").strip()
 
         doc_type = smeta.get("doc_type") or "其他"
@@ -872,5 +868,3 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-
-

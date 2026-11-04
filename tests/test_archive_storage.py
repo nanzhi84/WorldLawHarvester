@@ -151,19 +151,14 @@ class TestDatabaseInitialization:
                         sql.Identifier(stray_db)
                     )
                 )
-                conn.execute(
-                    sql.SQL("CREATE DATABASE {}").format(sql.Identifier(stray_db))
-                )
+                conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(stray_db)))
 
             existing_buckets = {
-                str(b.get("Name", ""))
-                for b in s3_client.list_buckets().get("Buckets", [])
+                str(b.get("Name", "")) for b in s3_client.list_buckets().get("Buckets", [])
             }
             if stray_bucket not in existing_buckets:
                 s3_client.create_bucket(Bucket=stray_bucket)
-            s3_client.put_object(
-                Bucket=stray_bucket, Key="stray.txt", Body=b"stray-payload"
-            )
+            s3_client.put_object(Bucket=stray_bucket, Key="stray.txt", Body=b"stray-payload")
 
             ensure_test_db_and_bucket(wlh_env)
 
@@ -173,14 +168,10 @@ class TestDatabaseInitialization:
                 ).fetchall()
                 found_dbs = {str(r[0]) for r in db_rows}
             assert stray_db not in found_dbs
-            assert all(
-                db in allowed_dbs or bool(_TEST_DB_NAME_RE.match(db))
-                for db in found_dbs
-            )
+            assert all(db in allowed_dbs or bool(_TEST_DB_NAME_RE.match(db)) for db in found_dbs)
 
             remaining_buckets = {
-                str(b.get("Name", ""))
-                for b in s3_client.list_buckets().get("Buckets", [])
+                str(b.get("Name", "")) for b in s3_client.list_buckets().get("Buckets", [])
             }
             assert stray_bucket not in remaining_buckets
             assert remaining_buckets.issubset(allowed_buckets)
@@ -192,13 +183,9 @@ class TestDatabaseInitialization:
                     )
                 )
             try:
-                objs = s3_client.list_objects_v2(Bucket=stray_bucket).get(
-                    "Contents", []
-                )
+                objs = s3_client.list_objects_v2(Bucket=stray_bucket).get("Contents", [])
                 for obj in objs:
-                    s3_client.delete_object(
-                        Bucket=stray_bucket, Key=str(obj["Key"])
-                    )
+                    s3_client.delete_object(Bucket=stray_bucket, Key=str(obj["Key"]))
                 s3_client.delete_bucket(Bucket=stray_bucket)
             except Exception:
                 pass
@@ -214,7 +201,9 @@ class TestContentAddressableStorage:
         objects = Objects()
         objects.check()
 
-        payload = b"WorldLawHarvester S3 CAS immutability verification payload \xe6\xb3\x95\xe5\xbe\x8b"
+        payload = (
+            b"WorldLawHarvester S3 CAS immutability verification payload \xe6\xb3\x95\xe5\xbe\x8b"
+        )
         expected_sha = hashlib.sha256(payload).hexdigest()
 
         returned_sha = objects.put(payload)
@@ -223,9 +212,7 @@ class TestContentAddressableStorage:
         read_back = objects.get(expected_sha)
         assert read_back == payload
 
-    def test_missing_or_malformed_hash_raises_archive_error(
-        self, wlh_env: dict[str, str]
-    ) -> None:
+    def test_missing_or_malformed_hash_raises_archive_error(self, wlh_env: dict[str, str]) -> None:
         """Requesting an unknown or malformed SHA-256 digest raises a deterministic archive error."""
         from wlh.core import WlhError
         from wlh.storage.cas import Objects

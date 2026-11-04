@@ -323,9 +323,7 @@ def prepare_run(path: str | Path, mode: str, *, enqueue: bool = False) -> str:
                 {"action": "select_configuration", "config_hash": fingerprint},
             )
         if not frontier:
-            c.execute(
-                "INSERT INTO wlh.frontier(id,source_id) VALUES(%s,%s)", (uid(), config["id"])
-            )
+            c.execute("INSERT INTO wlh.frontier(id,source_id) VALUES(%s,%s)", (uid(), config["id"]))
         identity = create_run(config["id"], mode, c, frozen)
         if enqueue:
             from wlh.scheduler.queue import enqueue as submit

@@ -223,8 +223,7 @@ class JsonParser(RecordAdapter):
             re.compile(p) for p in rules.get("detail_url_patterns", ())
         ]
         self._attachment: re.Pattern[str] = re.compile(
-            rules.get("attachment_url_pattern")
-            or r"(?i)\.(?:pdf|docx?|rtf|xlsx?|zip)(?:$|[?#])"
+            rules.get("attachment_url_pattern") or r"(?i)\.(?:pdf|docx?|rtf|xlsx?|zip)(?:$|[?#])"
         )
         self._max_pages: int = int(self.options.get("max_pages", 1))
 
@@ -426,9 +425,7 @@ class JsonParser(RecordAdapter):
                         ):
                             seen_json_links.add(att_link)
                             desc = str(
-                                fs_map.get("resourceDescription")
-                                or ds_obj.get("title")
-                                or ""
+                                fs_map.get("resourceDescription") or ds_obj.get("title") or ""
                             ).strip()
                             attachments.append({"url": att_link, "text": desc})
             else:
@@ -468,8 +465,7 @@ class JsonParser(RecordAdapter):
                         )
                         cur_page = (
                             int(cur_page_raw)
-                            if isinstance(cur_page_raw, (int, str))
-                            and str(cur_page_raw).isdigit()
+                            if isinstance(cur_page_raw, (int, str)) and str(cur_page_raw).isdigit()
                             else 1
                         )
                         last_page_raw = pl_obj.get("lastPage")
@@ -562,9 +558,7 @@ class JsonParser(RecordAdapter):
                 }
             if role == "batch":
                 results: Any = (
-                    cast(dict[str, Any], value).get("results")
-                    if isinstance(value, dict)
-                    else None
+                    cast(dict[str, Any], value).get("results") if isinstance(value, dict) else None
                 )
                 if (
                     results is None
@@ -578,9 +572,7 @@ class JsonParser(RecordAdapter):
                 for item in cast(list[dict[str, Any]], results):
                     target = self.target(item, request, None)
                     target["inputs"][0].pop("pointer")
-                    target["inputs"][0]["select"] = {
-                        "document_number": item["document_number"]
-                    }
+                    target["inputs"][0]["select"] = {"document_number": item["document_number"]}
                     targets.append(target)
                 return {"requests": [], "targets": targets}
             results = (
@@ -861,21 +853,51 @@ class JsonParser(RecordAdapter):
                 if "cases" in vdict or "opinions" in vdict:
                     entries = items(value, ("cases", "opinions", "results"))
                     if entries and any(
-                        k in entries[0] for k in ("case_name", "caseName", "docket_number", "download_url")
+                        k in entries[0]
+                        for k in ("case_name", "caseName", "docket_number", "download_url")
                     ):
                         return self._juriscraper_json_records(value, acquisition, limit)
                     return self._oldp_json_records(entries, limit)
-            entries = items(value, ("bills", "decisions", "cases", "opinions", "records", "results", "data"))
+            entries = items(
+                value, ("bills", "decisions", "cases", "opinions", "records", "results", "data")
+            )
             if not entries:
                 return []
             sample = entries[0]
-            if "identifier" in sample or "from_organization" in sample or "openstates_url" in sample or "versions" in sample:
+            if (
+                "identifier" in sample
+                or "from_organization" in sample
+                or "openstates_url" in sample
+                or "versions" in sample
+            ):
                 return self._openstates_records(entries)
-            if "decision_id" in sample or "citation_string_de" in sample or ("docket_number" in sample and ("full_text" in sample or "decision_date" in sample)):
+            if (
+                "decision_id" in sample
+                or "citation_string_de" in sample
+                or (
+                    "docket_number" in sample
+                    and ("full_text" in sample or "decision_date" in sample)
+                )
+            ):
                 return self._opencaselaw_records(entries, limit)
-            if any(k in sample for k in ("case_name", "case_names", "caseName", "cluster_id", "download_url", "download_urls")):
+            if any(
+                k in sample
+                for k in (
+                    "case_name",
+                    "case_names",
+                    "caseName",
+                    "cluster_id",
+                    "download_url",
+                    "download_urls",
+                )
+            ):
                 return self._juriscraper_json_records(value, acquisition, limit)
-            if sample.get("model") == "cases.case" or "ecli" in sample or "file_number" in sample or isinstance(sample.get("fields"), dict):
+            if (
+                sample.get("model") == "cases.case"
+                or "ecli" in sample
+                or "file_number" in sample
+                or isinstance(sample.get("fields"), dict)
+            ):
                 return self._oldp_json_records(entries, limit)
             return self._worldwidelaw_records(entries)
         if zipped or data.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(
@@ -1086,9 +1108,7 @@ class JsonParser(RecordAdapter):
                 or item.get("name")
             )
             number = (
-                item.get("docket_number")
-                or item.get("docket_numbers")
-                or item.get("docketNumber")
+                item.get("docket_number") or item.get("docket_numbers") or item.get("docketNumber")
             )
             raw_opinions = item.get("opinions")
             opinions: list[Any] = (
@@ -1177,9 +1197,7 @@ class JsonParser(RecordAdapter):
             self.truncated = "document_budget_exceeded"
         return result[:limit]
 
-    def _worldwidelaw_records(
-        self, entries: Sequence[Mapping[str, Any]]
-    ) -> list[dict[str, Any]]:
+    def _worldwidelaw_records(self, entries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         detail_tmpl = self.options.get("detail_url_template")
         att_rules = self.options.get("attachment_rules")
         records_out: list[dict[str, Any]] = []
@@ -1221,9 +1239,7 @@ class JsonParser(RecordAdapter):
                     ),
                     "title": r["title"],
                     "doc_number": r.get("document_number") or r.get("number"),
-                    "issuer": (
-                        r.get("issuing_authority") or r.get("authority") or r.get("issuer")
-                    ),
+                    "issuer": (r.get("issuing_authority") or r.get("authority") or r.get("issuer")),
                     "published_at": r.get("date") or r.get("publication_date"),
                     "effective_at": r.get("effective_date"),
                     "detail_url": detail_url,
@@ -1233,9 +1249,7 @@ class JsonParser(RecordAdapter):
             )
         return records_out
 
-    def next_requests(
-        self, data: bytes, acquisition: Mapping[str, Any]
-    ) -> list[dict[str, Any]]:
+    def next_requests(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
         official = japan_requests(data, acquisition, self.config)
         if official is not None:
             return official
@@ -1342,9 +1356,7 @@ class JsonParser(RecordAdapter):
             except etree.XMLSyntaxError:
                 return []
             if etree.QName(tree).localname == "items":
-                base = str(
-                    acquisition.get("actual_url") or acquisition.get("request_url") or ""
-                )
+                base = str(acquisition.get("actual_url") or acquisition.get("request_url") or "")
                 base_parts = urlsplit(base)
                 urls: list[str] = []
                 seen: set[str] = set()
@@ -1362,9 +1374,7 @@ class JsonParser(RecordAdapter):
                     )
                     try:
                         candidate = public_url(
-                            urlunsplit(
-                                (scheme, parts.netloc, parts.path or "/", parts.query, "")
-                            )
+                            urlunsplit((scheme, parts.netloc, parts.path or "/", parts.query, ""))
                         )
                         guard(self.config, candidate)
                     except (WlhError, ValueError):
