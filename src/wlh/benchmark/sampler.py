@@ -8,11 +8,20 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence, cast
+from urllib.parse import urlsplit, urlunsplit
+
+from wlh.benchmark.models import (
+    ContentPageGroundTruth,
+    ListPageGroundTruth,
+    ProcessorBenchmarkTask,
+    RecordGroundTruth,
+)
 
 DEFAULT_HTML_PATH = Path("docs/runbooks/source-verification-samples.html")
 DEFAULT_CSV_PATH = Path("docs/runbooks/source-adaptation-matrix.csv")
@@ -662,37 +671,95 @@ def extract_representative_candidates(
         tuple of (candidates_list, manifest_dict)
     """
     cached_data = load_cached_samples(html_path)
-    local_jsonl = DEFAULT_OUTPUT_DIR / "raw_candidates.jsonl"
-    if local_jsonl.exists():
-        by_id: dict[str, dict[str, Any]] = {}
-        with local_jsonl.open("r", encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    row = json.loads(line)
-                    by_id[str(row.get("id", ""))] = row
-        for idx, (sid, s_idx, _, _) in enumerate(plan, start=1):
-            cid = f"cand_{idx:02d}"
-            if cid in by_id and sid in cached_data and s_idx < len(cached_data[sid]):
-                target = cached_data[sid][s_idx]
-                if not target.get("raw_payload"):
-                    target["raw_payload"] = by_id[cid].get("raw_payload", "")
-                if not target.get("markdown"):
-                    target["markdown"] = by_id[cid].get("markdown", "")
+    by_id: dict[str, dict[str, Any]] = {}
+    for local_jsonl in (
+        DEFAULT_OUTPUT_DIR / "raw_candidates.jsonl",
+        Path("tests/fixtures/benchmark/candidates_sample.jsonl"),
+        DEFAULT_OUTPUT_DIR / "ground_truth_benchmark.jsonl",
+    ):
+        if local_jsonl.is_file():
+            with local_jsonl.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        row = json.loads(line)
+                        rid = str(row.get("id", ""))
+                        sid_row = str(row.get("source_id", ""))
+                        prefix = f"content_{sid_row}_"
+                        cid_key = rid[len(prefix) :] if rid.startswith(prefix) else rid
+                        by_id.setdefault(cid_key, row)
+    pipeline_json = DEFAULT_OUTPUT_DIR / "annotation_pipeline.json"
+    if pipeline_json.is_file():
+        try:
+            pipe_data: Any = json.loads(pipeline_json.read_text(encoding="utf-8"))
+            pipe_items: list[object] = (
+                cast(list[object], cast(dict[str, Any], pipe_data).get("items", []))
+                if isinstance(pipe_data, dict)
+                else []
+            )
+            for row_raw in pipe_items:
+                if isinstance(row_raw, dict):
+                    row_dict = cast(dict[str, Any], row_raw)
+                    rid = str(row_dict.get("id", ""))
+                    if "_cand_" in rid:
+                        sid_row = str(row_dict.get("source_id", ""))
+                        prefix = f"content_{sid_row}_"
+                        cid_key = rid[len(prefix) :] if rid.startswith(prefix) else rid
+                        by_id.setdefault(cid_key, row_dict)
+        except Exception:
+            pass
 
-    plan_needs_hydration = any(
-        not str(
-            cached_data[sid][s_idx].get("raw_payload")
-            or cached_data[sid][s_idx].get("markdown")
-            or ""
-        ).strip()
+    for idx, (sid, s_idx, _, _) in enumerate(plan, start=1):
+        cid = f"cand_{idx:02d}"
+        if cid in by_id and sid in cached_data and s_idx < len(cached_data[sid]):
+            target = cached_data[sid][s_idx]
+            src_row = by_id[cid]
+            if not target.get("raw_payload") or str(target.get("raw_payload", "")).strip().endswith(
+                "…(truncated)"
+            ):
+                if src_row.get("raw_payload"):
+                    target["raw_payload"] = src_row["raw_payload"]
+            if not target.get("markdown"):
+                md_val: Any = src_row.get("markdown")
+                if not md_val:
+                    arb_raw = src_row.get("arbitration")
+                    gt_obj: Any = src_row.get("ground_truth") or (
+                        cast(dict[str, Any], arb_raw).get("authoritative_ground_truth")
+                        if isinstance(arb_raw, dict)
+                        else None
+                    )
+                    if isinstance(gt_obj, dict):
+                        gt_dict = cast(dict[str, Any], gt_obj)
+                        recs = gt_dict.get("records")
+                        if isinstance(recs, list) and recs:
+                            recs_list = cast(list[object], recs)
+                            if isinstance(recs_list[0], dict):
+                                md_val = cast(dict[str, Any], recs_list[0]).get("markdown")
+                if md_val:
+                    target["markdown"] = str(md_val)
+
+    missing_sids = {
+        sid
         for sid, s_idx, _, _ in plan
-        if sid in cached_data and s_idx < len(cached_data[sid])
-    )
-    if plan_needs_hydration:
+        if sid in cached_data
+        and s_idx < len(cached_data[sid])
+        and (
+            not str(
+                cached_data[sid][s_idx].get("raw_payload")
+                or cached_data[sid][s_idx].get("markdown")
+                or ""
+            ).strip()
+            or str(cached_data[sid][s_idx].get("raw_payload") or "")
+            .strip()
+            .endswith("…(truncated)")
+        )
+    }
+    if missing_sids:
         from wlh.runbook_samples import hydrate_samples_from_store
 
         try:
-            cached_data = hydrate_samples_from_store(cached_data, full=False, csv_path=csv_path)
+            subset = {sid: cached_data[sid] for sid in missing_sids}
+            hydrated_subset = hydrate_samples_from_store(subset, full=True, csv_path=csv_path)
+            cached_data.update(hydrated_subset)
         except Exception:
             pass
     source_meta = load_source_metadata(csv_path)
@@ -817,6 +884,411 @@ def write_benchmark_candidates(
     manifest_path = output_dir / "candidate_manifest.json"
     with manifest_path.open("w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
+
+
+def export_processor_batch_bundle(
+    output_path: Path | str = DEFAULT_OUTPUT_DIR / "processor_batch_bundle.jsonl",
+    fixtures_dir: Path | str = Path("tests/fixtures"),
+    candidates_path: Path | str = DEFAULT_OUTPUT_DIR / "raw_candidates.jsonl",
+    csv_path: Path | str = DEFAULT_CSV_PATH,
+    max_list_per_source: int = 1,
+    max_content_per_source: int = 10,
+    max_char_length: int = 100_000,
+) -> list[ProcessorBenchmarkTask]:
+    """Export 100% untruncated HTML/JSON/XML batch bundle covering list pages and content pages.
+
+    Excludes pure binaries (PDF/Office/ZIP/images). Deduplicates bulk containers by (source_id, payload_sha256).
+    Applies per-source caps (max 1 representative list page + up to 10 content pages per source).
+    """
+    out_file = Path(output_path)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+
+    fix_dir = Path(fixtures_dir)
+    source_metadata = load_source_metadata(Path(csv_path)) if Path(csv_path).is_file() else {}
+
+    list_tasks_by_source: dict[str, list[ProcessorBenchmarkTask]] = {}
+    content_tasks_by_source: dict[str, list[ProcessorBenchmarkTask]] = {}
+    seen_payload_hashes: set[tuple[str, str]] = set()
+
+    BINARY_EXTENSIONS = {
+        ".pdf",
+        ".docx",
+        ".doc",
+        ".xlsx",
+        ".xls",
+        ".zip",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".bin",
+    }
+    BINARY_PREFIXES = (b"%PDF-", b"PK\x03\x04", b"\xd0\xcf\x11\xe0", b"\x89PNG")
+
+    # 1. Scan tests/fixtures/dd-*/manifest.json
+    manifest_paths = sorted(fix_dir.glob("dd-*/manifest.json"))
+    for mf in manifest_paths:
+        try:
+            with mf.open("r", encoding="utf-8") as f:
+                mdata = json.load(f)
+        except Exception:
+            continue
+
+        sid = mdata.get("source_id") or mf.parent.name
+        meta = source_metadata.get(sid, {})
+        jur = meta.get("jurisdiction") or "CN"
+        sample_urls = [s.get("public_url") for s in mdata.get("samples", []) if s.get("public_url")]
+
+        routes = mdata.get("routes", [])
+        for r_idx, r in enumerate(routes, start=1):
+            if r.get("status") != 200:
+                continue
+
+            content_type = r.get("content_type", "")
+            fix_name = r.get("fixture", "")
+            if not fix_name:
+                continue
+
+            fix_file = mf.parent / fix_name
+            if not fix_file.is_file():
+                continue
+
+            # Skip binary files
+            if fix_file.suffix.lower() in BINARY_EXTENSIONS or any(
+                b in content_type.lower()
+                for b in ["pdf", "zip", "word", "excel", "image", "octet-stream"]
+            ):
+                continue
+
+            try:
+                raw_bytes = fix_file.read_bytes()
+            except Exception:
+                continue
+
+            if any(raw_bytes.startswith(p) for p in BINARY_PREFIXES):
+                continue
+
+            enc = r.get("encoding", "utf-8")
+            try:
+                raw_payload = raw_bytes.decode(enc)
+            except Exception:
+                try:
+                    raw_payload = raw_bytes.decode("utf-8", errors="replace")
+                except Exception:
+                    continue
+
+            if not raw_payload.strip() or raw_payload.strip().endswith("…(truncated)"):
+                continue
+            if len(raw_payload) > max_char_length:
+                continue
+
+            p_hash = hashlib.sha256(raw_payload.encode("utf-8")).hexdigest()
+            if (sid, p_hash) in seen_payload_hashes:
+                continue
+            seen_payload_hashes.add((sid, p_hash))
+
+            # Determine MIME type
+            if "json" in content_type:
+                mime = "application/json"
+            elif "xml" in content_type:
+                mime = "application/xml"
+            else:
+                mime = "text/html"
+
+            # Determine task_type and request_url
+            r_path = r.get("path", "")
+            base_url = sample_urls[0] if sample_urls else f"https://www.wlh-benchmark.test/{sid}"
+            parsed_base = urlsplit(base_url)
+            if r_path.startswith("http://") or r_path.startswith("https://"):
+                req_url = r_path
+            else:
+                req_url = urlunsplit(
+                    (
+                        parsed_base.scheme,
+                        parsed_base.netloc,
+                        r_path if r_path.startswith("/") else f"/{r_path}",
+                        "",
+                        "",
+                    )
+                )
+
+            is_sample_detail = any(
+                (r_path and r_path in s) or (s and s.endswith(r_path)) for s in sample_urls
+            )
+            if is_sample_detail or (
+                mime in ["application/json", "application/xml"] and not r_path.endswith("/")
+            ):
+                t_type = "content_page"
+                t_id = f"content_{sid}_{r_idx:02d}"
+            else:
+                t_type = "list_page"
+                t_id = f"list_{sid}_{r_idx:02d}"
+
+            task = ProcessorBenchmarkTask(
+                id=t_id,
+                task_type=t_type,
+                source_id=sid,
+                jurisdiction=jur,
+                request_url=req_url,
+                mime_type=mime,
+                raw_payload=raw_payload,
+                payload_sha256=p_hash,
+            )
+            if t_type == "list_page":
+                list_tasks_by_source.setdefault(sid, []).append(task)
+            else:
+                content_tasks_by_source.setdefault(sid, []).append(task)
+
+    # 2. Ingest raw_candidates.jsonl or annotation_pipeline.json (content pages)
+    c_path = Path(candidates_path)
+    if not c_path.is_file() and c_path == DEFAULT_OUTPUT_DIR / "raw_candidates.jsonl":
+        pipeline_fallback = DEFAULT_OUTPUT_DIR / "annotation_pipeline.json"
+        if pipeline_fallback.is_file():
+            c_path = pipeline_fallback
+    if c_path.is_file():
+        cand_items: list[dict[str, Any]] = []
+        if c_path.suffix == ".json":
+            raw_obj: Any = json.loads(c_path.read_text(encoding="utf-8"))
+            pipe_items: list[object] = (
+                cast(list[object], cast(dict[str, Any], raw_obj).get("items", []))
+                if isinstance(raw_obj, dict)
+                else cast(list[object], raw_obj)
+            )
+            for item_raw in pipe_items:
+                if not isinstance(item_raw, dict):
+                    continue
+                it_dict = cast(dict[str, Any], item_raw)
+                full_id = str(it_dict.get("id", ""))
+                if it_dict.get("task_type") == "content_page" and "_cand_" in full_id:
+                    sid_str = str(it_dict.get("source_id", ""))
+                    prefix = f"content_{sid_str}_"
+                    cid = full_id[len(prefix) :] if full_id.startswith(prefix) else full_id
+                    cand_items.append(
+                        {
+                            "id": cid,
+                            "source_id": sid_str,
+                            "jurisdiction": it_dict.get("jurisdiction", "CN"),
+                            "detail_url": it_dict.get("request_url", ""),
+                            "raw_payload": it_dict.get("raw_payload", ""),
+                        }
+                    )
+        else:
+            with c_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        cand_items.append(json.loads(line.strip()))
+
+        has_trunc = any(
+            str(it.get("raw_payload", "")).strip().endswith("…(truncated)") for it in cand_items
+        )
+        if has_trunc:
+            try:
+                from wlh.runbook_samples import hydrate_samples_from_store
+
+                cached = load_cached_samples(DEFAULT_HTML_PATH)
+                hydrated = hydrate_samples_from_store(cached, full=True, csv_path=Path(csv_path))
+                by_sid_idx: dict[tuple[str, int], str] = {}
+                for sid, s_list in hydrated.items():
+                    for s_i, s_data in enumerate(s_list):
+                        if s_data.get("raw_payload"):
+                            by_sid_idx[(sid, s_i)] = s_data["raw_payload"]
+                for it in cand_items:
+                    cid = it.get("id", "")
+                    for plan_idx, (p_sid, p_idx, _, _) in enumerate(CANDIDATE_PLAN, start=1):
+                        if f"cand_{plan_idx:02d}" == cid:
+                            if (p_sid, p_idx) in by_sid_idx:
+                                it["raw_payload"] = by_sid_idx[(p_sid, p_idx)]
+                            break
+            except Exception:
+                pass
+
+        for it in cand_items:
+            sid = it.get("source_id", "")
+            raw_payload = str(it.get("raw_payload") or "")
+            if not raw_payload.strip() or raw_payload.strip().endswith("…(truncated)"):
+                continue
+            if len(raw_payload) > max_char_length:
+                continue
+
+            raw_bytes = raw_payload[:64].encode("latin-1", errors="ignore")
+            if any(raw_bytes.startswith(p) for p in BINARY_PREFIXES):
+                continue
+
+            p_hash = hashlib.sha256(raw_payload.encode("utf-8")).hexdigest()
+            if (sid, p_hash) in seen_payload_hashes:
+                continue
+            seen_payload_hashes.add((sid, p_hash))
+
+            # Determine mime
+            if raw_payload.lstrip().startswith("{") or raw_payload.lstrip().startswith("["):
+                mime = "application/json"
+            elif raw_payload.lstrip().startswith("<?xml") or raw_payload.lstrip().startswith(
+                "<xml"
+            ):
+                mime = "application/xml"
+            else:
+                mime = "text/html"
+
+            task = ProcessorBenchmarkTask(
+                id=f"content_{sid}_{it.get('id', 'sample')}",
+                task_type="content_page",
+                source_id=sid,
+                jurisdiction=it.get("jurisdiction", "CN"),
+                request_url=it.get("detail_url") or f"https://www.wlh-benchmark.test/{sid}",
+                mime_type=mime,
+                raw_payload=raw_payload,
+                payload_sha256=p_hash,
+            )
+            content_tasks_by_source.setdefault(sid, []).append(task)
+
+    # 3. Assemble final tasks capped at max_list_per_source and max_content_per_source
+    all_sids = sorted(set(list_tasks_by_source.keys()) | set(content_tasks_by_source.keys()))
+    tasks: list[ProcessorBenchmarkTask] = []
+    for sid in all_sids:
+        tasks.extend(list_tasks_by_source.get(sid, [])[:max_list_per_source])
+        tasks.extend(content_tasks_by_source.get(sid, [])[:max_content_per_source])
+
+    # Write output
+    with out_file.open("w", encoding="utf-8") as f:
+        for t in tasks:
+            f.write(json.dumps(t.model_dump(), ensure_ascii=False) + "\n")
+
+    return tasks
+
+
+def run_preflight_checks(
+    bundle_path: Path | str = DEFAULT_OUTPUT_DIR / "ground_truth_benchmark.jsonl",
+) -> dict[str, Any]:
+    """Execute pre-flight static verification checks before uploading to GPU worker."""
+    b_path = Path(bundle_path)
+    if not b_path.is_file():
+        fallback = DEFAULT_OUTPUT_DIR / "annotation_pipeline.json"
+        if b_path == DEFAULT_OUTPUT_DIR / "ground_truth_benchmark.jsonl" and fallback.is_file():
+            b_path = fallback
+        else:
+            raise FileNotFoundError(f"Processor batch bundle not found: {b_path}")
+
+    tasks: list[ProcessorBenchmarkTask] = []
+    if b_path.suffix == ".json":
+        raw_obj: Any = json.loads(b_path.read_text(encoding="utf-8"))
+        items_list: list[object] = (
+            cast(list[object], cast(dict[str, Any], raw_obj).get("items", []))
+            if isinstance(raw_obj, dict)
+            else cast(list[object], raw_obj)
+        )
+        for idx, item in enumerate(items_list, start=1):
+            try:
+                tasks.append(ProcessorBenchmarkTask.model_validate(item))
+            except Exception as e:
+                raise ValueError(f"Item {idx} violates ProcessorBenchmarkTask schema: {e}") from e
+    else:
+        with b_path.open("r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, start=1):
+                if line.strip():
+                    try:
+                        tasks.append(ProcessorBenchmarkTask.model_validate_json(line.strip()))
+                    except Exception as e:
+                        raise ValueError(
+                            f"Line {line_num} violates ProcessorBenchmarkTask schema: {e}"
+                        ) from e
+
+    if not tasks:
+        raise ValueError("Batch bundle contains zero tasks.")
+
+    list_tasks = [t for t in tasks if t.task_type == "list_page"]
+    content_tasks = [t for t in tasks if t.task_type == "content_page"]
+
+    if not list_tasks:
+        raise ValueError("Batch bundle contains zero list_page tasks.")
+    if not content_tasks:
+        raise ValueError("Batch bundle contains zero content_page tasks.")
+
+    BINARY_PREFIXES = (b"%PDF-", b"PK\x03\x04", b"\xd0\xcf\x11\xe0", b"\x89PNG")
+
+    warnings: list[str] = []
+    for t in tasks:
+        # Check 1: No truncation
+        if t.raw_payload.strip().endswith("…(truncated)"):
+            raise ValueError(f"Task {t.id} has truncated payload (ends with …(truncated))")
+        if re.search(r'<script\s+id=["\']wlh-', t.raw_payload):
+            raise ValueError(f'Task {t.id} contains preview cache wrapper <script id="wlh-...')
+
+        # Check 2: Pure text
+        raw_b = t.raw_payload[:64].encode("latin-1", errors="ignore")
+        if any(raw_b.startswith(p) for p in BINARY_PREFIXES):
+            raise ValueError(f"Task {t.id} contains binary header")
+
+        # Check 3: Token watermark check (< 100K token budget)
+        estimated_tokens = len(t.raw_payload) // 4
+        if estimated_tokens > 100_000:
+            warnings.append(
+                f"Task {t.id} ({t.source_id}) has estimated {estimated_tokens:,} tokens (> 100K token budget); "
+                f"requires high-memory GPU context or chunked prefill exemption."
+            )
+
+    # Check 4: XGrammar JSON Schema validity
+    from wlh.benchmark.schema import (
+        get_content_page_json_schema,
+        get_list_page_json_schema,
+        validate_xgrammar_schema,
+    )
+
+    if not validate_xgrammar_schema(get_list_page_json_schema()):
+        raise ValueError("ListPageGroundTruth JSON Schema is incompatible with XGrammar")
+    if not validate_xgrammar_schema(get_content_page_json_schema()):
+        raise ValueError("ContentPageGroundTruth JSON Schema is incompatible with XGrammar")
+
+    # Check 5: Local Mock Dry-Run
+    mock_list_task = list_tasks[0]
+    mock_content_task = content_tasks[0]
+
+    mock_list_output = ListPageGroundTruth(target_urls=[mock_list_task.request_url]).model_dump()
+    mock_content_output = ContentPageGroundTruth(
+        records=[
+            RecordGroundTruth(
+                doc_type="政策文件",
+                markdown="# 标题\n\n正文内容。",
+                title="测试标题",
+                doc_number="第1号",
+                published_at="2026-01-01",
+                effective_at="2026-01-01",
+                issuer="测试机关",
+                attachment_urls=[],
+            )
+        ]
+    ).model_dump()
+
+    from wlh.benchmark.evaluator import evaluate_sample
+
+    eval_list = evaluate_sample(
+        prediction={"target_urls": [mock_list_task.request_url]},
+        ground_truth=mock_list_output,
+        sample_id=mock_list_task.id,
+        source_id=mock_list_task.source_id,
+        jurisdiction=mock_list_task.jurisdiction,
+    )
+    assert eval_list.overall_score >= 90.0, (
+        f"Mock list evaluation failed: {eval_list.overall_score}"
+    )
+
+    eval_content = evaluate_sample(
+        prediction=mock_content_output["records"][0],
+        ground_truth=mock_content_output,
+        sample_id=mock_content_task.id,
+        source_id=mock_content_task.source_id,
+        jurisdiction=mock_content_task.jurisdiction,
+    )
+    assert eval_content.overall_score >= 90.0, (
+        f"Mock content evaluation failed: {eval_content.overall_score}"
+    )
+
+    return {
+        "status": "passed",
+        "total_tasks": len(tasks),
+        "list_tasks": len(list_tasks),
+        "content_tasks": len(content_tasks),
+        "bundle_path": str(b_path),
+        "warnings": warnings,
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> None:

@@ -30,11 +30,28 @@ dependencies = [
   "yarl>=1.18",
 ]
 
+[project.optional-dependencies]
+benchmark = [
+  "transformers>=5.22.1,<6",
+  "jinja2>=3.1,<4",
+  "sentencepiece>=0.2,<1",
+  "socksio>=1,<2",
+]
+
 [project.scripts]
 wlh = "wlh.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.25", "ruff>=0.9", "pyright>=1.1"]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.25",
+  "ruff>=0.9",
+  "pyright>=1.1",
+  "transformers>=5.22.1,<6",
+  "jinja2>=3.1,<4",
+  "sentencepiece>=0.2,<1",
+  "socksio>=1,<2",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/wlh"]

@@ -69,4 +69,4 @@ During milestone implementation and final sign-off:
 2. **Final Milestone Acceptance (M4/M5)**:
    - Full test suite: `uv run pytest`
    - Acceptance suite: `uv run pytest tests/test_e2e_worktrees_acceptance.py -v`
-   - Full benchmark evaluation: `uv run python -m wlh.benchmark run --input data/benchmark/raw_candidates.jsonl --output-dir artifacts/benchmark_full_run`
+   - Full benchmark evaluation: `uv run python -m wlh.benchmark run --input data/benchmark/ground_truth_benchmark.jsonl --output-dir artifacts/benchmark_full_run`

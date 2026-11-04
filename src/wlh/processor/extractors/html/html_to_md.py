@@ -199,7 +199,10 @@ def html_to_markdown(
                 if cells:
                     raw_rows.append(cells)
             raw_rows = [
-                [(text, colspan, min(rowspan, len(raw_rows) - r_idx)) for text, colspan, rowspan in row]
+                [
+                    (text, colspan, min(rowspan, len(raw_rows) - r_idx))
+                    for text, colspan, rowspan in row
+                ]
                 for r_idx, row in enumerate(raw_rows)
             ]
             rows = expand_rows(raw_rows)

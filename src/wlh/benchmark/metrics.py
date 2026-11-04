@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
+from collections.abc import Sequence
 from typing import Any, Mapping, cast
 
 from wlh.benchmark.models import (
@@ -12,7 +13,11 @@ from wlh.benchmark.models import (
     AccuracySubScores,
     CleanlinessResult,
     CleanlinessSubScores,
+    ContentFidelityResult,
+    DiscoveryResult,
+    RecordSplitResult,
 )
+from wlh.core import public_url
 
 # Standard taxonomy mapping for legal document types
 DOC_TYPE_TAXONOMY_MAP: dict[str, str] = {
@@ -958,6 +963,25 @@ def evaluate_accuracy(
     if doc_type_mis:
         mismatches.append(doc_type_mis)
 
+    p_raw = prediction.get("attachment_urls")
+    p_att: list[str] = (
+        [str(u) for u in cast(list[object], p_raw)] if isinstance(p_raw, list) else []
+    )
+    g_raw = ground_truth.get("attachment_urls")
+    g_att: list[str] = (
+        [str(u) for u in cast(list[object], g_raw)] if isinstance(g_raw, list) else []
+    )
+    att_p, att_r, att_f1 = evaluate_attachment_urls(p_att, g_att)
+    if (p_att or g_att) and att_f1 < 100.0:
+        mismatches.append(
+            {
+                "field": "attachment_urls",
+                "reason": f"Attachment URLs mismatch (P={att_p}, R={att_r}, F1={att_f1})",
+                "predicted": p_att,
+                "ground_truth": g_att,
+            }
+        )
+
     sub_scores = AccuracySubScores(
         title_accuracy=title_score,
         doc_number_accuracy=doc_num_score,
@@ -965,6 +989,7 @@ def evaluate_accuracy(
         effective_at_accuracy=eff_score,
         issuer_accuracy=issuer_score,
         doc_type_accuracy=doc_type_score,
+        attachment_url_f1=att_f1,
     )
 
     field_scores = {
@@ -974,6 +999,7 @@ def evaluate_accuracy(
         "effective_at_accuracy": eff_score,
         "issuer_accuracy": issuer_score,
         "doc_type_accuracy": doc_type_score,
+        "attachment_url_f1": att_f1,
     }
 
     overall_accuracy = (
@@ -990,4 +1016,169 @@ def evaluate_accuracy(
         sub_scores=sub_scores,
         field_scores=field_scores,
         mismatches=mismatches,
+    )
+
+
+def evaluate_list_discovery(
+    predicted_urls: Sequence[str],
+    ground_truth_urls: Sequence[str],
+) -> DiscoveryResult:
+    """Evaluate list page URL discovery against ground truth (Pillar 1)."""
+    pred_set = {public_url(u).rstrip("/") for u in predicted_urls if u and u.strip()}
+    gt_set = {public_url(u).rstrip("/") for u in ground_truth_urls if u and u.strip()}
+
+    if not pred_set and not gt_set:
+        return DiscoveryResult(
+            target_url_precision=100.0, target_url_recall=100.0, target_url_f1=100.0
+        )
+    if not pred_set or not gt_set:
+        return DiscoveryResult(target_url_precision=0.0, target_url_recall=0.0, target_url_f1=0.0)
+
+    inter = pred_set & gt_set
+    p = round(len(inter) / len(pred_set) * 100.0, 2)
+    r = round(len(inter) / len(gt_set) * 100.0, 2)
+    f1 = round(2 * p * r / (p + r), 2) if (p + r) > 0 else 0.0
+    return DiscoveryResult(target_url_precision=p, target_url_recall=r, target_url_f1=f1)
+
+
+def evaluate_attachment_urls(
+    predicted_urls: Sequence[str],
+    ground_truth_urls: Sequence[str],
+) -> tuple[float, float, float]:
+    """Evaluate attachment URL discovery precision, recall, and F1."""
+    pred_set = {public_url(u) for u in predicted_urls if u and u.strip()}
+    gt_set = {public_url(u) for u in ground_truth_urls if u and u.strip()}
+
+    if not pred_set and not gt_set:
+        return 100.0, 100.0, 100.0
+    if not pred_set or not gt_set:
+        return 0.0, 0.0, 0.0
+
+    inter = pred_set & gt_set
+    p = round(len(inter) / len(pred_set) * 100.0, 2)
+    r = round(len(inter) / len(gt_set) * 100.0, 2)
+    f1 = round(2 * p * r / (p + r), 2) if (p + r) > 0 else 0.0
+    return p, r, f1
+
+
+def evaluate_record_split(
+    predicted_records: Sequence[Mapping[str, Any]],
+    ground_truth_records: Sequence[Mapping[str, Any]],
+) -> tuple[RecordSplitResult, list[tuple[int, int]]]:
+    """Evaluate multi-record splitting and compute optimal bipartite alignment (Pillar 2)."""
+    num_pred = len(predicted_records)
+    num_gt = len(ground_truth_records)
+    exact_count = num_pred == num_gt
+
+    if num_pred == 0 and num_gt == 0:
+        return (
+            RecordSplitResult(
+                record_split_precision=100.0,
+                record_split_recall=100.0,
+                record_split_f1=100.0,
+                exact_count_match=True,
+            ),
+            [],
+        )
+    if num_pred == 0 or num_gt == 0:
+        return (
+            RecordSplitResult(
+                record_split_precision=0.0,
+                record_split_recall=0.0,
+                record_split_f1=0.0,
+                exact_count_match=False,
+            ),
+            [],
+        )
+
+    # Compute pairwise alignment scores
+    scores: list[tuple[float, int, int]] = []
+    for i, p_rec in enumerate(predicted_records):
+        p_doc = str(p_rec.get("doc_number") or "").strip()
+        p_title = strip_all_punct_and_whitespace(str(p_rec.get("title") or ""))
+        p_words = set(re.findall(r"\w+", str(p_rec.get("markdown") or "").lower()))
+
+        for j, g_rec in enumerate(ground_truth_records):
+            g_doc = str(g_rec.get("doc_number") or "").strip()
+            g_title = strip_all_punct_and_whitespace(str(g_rec.get("title") or ""))
+            g_words = set(re.findall(r"\w+", str(g_rec.get("markdown") or "").lower()))
+
+            score = 0.0
+            if p_doc and g_doc and p_doc == g_doc:
+                score += 0.5
+            if p_title and g_title:
+                if p_title == g_title:
+                    score += 0.3
+                elif p_title in g_title or g_title in p_title:
+                    score += 0.2
+            if p_words and g_words:
+                jaccard = len(p_words & g_words) / len(p_words | g_words)
+                score += 0.2 * jaccard
+
+            # Special case for single-record items with no explicit metadata
+            if num_pred == 1 and num_gt == 1:
+                score = max(score, 1.0)
+
+            scores.append((score, i, j))
+
+    scores.sort(key=lambda x: x[0], reverse=True)
+    matched_preds: set[int] = set()
+    matched_gts: set[int] = set()
+    matched_pairs: list[tuple[int, int]] = []
+
+    for score, i, j in scores:
+        if i not in matched_preds and j not in matched_gts and score > 0.0:
+            matched_preds.add(i)
+            matched_gts.add(j)
+            matched_pairs.append((i, j))
+
+    match_count = len(matched_pairs)
+    p = round(match_count / num_pred * 100.0, 2)
+    r = round(match_count / num_gt * 100.0, 2)
+    f1 = round(2 * p * r / (p + r), 2) if (p + r) > 0 else 0.0
+
+    return (
+        RecordSplitResult(
+            record_split_precision=p,
+            record_split_recall=r,
+            record_split_f1=f1,
+            exact_count_match=exact_count,
+        ),
+        matched_pairs,
+    )
+
+
+def evaluate_content_fidelity(
+    pred_markdown: str,
+    gt_markdown: str,
+) -> ContentFidelityResult:
+    """Evaluate DOM boundary fidelity (character-level recall, precision, and F1, Pillar 4)."""
+    p_clean = re.sub(r"[#*_`~>|\\-]", " ", pred_markdown or "")
+    g_clean = re.sub(r"[#*_`~>|\\-]", " ", gt_markdown or "")
+    p_norm = "".join(unicodedata.normalize("NFKC", p_clean).split())
+    g_norm = "".join(unicodedata.normalize("NFKC", g_clean).split())
+
+    if not p_norm and not g_norm:
+        return ContentFidelityResult(
+            content_char_recall=100.0, content_char_precision=100.0, content_f1=100.0
+        )
+    if not p_norm or not g_norm:
+        return ContentFidelityResult(
+            content_char_recall=0.0, content_char_precision=0.0, content_f1=0.0
+        )
+
+    c_p = Counter(p_norm)
+    c_g = Counter(g_norm)
+    intersection = sum((c_p & c_g).values())
+
+    recall = round(intersection / len(g_norm) * 100.0, 2)
+    precision = round(intersection / len(p_norm) * 100.0, 2)
+    f1 = (
+        round(2 * precision * recall / (precision + recall), 2) if (precision + recall) > 0 else 0.0
+    )
+
+    return ContentFidelityResult(
+        content_char_recall=recall,
+        content_char_precision=precision,
+        content_f1=f1,
     )

@@ -57,7 +57,7 @@ The test harness is organized into four complementary tiers, creating a comprehe
 ### Tier 3: Source Adapters & Integration Verification (`markers: pipeline`, `replay`)
 - **Scope**: Source replay against recorded payloads, crawler lifecycle, transactional storage, and concurrent task queues.
 - **Key Modules**:
-  - `tests/test_japan_sources.py` & `tests/test_taiwan_judicial_sources.py`: Source replay pipelines for specialized judicial, patent, and tax portals.
+  - `tests/test_japan_sources.py` & `tests/test_taiwan_source_delivery.py`: Source replay pipelines for specialized judicial, patent, and tax portals.
   - `tests/test_archive_storage.py`: Content-Addressable Storage (CAS) on S3/MinIO, cryptographic SHA256 integrity, and PostgreSQL state persistence.
   - `tests/test_collection_concurrency.py`: Worker pool concurrency, rate limiting, and failure containment.
   - `tests/test_session_replay.py`: Deterministic HTTP session replays.
@@ -68,7 +68,8 @@ The test harness is organized into four complementary tiers, creating a comprehe
   - `tests/test_e2e_worktrees_acceptance.py`: Validates repository-wide AGENTS.md conventions, flawless `harness doctor` execution, and benchmark CLI execution.
   - `tests/test_benchmark.py`: Metric scoring rules for cleanliness (markdown syntax, encoding, boilerplate removal) and field accuracy (title, doc_number, published_at, effective_at, issuer).
   - `tests/test_benchmark_cli.py`: Subprocess invocation of `wlh.benchmark` CLI commands (`sample` and `run`).
-  - Full Benchmark Regression Evaluation: Runs offline evaluation across 721 candidate samples without metric degradation.
+  - `tests/test_benchmark_completion.py` & `tests/test_benchmark_processor_suite.py`: Dual-model tokenizer pre-selection, completion integrity gates, and 5-pillar processor evaluation.
+  - Full Benchmark Regression Evaluation: Runs offline evaluation across 417 golden-set samples without metric degradation.
 
 ---
 
@@ -117,9 +118,9 @@ uv run python -m wlh.benchmark run \
   --input tests/fixtures/benchmark/candidates_sample.jsonl \
   --output-dir work/benchmark_sample_run
 
-# Full regression benchmark evaluation (721 samples)
+# Full regression benchmark evaluation (417 golden-set samples)
 uv run python -m wlh.benchmark run \
-  --input data/benchmark/raw_candidates.jsonl \
+  --input data/benchmark/ground_truth_benchmark.jsonl \
   --output-dir artifacts/benchmark_full_run
 ```
 
