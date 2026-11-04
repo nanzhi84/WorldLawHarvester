@@ -289,8 +289,8 @@ _PYRAMID_MARKERS_BY_FILE: dict[str, str] = {
     "test_bridge_adapters.py": "replay",
     "test_japan_sources.py": "replay",
     "test_japan_court_catalog.py": "replay",
-    "test_taiwan_judicial_sources.py": "replay",
     "test_taiwan_source_delivery.py": "replay",
+    "test_e2e_worktrees_acceptance.py": "contract",
 }
 PYRAMID_MARKERS_BY_FILE = _PYRAMID_MARKERS_BY_FILE
 

@@ -25,8 +25,6 @@ from wlh.processor.parsers.html.document_builder import (
     reconcile_range_enabled as _reconcile_range_enabled,
 )
 from wlh.processor.parsers.html.dom_cleanup import (
-    DEFAULT_ATTACHMENT_EXCLUDE_XPATHS,
-    DEFAULT_ATTACHMENT_TITLE_XPATH,
     clean_attachment_title_attr,
 )
 from wlh.processor.parsers.html.fields import (
@@ -291,10 +289,8 @@ class HtmlParser(WebDocumentBuilder, Base):
                     if str(x).strip()
                 )
             else:
-                att_excl_xpaths = DEFAULT_ATTACHMENT_EXCLUDE_XPATHS
-            att_title_xpath = (
-                docs.get("attachment_title_xpath") or DEFAULT_ATTACHMENT_TITLE_XPATH
-            )
+                att_excl_xpaths = ()
+            att_title_xpath = docs.get("attachment_title_xpath")
             title_strip_regexes: Sequence[str] = tuple(
                 str(x)
                 for x in (
@@ -453,7 +449,6 @@ class HtmlParser(WebDocumentBuilder, Base):
                         r_node,
                         exclude_xpaths=excl_list,
                         dom_transforms=tuple(self.transforms) or ("inline_script_cell_restore",),
-                        include_defaults=True,
                     )
                     clean_html_tree(r_node, quirks=tuple(quirks))
                     for img in r_node.xpath("descendant-or-self::img"):

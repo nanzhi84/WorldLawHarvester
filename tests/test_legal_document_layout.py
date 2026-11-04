@@ -31,7 +31,7 @@ def _source(path: Path, origin: str, source_id: str, url_path: str, language: st
         "processor": {
             "parser": {
                 "type": "html",
-                "documents": {"detail_url_patterns": [r"\.pdf$"], "require_complete_text": True},
+                "documents": {"detail_url_patterns": [r"\.pdf$"]},
             }
         },
         "cleaners": {"require_complete_text": True},

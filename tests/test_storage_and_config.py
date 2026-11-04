@@ -252,9 +252,9 @@ storage:
         md_path = tmp_path / "source-adaptation-matrix.md"
         csv_path.write_text(
             "Source ID,大洲/区域,法域/国家,业务子分类,资料类型,来源名称,官方入口 URL,优先级,推荐适配器,状态,备注与实测结论\n"
-            "dd-492,1. 亚洲 (Asia),1.3 越南 (Vietnam),—,法律法规,Cổng Thông tin điện tử Chính phủ,https://vanban.chinhphu.vn/,P0,web (sources/dd-492.yaml),[x] 已实网跑通,实网已跑通（2026-10-25）：采集与离线重解析通过。\n"
-            "dd-495,1. 亚洲 (Asia),1.3 越南 (Vietnam),—,法律法规,LuatVietnam 法规库,https://luatvietnam.vn/,P0,web (sources/dd-495.yaml),[~] 部分跑通,部分跑通（公开样本 5/10 篇）：部分文件需登录会员下载。\n"
-            "dd-498,1. 亚洲 (Asia),1.3 越南 (Vietnam),—,法律法规,Thư Viện Pháp Luật,https://thuvienphapluat.vn/,P1,web,[ ] 实测受阻,实测受阻（Cloudflare 拦截）：待接入专用通道。\n",
+            "dd-492,1. 亚洲 (Asia),1.3 越南 (Vietnam),—,法律法规,Cổng Thông tin điện tử Chính phủ,https://vanban.chinhphu.vn/,P0,html (sources/dd-492.yaml),[x] 已实网跑通,实网已跑通（2026-10-25）：采集与离线重解析通过。\n"
+            "dd-495,1. 亚洲 (Asia),1.3 越南 (Vietnam),—,法律法规,LuatVietnam 法规库,https://luatvietnam.vn/,P0,html (sources/dd-495.yaml),[~] 部分跑通,部分跑通（公开样本 5/10 篇）：部分文件需登录会员下载。\n"
+            "dd-498,1. 亚洲 (Asia),1.3 越南 (Vietnam),—,法律法规,Thư Viện Pháp Luật,https://thuvienphapluat.vn/,P1,html,[ ] 实测受阻,实测受阻（Cloudflare 拦截）：待接入专用通道。\n",
             encoding="utf-8",
         )
         rendered = render_markdown_from_csv(csv_path, md_path)
@@ -274,7 +274,7 @@ storage:
         md_path = tmp_path / "source-adaptation-matrix.md"
         csv_path.write_text(
             "Source ID,大洲/区域,法域/国家,业务子分类,资料类型,来源名称,官方入口 URL,优先级,推荐适配器,状态,备注与实测结论\n"
-            'dd-509,1. 亚洲法域 (Asia),1.3 中国台湾 (Taiwan),—,法律法规,全国法规资料库（LawBank Taiwan）,"https://law.moj.gov.tw/ENG/Law/LawSearchLaw.aspx, https://law.moj.gov.tw/ENG/Law/LawSearchAgree.aspx",P0,web / structured_xml,[ ] 实测受阻,实测受阻说明\n',
+            'dd-509,1. 亚洲法域 (Asia),1.3 中国台湾 (Taiwan),—,法律法规,全国法规资料库（LawBank Taiwan）,"https://law.moj.gov.tw/ENG/Law/LawSearchLaw.aspx, https://law.moj.gov.tw/ENG/Law/LawSearchAgree.aspx",P0,html / xml,[ ] 实测受阻,实测受阻说明\n',
             encoding="utf-8",
         )
         rendered = render_markdown_from_csv(csv_path, md_path)

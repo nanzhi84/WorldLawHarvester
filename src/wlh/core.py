@@ -189,10 +189,6 @@ def compact(value: str) -> str:
 def normalized(value: str) -> str:
     value = unicodedata.normalize("NFC", value).replace("\r\n", "\n").replace("\r", "\n")
     value = value.replace("****", "")
-    value = re.sub(r"【字体：\s*大\s+中\s+小\s*】", "", value)
-    value = re.sub(r"\d{4}-\d{2}-\d{2}[ \t]+字体\s*\[\s*大\s+中\s+小\s*\]", "", value)
-    value = re.sub(r"字体\s*\[\s*大\s+中\s+小\s*\]", "", value)
-    value = re.sub(r"\[责任编辑：[^\]]*\]", "", value)
     lines = [line.rstrip() for line in value.splitlines()]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip() + "\n"
 

@@ -319,7 +319,6 @@ class WebDocumentBuilder:
                 node,
                 exclude_xpaths=excl_list,
                 dom_transforms=dom_transforms or ("inline_script_cell_restore",),
-                include_defaults=True,
             )
             clean_html_tree(node, quirks=quirks)
             if req_complete:

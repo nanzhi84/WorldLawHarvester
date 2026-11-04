@@ -226,6 +226,8 @@ processor:
         - "^http://127\\\\.0\\\\.0\\\\.1:{port}/tw/detail-\\\\d+\\\\.html$"
       detail_body: always
       content_xpath: '//div[@class="law-body"]'
+      attachment_exclude_xpath:
+        - 'ancestor::*[contains(@class, "Side_Links")]'
       fields:
         title:
           xpath: '//h1[@class="doc-title"]'

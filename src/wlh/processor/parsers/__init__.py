@@ -71,20 +71,7 @@ def normalize_parser_config(config: Mapping[str, Any]) -> dict[str, Any]:
         for k, v in nested_docs.items():
             parser_spec.setdefault(k, v)
 
-    legacy_adapter_map = {
-        "web": "html",
-        "japan_courts": "html",
-        "worldwidelaw_bridge": "html",
-        "federal_register": "json",
-        "openstates_bridge": "json",
-        "opencaselaw_bridge": "json",
-        "juriscraper_bridge": "json",
-        "oldp_bridge": "json",
-        "japan_law": "json",
-    }
     parser_spec.setdefault("type", out.get("adapter", "html"))
-    if parser_spec["type"] in legacy_adapter_map:
-        parser_spec["type"] = legacy_adapter_map[parser_spec["type"]]
     parser_spec.setdefault("options", _as_dict(out.get("adapter_options")))
     parser_spec.setdefault("transforms", _as_list(out.get("transforms")))
 

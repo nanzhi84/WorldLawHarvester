@@ -329,6 +329,199 @@ class TestArchitectureContract:
                         f"{dq_path}:{node.lineno}; must be loaded from delivery_quality_rules.yaml"
                     )
 
+        forbidden_extractor_html_tokens = (
+            "@class",
+            "@id",
+            "@data-controller",
+            '@type="RelatedNewsBox"',
+            "gospecialurl",
+            "fontzoom",
+        )
+        for py_file in (SRC_WLH / "processor" / "extractors" / "html").rglob("*.py"):
+            ext_tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+            for node in ast.walk(ext_tree):
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            assert target.id != "_GENERIC_UI_CHROME_XPATHS", (
+                                f"_GENERIC_UI_CHROME_XPATHS must not be defined in {py_file}:{node.lineno}"
+                            )
+                elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                    assert node.target.id != "_GENERIC_UI_CHROME_XPATHS", (
+                        f"_GENERIC_UI_CHROME_XPATHS must not be defined in {py_file}:{node.lineno}"
+                    )
+                elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    val_str = node.value
+                    val_lower = val_str.lower()
+                    for bad_tok in forbidden_extractor_html_tokens:
+                        check_haystack = (
+                            val_lower if bad_tok in ("gospecialurl", "fontzoom") else val_str
+                        )
+                        assert bad_tok not in check_haystack, (
+                            f"Site-specific selector or JS token {bad_tok!r} hardcoded in "
+                            f"{py_file}:{node.lineno}"
+                        )
+
+        forbidden_parser_html_globals = {
+            "DEFAULT_EXCLUDE_CONTENT_XPATHS",
+            "DEFAULT_ATTACHMENT_EXCLUDE_XPATHS",
+            "DEFAULT_ATTACHMENT_TITLE_XPATH",
+        }
+        forbidden_parser_html_tokens = (
+            "extend_font",
+            "m3page_funs",
+            "share_icon",
+            "zrbj",
+            "xgxw",
+            "xg-list",
+            "hmc4ChgBtn",
+            "hmc4Table",
+            "eyd-page-header__share",
+            "eyd-page-anchors",
+            "eyd-related-pages",
+            "eyd-breadcrumb",
+            "eyd-side-navigation",
+            "target-hidden",
+            "document-tip",
+            "tooltip-button",
+            "box-commen",
+            "text-gopy",
+            "gopy",
+            "gem-c-print-link",
+            "RelatedNewsBox",
+            "legislationContents",
+            "history-tab",
+            "related-tab",
+            "language-switcher",
+            "vblienquan",
+            "Side_Links",
+            "col-md-4",
+            "_sblb",
+        )
+        for py_file in (SRC_WLH / "processor" / "parsers" / "html").rglob("*.py"):
+            par_tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+            for node in ast.walk(par_tree):
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            assert target.id not in forbidden_parser_html_globals, (
+                                f"Legacy default XPath constant '{target.id}' must not be defined in "
+                                f"{py_file}:{node.lineno}"
+                            )
+                elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                    assert node.target.id not in forbidden_parser_html_globals, (
+                        f"Legacy default XPath constant '{node.target.id}' must not be defined in "
+                        f"{py_file}:{node.lineno}"
+                    )
+                elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    val_str = node.value
+                    assert val_str not in forbidden_parser_html_globals, (
+                        f"Legacy default XPath constant '{val_str}' must not be exported in "
+                        f"{py_file}:{node.lineno}"
+                    )
+                    for bad_tok in forbidden_parser_html_tokens:
+                        assert bad_tok not in val_str, (
+                            f"Legacy site-specific CSS/ID selector token {bad_tok!r} hardcoded in "
+                            f"{py_file}:{node.lineno}; move to sources/dd-xxx.yaml"
+                        )
+
+    def test_dom_cleanup_dead_court_helpers_removed_and_browser_runtime_identity_cached(
+        self,
+    ) -> None:
+        import time
+
+        from wlh.cleaners.text_cleaner import apply_text_cleaners
+        from wlh.cleaners.text_cleaner import normalized as cleaner_normalized
+        from wlh.core import normalized as core_normalized
+        from wlh.fetcher import browser_runtime
+        from wlh.processor.parsers import html as html_pkg
+        from wlh.processor.parsers.html import dom_cleanup
+
+        dead_court_symbols = (
+            "DETAIL_FIELDS",
+            "court_id",
+            "result_range",
+            "next_page_url",
+            "parse_list_rows",
+            "parse_detail_fields",
+            "verify_detail_fields",
+        )
+        for sym in dead_court_symbols:
+            assert not hasattr(dom_cleanup, sym), (
+                f"Deprecated court helper '{sym}' must be removed from dom_cleanup.py"
+            )
+            assert not hasattr(html_pkg, sym), (
+                f"Deprecated court helper '{sym}' must be removed from parsers/html/__init__.py"
+            )
+
+        sample_portal_text = "正文【字体：大 中 小】2026-06-30 字体 [大 中 小][责任编辑：张三]"
+        for norm_fn in (core_normalized, cleaner_normalized):
+            preserved = norm_fn(sample_portal_text)
+            assert "【字体：大 中 小】" in preserved
+            assert "2026-06-30 字体 [大 中 小]" in preserved
+            assert "[责任编辑：张三]" in preserved
+
+        stripped = apply_text_cleaners(
+            sample_portal_text,
+            strip_regexes=[
+                r"【字体[：:]\s*大\s*中\s*小\s*】",
+                r"\d{4}-\d{2}-\d{2}[ \t]+字体\s*\[\s*大\s+中\s+小\s*\]",
+                r"\[责任编辑[：:][^\]]*\]",
+            ],
+        )
+        assert stripped.strip() == "正文"
+
+        parsers_init_src = (SRC_WLH / "processor" / "parsers" / "__init__.py").read_text(
+            encoding="utf-8"
+        )
+        for legacy_token in (
+            "legacy_adapter_map",
+            "japan_courts",
+            "worldwidelaw_bridge",
+            "federal_register",
+            "openstates_bridge",
+            "opencaselaw_bridge",
+            "juriscraper_bridge",
+            "oldp_bridge",
+            "japan_law",
+        ):
+            assert legacy_token not in parsers_init_src, (
+                f"Legacy adapter compatibility token {legacy_token!r} must be removed from "
+                f"src/wlh/processor/parsers/__init__.py"
+            )
+
+        assert hasattr(browser_runtime, "clear_identity_cache"), (
+            "browser_runtime must expose clear_identity_cache()"
+        )
+        clear_fn: Any = getattr(browser_runtime, "clear_identity_cache")
+        clear_fn()
+        id1 = browser_runtime.identity()
+        t0 = time.perf_counter()
+        id2 = browser_runtime.identity()
+        elapsed = time.perf_counter() - t0
+        assert id1 == id2
+        assert id1 is not id2, "identity() must return a fresh copy to prevent cache mutation"
+        assert elapsed < 0.05, f"Cached browser_runtime.identity() took {elapsed:.4f}s (>= 0.05s)"
+
+        assert not (REPO_ROOT / "tests" / "test_taiwan_judicial_sources.py").exists(), (
+            "Legacy white-box stub test file tests/test_taiwan_judicial_sources.py must be removed"
+        )
+        forbidden_stub_classes = {
+            "_RuntimeStub",
+            "_InMemoryAdapterContext",
+            "_StubRuntime",
+            "_StubCtx",
+        }
+        for test_file in (REPO_ROOT / "tests").rglob("*.py"):
+            test_src = test_file.read_text(encoding="utf-8")
+            test_tree = ast.parse(test_src, filename=str(test_file))
+            for node in ast.walk(test_tree):
+                if isinstance(node, ast.ClassDef):
+                    assert node.name not in forbidden_stub_classes, (
+                        f"White-box stub class '{node.name}' must not be defined in "
+                        f"{test_file}:{node.lineno}"
+                    )
+
 
     def test_xml_extractor_converts_legal_and_gpo_xml_to_standard_markdown(self) -> None:
         import lxml.etree as _etree  # type: ignore[import-untyped]
@@ -431,7 +624,6 @@ class TestArchitectureContract:
         all_test_files = {p.name for p in (REPO_ROOT / "tests").glob("test_*.py")}
         missing = all_test_files - set(PYRAMID_MARKERS_BY_FILE.keys())
         assert not missing, f"Test files missing pyramid marker registration: {sorted(missing)}"
-
 
 
 class TestSourceConfigContract:
@@ -925,7 +1117,7 @@ class TestEphemeralProxyManager:
     def test_ephemeral_proxy_startup_retries_and_transport_async_context_manager(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        from wlh.config import load_file
+        from wlh.config import SourceConfig, load_file
         from wlh.fetcher.proxy import EphemeralProxy
         from wlh.fetcher.transport import Budget, Recorder, Transport
         from wlh.processor.parsers.html.parser import HtmlParser
@@ -948,7 +1140,8 @@ class TestEphemeralProxyManager:
         for forbidden_xpath in ("iframe-data", "hlNext", "vblienquan", "Side_Links"):
             assert forbidden_xpath not in html_parser_text
 
-        # 3. Verify HtmlParser handles attachment_exclude_xpath as list[str] and next_page_xpath
+        # 3. Verify SourceConfig and HtmlParser accept attachment_exclude_xpath (list[str] and str),
+        # attachment_title_xpath, and next_page_xpath declarative contracts
         h_cfg: dict[str, Any] = {
             "id": "dd-994",
             "scheduler": {
@@ -974,48 +1167,41 @@ class TestEphemeralProxyManager:
             },
             "storage": {"archive_approved": True, "metadata": {"document_type": "法律法规"}},
         }
-        hp = HtmlParser(h_cfg)
-
-        class _StubRuntime:
-            mode = "collect"
-
-        class _StubCtx:
-            runtime = _StubRuntime()
-
-            @staticmethod
-            def read(_acq: Mapping[str, Any]) -> bytes:
-                return (
-                    b"<html><body>"
-                    b"<div class='main'>"
-                    b"<span class='att-name'>Official Tax Schedule</span>"
-                    b"<a href='/files/valid.pdf'>PDF</a>"
-                    b"</div>"
-                    b"<div id='sidebar-related'><a href='/files/excluded.pdf'>PDF</a></div>"
-                    b"</body></html>"
-                )
-
-            @staticmethod
-            def follow_links(_task: Mapping[str, Any]) -> bool:
-                return True
-
-        parsed_detail = hp.parse(
-            _StubCtx(),
-            {"depth": 1, "payload": {"url": "https://example.gov/detail/1.html", "role": "page"}},
-            {
-                "id": "acq-1",
-                "outcome": "ok",
-                "actual_url": "https://example.gov/detail/1.html",
-                "request_url": "https://example.gov/detail/1.html",
-                "mime_type": "text/html",
-                "charset": "utf-8",
-            },
+        validated_list_cfg = SourceConfig.model_validate(h_cfg)
+        assert validated_list_cfg.processor.parser.documents is not None
+        assert validated_list_cfg.processor.parser.documents.attachment_exclude_xpath == [
+            "ancestor::div[@id='sidebar-related']",
+            "ancestor::aside[@class='ignored-files']",
+        ]
+        assert (
+            validated_list_cfg.processor.parser.documents.attachment_title_xpath
+            == "preceding-sibling::span[@class='att-name'][1]"
         )
-        assert len(parsed_detail["targets"]) == 1
-        target_inputs = parsed_detail["targets"][0]["inputs"]
-        att_inputs = [i for i in target_inputs if i["role"] == "attachment"]
-        assert len(att_inputs) == 1
-        assert att_inputs[0]["request"]["url"] == "https://example.gov/files/valid.pdf"
-        assert att_inputs[0]["text"] == "Official Tax Schedule"
+        assert (
+            validated_list_cfg.processor.parser.documents.next_page_xpath
+            == "//a[@class='next-page-link' and @href]"
+        )
+        hp = HtmlParser(validated_list_cfg.model_dump())
+        assert hp.max_pages == 3
+
+        h_cfg_str: dict[str, Any] = {
+            **h_cfg,
+            "processor": {
+                "parser": {
+                    **h_cfg["processor"]["parser"],
+                    "documents": {
+                        **h_cfg["processor"]["parser"]["documents"],
+                        "attachment_exclude_xpath": "ancestor::div[@id='sidebar-related']",
+                    },
+                }
+            },
+        }
+        validated_str_cfg = SourceConfig.model_validate(h_cfg_str)
+        assert validated_str_cfg.processor.parser.documents is not None
+        assert (
+            validated_str_cfg.processor.parser.documents.attachment_exclude_xpath
+            == "ancestor::div[@id='sidebar-related']"
+        )
 
         # 4. Verify EphemeralProxy retries 3 times on startup failure and raises ephemeral_proxy_startup_failed,
         # and Transport supports async with (__aenter__ / __aexit__)

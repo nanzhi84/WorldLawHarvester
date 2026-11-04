@@ -38,31 +38,12 @@ def _remove_element(el: Any) -> None:
     parent.remove(el)
 
 
-_GENERIC_UI_CHROME_XPATHS: tuple[str, ...] = (
-    './/div[contains(@class, "col-md-4") and following-sibling::div[contains(@class, "col-md-8")]//div[contains(@class, "book")]]',
-    './/*[contains(@class, "extend_font") or contains(@class, "m3page_funs") '
-    'or contains(@class, "share_icon") or contains(@class, "zrbj") '
-    'or contains(@class, "eyd-page-header__share") or contains(@class, "eyd-page-anchors") '
-    'or contains(@class, "eyd-related-pages") or contains(@class, "eyd-breadcrumb") '
-    'or contains(@class, "eyd-side-navigation") or contains(@class, "target-hidden") '
-    'or contains(@class, "document-tip") or contains(@class, "tooltip-button") '
-    'or contains(@class, "box-commen") or contains(@class, "text-gopy") '
-    'or contains(@class, "gopy") or contains(@class, "skip-links") '
-    'or contains(@class, "to-the-top") or contains(@class, "breadcrumb")]',
-)
-
-
 def clean_html_tree(node: Any, *, quirks: Sequence[str] | None = None) -> None:
-    """In-place strip of standard non-content HTML tags and generic UI chrome."""
+    """In-place strip of standard non-content HTML tags and hidden inline styles."""
     for el in list(node.xpath(".//*[@style]")):
         st = (el.get("style") or "").lower()
         if re.search(r"display\s*:\s*none|visibility\s*:\s*hidden", st):
             _remove_element(el)
-
-    for xp in _GENERIC_UI_CHROME_XPATHS:
-        for item in list(cast(list[Any], node.xpath(xp))):
-            if item is not node and hasattr(item, "getparent"):
-                _remove_element(item)
 
     for bad_tag in list(
         node.xpath(".//script|.//style|.//noscript|.//template|.//svg|.//button|.//nav")
@@ -230,10 +211,7 @@ def html_to_markdown(
                 not raw_href
                 or raw_href.startswith(("#", "javascript:"))
                 or raw_href.endswith("#")
-                or any(
-                    k in onclick
-                    for k in ("print", "gospecialurl", "history.back", "window.close", "fontzoom")
-                )
+                or bool(onclick)
             ):
                 return ""
             if (

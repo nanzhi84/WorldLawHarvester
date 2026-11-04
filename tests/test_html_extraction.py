@@ -43,7 +43,8 @@ class TestHtmlToMarkdownConversion:
         self,
     ) -> None:
         """HTML containing UI chrome (font widgets, print/back buttons, share bars, anchors without href, adjacent bolds) renders clean Markdown."""
-        from wlh.processor.extractors.html.html_to_md import html_to_markdown
+        from wlh.processor.extractors.html.dom_tree import parse_html
+        from wlh.processor.parsers.html.document_builder import WebDocumentBuilder
 
         html = """
         <html>
@@ -81,9 +82,44 @@ class TestHtmlToMarkdownConversion:
           </body>
         </html>
         """
-        md = html_to_markdown(
-            html,
-            base_url="https://www.safe.gov.cn/www/illegal/listQuery?saffno=22d58c4edfbf401595848a52a3f91db6",
+        base_url = "https://www.safe.gov.cn/www/illegal/listQuery?saffno=22d58c4edfbf401595848a52a3f91db6"
+        builder = WebDocumentBuilder(
+            {
+                "processor": {
+                    "parser": {
+                        "type": "html",
+                        "documents": {
+                            "exclude_content_xpath": [
+                                './/*[contains(@class, "extend_font") '
+                                'or contains(@class, "eyd-page-header__share") '
+                                'or contains(@class, "eyd-page-anchors") '
+                                'or contains(@class, "eyd-related-pages") '
+                                'or contains(@class, "target-hidden") '
+                                'or contains(@class, "document-tip") '
+                                'or contains(@class, "tooltip-button") '
+                                'or contains(@class, "zrbj")]'
+                            ],
+                        },
+                    }
+                },
+                "cleaners": {
+                    "strip_text_regexes": [
+                        r"【字体[：:]\s*大\s*中\s*小\s*】",
+                        r"\d{4}-\d{2}-\d{2}[ \t]+字体\s*\[\s*大\s+中\s+小\s*\]",
+                        r"字体\s*\[\s*大\s+中\s+小\s*\]",
+                        r"\[责任编辑[：:][^\]]*\]",
+                    ]
+                },
+            }
+        )
+        tree, _, _ = parse_html(html.encode("utf-8"), "utf-8")
+        md = builder.html_markdown(
+            tree,
+            {
+                "actual_url": base_url,
+                "request_url": base_url,
+                "charset": "utf-8",
+            },
         )
         for forbidden in (
             "【字体：",
@@ -115,7 +151,8 @@ class TestHtmlToMarkdownConversion:
         self,
     ) -> None:
         """IRS IRB two-column layout strips the `col-md-4` table-of-contents sidebar and empty anchor links while keeping `col-md-8` body text."""
-        from wlh.processor.extractors.html.html_to_md import html_to_markdown
+        from wlh.processor.extractors.html.dom_tree import parse_html
+        from wlh.processor.parsers.html.document_builder import WebDocumentBuilder
 
         html = (
             '<div id="block-pup-irs-barrio-content">'
@@ -147,10 +184,30 @@ class TestHtmlToMarkdownConversion:
             "</div>"
             "</div>"
         )
-        md = html_to_markdown(
-            html,
-            base_url="https://www.irs.gov/irb/2026-35_IRB",
-            content_xpath='//div[@id="block-pup-irs-barrio-content"]',
+        base_url = "https://www.irs.gov/irb/2026-35_IRB"
+        builder = WebDocumentBuilder(
+            {
+                "processor": {
+                    "parser": {
+                        "type": "html",
+                        "documents": {
+                            "content_xpath": '//div[@id="block-pup-irs-barrio-content"]',
+                            "exclude_content_xpath": [
+                                './/div[contains(@class, "col-md-4") and following-sibling::div[contains(@class, "col-md-8")]//div[contains(@class, "book")]]'
+                            ],
+                        },
+                    }
+                }
+            }
+        )
+        tree, _, _ = parse_html(html.encode("utf-8"), "utf-8")
+        md = builder.html_markdown(
+            tree,
+            {
+                "actual_url": base_url,
+                "request_url": base_url,
+                "charset": "utf-8",
+            },
         )
         for forbidden in (
             "[HIGHLIGHTS OF THIS ISSUE](",

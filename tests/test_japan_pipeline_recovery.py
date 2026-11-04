@@ -23,8 +23,8 @@ from psycopg.rows import dict_row
 
 from wlh.config import load_file
 from wlh.processor.extractors.pdf.scan_detector import extract_pdf
+from wlh.processor.parsers.html.document_builder import WebDocumentBuilder
 from wlh.processor.parsers.html.fields import parse_html
-from wlh.processor.parsers.html.parser import HtmlParser as WebAdapter
 from wlh.storage.cas import Objects
 
 from .conftest import run_wlh_cli
@@ -233,14 +233,14 @@ class TestJapaneseInlineGlyphAndEmptyAttachmentHandling:
 
             pytest.skip("Private source config dd-582.yaml not present")
         cfg = load_file(src_path).model_dump()
-        adapter = WebAdapter(cfg)
+        builder = WebDocumentBuilder(cfg)
         tree, _, _ = parse_html(html_bytes, "utf-8")
         acquisition = {
             "actual_url": "https://www.kfs.go.jp/service/JP/120/01/index.html",
             "request_url": "https://www.kfs.go.jp/service/JP/120/01/index.html",
             "charset": "utf-8",
         }
-        markdown_text = adapter.html_markdown(tree, acquisition)
+        markdown_text = builder.html_markdown(tree, acquisition)
         for expected in ("まる1", "平方メートル", "まるイ", "○保"):
             assert expected in markdown_text, (expected, markdown_text)
 

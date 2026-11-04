@@ -114,8 +114,8 @@ def _court_server(fault: str = "") -> Generator[tuple[str, list[str]]]:
         thread.join(timeout=3)
 
 
-def _config(tmp_path: Path, origin: str, *, request_budget: int = 40, adapter: str = "japan_courts") -> Path:
-    if adapter == "web":
+def _config(tmp_path: Path, origin: str, *, request_budget: int = 40, direct_pdf: bool = False) -> Path:
+    if direct_pdf:
         config: dict[str, Any] = {
             "id": "dd-519",
             "scheduler": {
@@ -524,7 +524,7 @@ class TestLargeCatalogBudgets:
     ) -> None:
         """The real 67,890-case catalog needs >100,000 detail/PDF requests; a budget is a ceiling."""
         with _court_server() as (origin, requests):
-            config = _config(tmp_path, origin, request_budget=200000, adapter="web")
+            config = _config(tmp_path, origin, request_budget=200000, direct_pdf=True)
             report, rows = collect_artifact("dd-519", config, initialized_db, "large-catalog-request-budget", requests)
             assert len(rows) == 1, report
             assert report["result"]["status"] == "complete", report
