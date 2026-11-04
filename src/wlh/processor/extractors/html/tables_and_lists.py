@@ -21,7 +21,7 @@ def literal_text(value: str | None, *, html_output: bool = False) -> str:
 
 
 def span(value: str | None) -> int:
-    raw = value or "1"
+    raw = (value or "1").strip()
     if not raw.isdigit() or not 1 <= int(raw) <= 500:
         raise WlhError("table_span_invalid")
     return int(raw)

@@ -14,8 +14,15 @@ from wlh.core import WlhError
 etree: Any = _etree
 
 FRAGMENT = re.compile(r"^\s*<(?:!doctype|html|head|body)\b", re.I)
-_SELF_CLOSING_RAWTEXT_RE = re.compile(r"<(iframe|textarea|title|style)\b([^>]*?)/\s*>", re.I)
-_SELF_CLOSING_RAWTEXT_BYTES_RE = re.compile(rb"<(iframe|textarea|title|style)\b([^>]*?)/\s*>", re.I)
+_SELF_CLOSING_RAWTEXT_RE = re.compile(
+    r"<(iframe|textarea|title|style|script|noembed|noframes|xmp)\b((?:[^>\"']|\"[^\"]*\"|'[^']*')*?)/\s*>",
+    re.I,
+)
+_SELF_CLOSING_RAWTEXT_BYTES_RE = re.compile(
+    rb"<(iframe|textarea|title|style|script|noembed|noframes|xmp)\b((?:[^>\"']|\"[^\"]*\"|'[^']*')*?)/\s*>",
+    re.I,
+)
+_LXML_PARSER = lxml_html.HTMLParser(huge_tree=True)
 
 
 def document_tree(text: str | bytes) -> Any:
@@ -34,7 +41,7 @@ def document_tree(text: str | bytes) -> Any:
             normalized = LexborHTMLParser(raw, scripting=False).html or raw
         if not normalized:
             raise ValueError
-        tree: Any = cast(Any, lxml_html).document_fromstring(normalized)
+        tree: Any = cast(Any, lxml_html).document_fromstring(normalized, parser=_LXML_PARSER)
         for comment in list(cast(list[Any], tree.xpath("//comment()"))):
             parent = comment.getparent()
             if parent is None:

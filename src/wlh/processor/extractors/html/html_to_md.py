@@ -185,53 +185,53 @@ def html_to_markdown(
             return ""
         if disposition == "unwrap":
             return "\n\n" + children(node).strip() + "\n\n"
-        raw_rows: list[list[tuple[str, int, int]]] = []
-        for tr in node.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr"):
-            cells = [
-                (
-                    re.sub(r"\s+", " ", children(c)).strip().replace("|", "\\|"),
-                    span(c.get("colspan")),
-                    span(c.get("rowspan")),
-                )
-                for c in tr.xpath("./th|./td")
-            ]
-            if cells:
-                raw_rows.append(cells)
-        raw_rows = [
-            [(text, colspan, min(rowspan, len(raw_rows) - r_idx)) for text, colspan, rowspan in row]
-            for r_idx, row in enumerate(raw_rows)
-        ]
         try:
+            raw_rows: list[list[tuple[str, int, int]]] = []
+            for tr in node.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr"):
+                cells = [
+                    (
+                        re.sub(r"\s+", " ", children(c)).strip().replace("|", "\\|"),
+                        span(c.get("colspan")),
+                        span(c.get("rowspan")),
+                    )
+                    for c in tr.xpath("./th|./td")
+                ]
+                if cells:
+                    raw_rows.append(cells)
+            raw_rows = [
+                [(text, colspan, min(rowspan, len(raw_rows) - r_idx)) for text, colspan, rowspan in row]
+                for r_idx, row in enumerate(raw_rows)
+            ]
             rows = expand_rows(raw_rows)
+            caption = " ".join(children(c).strip() for c in node.xpath("./caption")).strip()
+            if not rows or not any(cell.strip() for row in rows for cell in row):
+                return f"\n\n{caption}\n\n" if caption else ""
+            if not scoped:
+                has_th = bool(node.xpath("./tr/th | ./thead/tr/th | ./tbody/tr/th"))
+                non_empty_rows = [r for r in rows if any(c.strip() for c in r)]
+                non_empty_cols = sum(
+                    1 for col_idx in range(len(rows[0])) if any(r[col_idx].strip() for r in rows)
+                )
+                if not has_th and (len(non_empty_rows) <= 1 or non_empty_cols <= 1):
+                    return "\n\n" + children(node).strip() + "\n\n"
+            if any(
+                colspan > 1 or rowspan > 1 for row in raw_rows for _, colspan, rowspan in row
+            ) or node.xpath(".//table | .//th[@scope]"):
+                return spanning_table(node, base_url if scoped else None, set(UI_ACTION_LABELS))
+            caption = " ".join(children(c).strip() for c in node.xpath("./caption")).strip()
+            width = max(map(len, rows))
+            rows = [row + [""] * (width - len(row)) for row in rows]
+            rows.insert(1, ["---"] * width)
+            return (
+                "\n\n"
+                + (caption + "\n\n" if caption else "")
+                + "\n".join("| " + " | ".join(row) + " |" for row in rows)
+                + "\n\n"
+            )
         except WlhError:
             if not scoped:
                 return "\n\n" + children(node).strip() + "\n\n"
             raise
-        caption = " ".join(children(c).strip() for c in node.xpath("./caption")).strip()
-        if not rows or not any(cell.strip() for row in rows for cell in row):
-            return f"\n\n{caption}\n\n" if caption else ""
-        if not scoped:
-            has_th = bool(node.xpath("./tr/th | ./thead/tr/th | ./tbody/tr/th"))
-            non_empty_rows = [r for r in rows if any(c.strip() for c in r)]
-            non_empty_cols = sum(
-                1 for col_idx in range(len(rows[0])) if any(r[col_idx].strip() for r in rows)
-            )
-            if not has_th and (len(non_empty_rows) <= 1 or non_empty_cols <= 1):
-                return "\n\n" + children(node).strip() + "\n\n"
-        if any(
-            colspan > 1 or rowspan > 1 for row in raw_rows for _, colspan, rowspan in row
-        ) or node.xpath(".//table | .//th[@scope]"):
-            return spanning_table(node, base_url if scoped else None, set(UI_ACTION_LABELS))
-        caption = " ".join(children(c).strip() for c in node.xpath("./caption")).strip()
-        width = max(map(len, rows))
-        rows = [row + [""] * (width - len(row)) for row in rows]
-        rows.insert(1, ["---"] * width)
-        return (
-            "\n\n"
-            + (caption + "\n\n" if caption else "")
-            + "\n".join("| " + " | ".join(row) + " |" for row in rows)
-            + "\n\n"
-        )
 
     def render(node: Any) -> str:
         if not isinstance(node.tag, str):

@@ -217,9 +217,17 @@ def recover_noscript_content(tree: Any) -> None:
             ):
                 continue
         idx = parent.index(ns)
-        for offset, item in enumerate(fragments):
+        last_element: Any = ns.getprevious()
+        for item in fragments:
             if isinstance(item, etree._Element):
-                parent.insert(idx + offset, item)
+                parent.insert(idx, item)
+                idx += 1
+                last_element = item
+            elif isinstance(item, str) and item:
+                if last_element is not None:
+                    last_element.tail = (last_element.tail or "") + item
+                else:
+                    parent.text = (parent.text or "") + item
         if ns.tail:
             prev = ns.getprevious()
             if prev is not None:
@@ -391,7 +399,7 @@ def _is_genuine_inline_math(inner: str) -> bool:
         return False
     if re.search(r"\\[a-zA-Z]+", s):
         return True
-    if re.match(r"^\d[\d,]*(\.\d{2})?(\s|$|[-–—,;:\)\]])", s):
+    if re.match(r"^\d[\d,]*(\.\d{2})?(\s|$|[-–—,;:\.\)\]])", s):
         if re.fullmatch(r"\d+(?:\.\d+)?(?:\s*[/^_*+\-=<>±×÷]\s*\d+(?:\.\d+)?)+", s):
             return True
         return False
