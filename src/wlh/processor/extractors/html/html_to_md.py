@@ -13,6 +13,10 @@ import lxml.etree as _etree  # type: ignore[import-untyped]
 from wlh.cleaners.text_cleaner import UI_ACTION_LABELS, normalized
 from wlh.core import WlhError
 from wlh.processor.extractors.html.dom_tree import document_tree
+from wlh.processor.extractors.html.fallback import (
+    escape_currency_dollars,
+    select_fallback_nodes,
+)
 from wlh.processor.extractors.html.tables_and_lists import (
     expand_rows,
     ordered_marker,
@@ -40,9 +44,23 @@ def _remove_element(el: Any) -> None:
 
 def clean_html_tree(node: Any, *, quirks: Sequence[str] | None = None) -> None:
     """In-place strip of standard non-content HTML tags and hidden inline styles."""
+    total_len = len(re.sub(r"\s+", " ", node.text_content() or "").strip())
     for el in list(node.xpath(".//*[@style]")):
+        if el is node or el.getparent() is None:
+            continue
         st = (el.get("style") or "").lower()
         if re.search(r"display\s*:\s*none|visibility\s*:\s*hidden", st):
+            if el.xpath(".//main | .//article | .//*[@role='main']"):
+                continue
+            cls_id = f"{el.get('id') or ''} {el.get('class') or ''} {el.get('role') or ''}".lower()
+            if re.search(
+                r"\b(?:tab-pane|tabpanel|acd-a-content|accordion-content|accordion-body|faq-answer)\b",
+                cls_id,
+            ):
+                continue
+            el_len = len(re.sub(r"\s+", " ", el.text_content() or "").strip())
+            if total_len > 300 and el_len > total_len * 0.45:
+                continue
             _remove_element(el)
 
     for bad_tag in list(
@@ -115,14 +133,13 @@ def html_to_markdown(
     *,
     quirks: Sequence[str] | None = None,
 ) -> str:
+    scoped = bool(content_xpath)
     try:
         tree = document_tree(html)
         for comment in list(tree.xpath("//comment()")):
             _remove_element(comment)
         nodes: list[Any] = (
-            tree.xpath(content_xpath)
-            if content_xpath
-            else [tree.body if tree.body is not None else tree]
+            tree.xpath(content_xpath) if content_xpath else select_fallback_nodes(tree)
         )
     except (etree.Error, ValueError):
         raise WlhError("html_unparseable") from None
@@ -149,35 +166,72 @@ def html_to_markdown(
             chunks.append(tail)
         return "".join(chunks)
 
+    def _is_layout_or_noise_table(node: Any) -> str | None:
+        """Return 'skip' for empty/noise tables, 'unwrap' for layout tables, or None for data tables."""
+        if not scoped:
+            sig = f"{node.get('id') or ''} {node.get('class') or ''}".lower()
+            if "calendar" in sig:
+                return "skip"
+            if node.get("role") in {"presentation", "none"}:
+                return "unwrap"
+            has_th = bool(node.xpath("./tr/th | ./thead/tr/th | ./tbody/tr/th"))
+            if not has_th and node.xpath(".//h1 | .//h2 | .//h3 | .//h4 | .//pre | .//article"):
+                return "unwrap"
+        return None
+
     def table(node: Any) -> str:
+        disposition = _is_layout_or_noise_table(node)
+        if disposition == "skip":
+            return ""
+        if disposition == "unwrap":
+            return "\n\n" + children(node).strip() + "\n\n"
         raw_rows: list[list[tuple[str, int, int]]] = []
         for tr in node.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr"):
             cells = [
-                (re.sub(r"\s+", " ", children(c)).strip().replace("|", "\\|"),
-                 span(c.get("colspan")), span(c.get("rowspan")))
+                (
+                    re.sub(r"\s+", " ", children(c)).strip().replace("|", "\\|"),
+                    span(c.get("colspan")),
+                    span(c.get("rowspan")),
+                )
                 for c in tr.xpath("./th|./td")
             ]
             if cells:
                 raw_rows.append(cells)
         raw_rows = [
-            [
-                (text, colspan, min(rowspan, len(raw_rows) - r_idx))
-                for text, colspan, rowspan in row
-            ]
+            [(text, colspan, min(rowspan, len(raw_rows) - r_idx)) for text, colspan, rowspan in row]
             for r_idx, row in enumerate(raw_rows)
         ]
-        rows = expand_rows(raw_rows)
-        if not rows:
-            return ""
-        if (any(colspan > 1 or rowspan > 1 for row in raw_rows for _, colspan, rowspan in row)
-                or node.xpath(".//table | .//th[@scope]")):
-            return spanning_table(node, base_url, set(UI_ACTION_LABELS))
+        try:
+            rows = expand_rows(raw_rows)
+        except WlhError:
+            if not scoped:
+                return "\n\n" + children(node).strip() + "\n\n"
+            raise
+        caption = " ".join(children(c).strip() for c in node.xpath("./caption")).strip()
+        if not rows or not any(cell.strip() for row in rows for cell in row):
+            return f"\n\n{caption}\n\n" if caption else ""
+        if not scoped:
+            has_th = bool(node.xpath("./tr/th | ./thead/tr/th | ./tbody/tr/th"))
+            non_empty_rows = [r for r in rows if any(c.strip() for c in r)]
+            non_empty_cols = sum(
+                1 for col_idx in range(len(rows[0])) if any(r[col_idx].strip() for r in rows)
+            )
+            if not has_th and (len(non_empty_rows) <= 1 or non_empty_cols <= 1):
+                return "\n\n" + children(node).strip() + "\n\n"
+        if any(
+            colspan > 1 or rowspan > 1 for row in raw_rows for _, colspan, rowspan in row
+        ) or node.xpath(".//table | .//th[@scope]"):
+            return spanning_table(node, base_url if scoped else None, set(UI_ACTION_LABELS))
         caption = " ".join(children(c).strip() for c in node.xpath("./caption")).strip()
         width = max(map(len, rows))
         rows = [row + [""] * (width - len(row)) for row in rows]
         rows.insert(1, ["---"] * width)
-        return ("\n\n" + (caption + "\n\n" if caption else "")
-                + "\n".join("| " + " | ".join(row) + " |" for row in rows) + "\n\n")
+        return (
+            "\n\n"
+            + (caption + "\n\n" if caption else "")
+            + "\n".join("| " + " | ".join(row) + " |" for row in rows)
+            + "\n\n"
+        )
 
     def render(node: Any) -> str:
         if not isinstance(node.tag, str):
@@ -191,15 +245,28 @@ def html_to_markdown(
             "head",
             "nav",
             "footer",
-            "form",
             "button",
+            "input",
+            "select",
+            "textarea",
+            "datalist",
+            "optgroup",
+            "option",
             "svg",
         }:
+            return ""
+        if tag == "form" and scoped:
             return ""
         if tag == "table":
             return table(node)
         if tag == "pre":
-            return "\n\n```\n" + node.text_content().strip() + "\n```\n\n"
+            for br in list(node.xpath(".//br")):
+                br.tail = "\n" + (br.tail or "")
+                _remove_element(br)
+            pre_text = node.text_content().strip()
+            if not pre_text:
+                return ""
+            return "\n\n```\n" + pre_text + "\n```\n\n"
         value = children(node)
         if tag == "a":
             label = value.strip()
@@ -214,6 +281,8 @@ def html_to_markdown(
                 or bool(onclick)
             ):
                 return ""
+            if not scoped:
+                return value
             if (
                 not raw_href
                 or raw_href.lower().startswith(("#", "javascript:"))
@@ -245,7 +314,12 @@ def html_to_markdown(
             trail = " " if value[-1:].isspace() else ""
             return f"{lead}*{stripped}*{trail}"
         if tag == "code":
-            return "`" + value.strip() + "`"
+            code_val = value.strip()
+            if not code_val:
+                return ""
+            if "\n" in code_val:
+                return "\n\n```\n" + code_val + "\n```\n\n"
+            return "`" + code_val + "`"
         if tag == "br":
             return "\n\n"
         if re.fullmatch(r"h[1-6]", tag):
@@ -261,7 +335,19 @@ def html_to_markdown(
             return "\n" + marker + re.sub(r"\n+", "\n  ", value.strip()) + "\n"
         if tag == "blockquote":
             return "\n\n" + "\n".join("> " + line for line in value.strip().splitlines()) + "\n\n"
-        if tag in {"p", "div", "section", "article", "main", "ul", "ol", "header", "body", "hr"}:
+        if tag in {
+            "p",
+            "div",
+            "section",
+            "article",
+            "main",
+            "ul",
+            "ol",
+            "header",
+            "body",
+            "hr",
+            "form",
+        }:
             body_text = value.strip()
             if tag == "p" and "\n" in body_text:
                 body_text = re.sub(r"(?m)^(\s*\d{1,9})([.)])(?=\s)", r"\1\\\2", body_text)
@@ -280,4 +366,7 @@ def html_to_markdown(
         parts.append(render(node))
         if parent is not None and id(parent) not in selected and inline(node.tail).strip():
             parts.append(escape_literal_order(inline(node.tail).strip()))
-    return normalized("\n\n".join(parts))
+    joined = "\n\n".join(parts)
+    if not scoped:
+        joined = escape_currency_dollars(joined)
+    return normalized(joined)

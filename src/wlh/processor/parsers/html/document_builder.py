@@ -216,12 +216,9 @@ class WebDocumentBuilder:
         self.config = config
         rules = _doc_rules(config)
         self.attachment = re.compile(
-            rules.get("attachment_url_pattern")
-            or r"(?i)\.(?:pdf|docx?|rtf|xlsx?|zip)(?:$|[?#])"
+            rules.get("attachment_url_pattern") or r"(?i)\.(?:pdf|docx?|rtf|xlsx?|zip)(?:$|[?#])"
         )
-        self.volume = (
-            re.compile(rules["volume_pattern"]) if rules.get("volume_pattern") else None
-        )
+        self.volume = re.compile(rules["volume_pattern"]) if rules.get("volume_pattern") else None
 
     def deliverable_text(
         self,
@@ -333,7 +330,10 @@ class WebDocumentBuilder:
         if blocked(fragment.encode("utf-8"), self.config):
             raise WlhError("target_content_blocked")
         md = html_to_markdown(
-            "<html><body>" + fragment + "</body></html>", base, quirks=quirks
+            "<html><body>" + fragment + "</body></html>",
+            base,
+            content_xpath="/html/body" if rule else None,
+            quirks=quirks,
         )
         strip_pats = _strip_text_regexes(self.config)
         return apply_text_cleaners(md, strip_pats) if strip_pats else md
@@ -368,13 +368,17 @@ class WebDocumentBuilder:
                 or " ".join(v for v in (fields.get("裁判所名"), fields.get("部名")) if v)
                 or None
             )
-            return {
-                "document_number": number,
-                "issuer": issuer,
-                "published_at": published,
-                "effective_at": None,
-                "status": fields.get("結果") or fields.get("判決結果"),
-            }, title, encoding
+            return (
+                {
+                    "document_number": number,
+                    "issuer": issuer,
+                    "published_at": published,
+                    "effective_at": None,
+                    "status": fields.get("結果") or fields.get("判決結果"),
+                },
+                title,
+                encoding,
+            )
         docs = _doc_rules(self.config)
         fields_cfg = docs.get("fields")
         fields_map: Mapping[str, Any] = (
@@ -498,7 +502,10 @@ class WebDocumentBuilder:
         verified_title: str | None = None
         if kind in BINARY_KINDS and docs.get("binary_title_from_link"):
             verified_title, context = directory_title(
-                ctx, inputs, acquisition["request_url"], GENERIC_ATTACHMENT_LABELS,
+                ctx,
+                inputs,
+                acquisition["request_url"],
+                GENERIC_ATTACHMENT_LABELS,
             )
             candidate_inputs.append(context)
         deliverables: list[dict[str, Any]] = []
@@ -563,8 +570,7 @@ class WebDocumentBuilder:
             att = item["acquisition"]
             source = public_url(att["actual_url"] or att["request_url"])
             if not (
-                self.attachment.search(unquote(source))
-                or self.attachment.search(file_name(source))
+                self.attachment.search(unquote(source)) or self.attachment.search(file_name(source))
             ):
                 continue
             body = ctx.read(att)
@@ -601,9 +607,7 @@ class WebDocumentBuilder:
             else:
                 att_title = clean_base_name or base_name
             match: re.Match[str] | None = (
-                (self.volume.search(text) or self.volume.search(base_name))
-                if self.volume
-                else None
+                (self.volume.search(text) or self.volume.search(base_name)) if self.volume else None
             )
             files.append(
                 {
@@ -623,7 +627,9 @@ class WebDocumentBuilder:
                 for f in volumes:
                     f["order"] = None
         others = [f for f in files if f not in volumes]
-        body_mode = "never" if _reconcile_range_enabled(self.config) else docs.get("detail_body", "auto")
+        body_mode = (
+            "never" if _reconcile_range_enabled(self.config) else docs.get("detail_body", "auto")
+        )
         use_body = not volumes and (body_mode == "always" or (body_mode == "auto" and not files))
         if kind not in TEXT_KINDS | BINARY_KINDS:
             raise WlhError("unsupported_document_type")

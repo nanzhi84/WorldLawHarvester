@@ -82,7 +82,9 @@ class TestHtmlToMarkdownConversion:
           </body>
         </html>
         """
-        base_url = "https://www.safe.gov.cn/www/illegal/listQuery?saffno=22d58c4edfbf401595848a52a3f91db6"
+        base_url = (
+            "https://www.safe.gov.cn/www/illegal/listQuery?saffno=22d58c4edfbf401595848a52a3f91db6"
+        )
         builder = WebDocumentBuilder(
             {
                 "processor": {
@@ -215,7 +217,9 @@ class TestHtmlToMarkdownConversion:
             "[The IRS Mission](",
             "[](https://www.irs.gov/irb/2026-35_IRB",
         ):
-            assert forbidden not in md, f"Unexpected TOC/anchor noise {forbidden!r} in Markdown:\n{md}"
+            assert forbidden not in md, (
+                f"Unexpected TOC/anchor noise {forbidden!r} in Markdown:\n{md}"
+            )
 
         assert "# Internal Revenue Bulletin: 2026-35" in md
         assert "Substantive bulletin text on Section 43 inflation adjustment." in md
@@ -309,3 +313,275 @@ class TestHtmlToMarkdownConversion:
         )
 
 
+class TestUnscopedHtmlFallbackExtraction:
+    def test_unscoped_article_page_with_chrome_sidebars_comments_and_related_links_extracts_clean_main_body(
+        self,
+    ) -> None:
+        """Unscoped article HTML strips site chrome, cookie banners, comments, and related links while keeping clean main body prose."""
+        from wlh.processor.extractors.html.html_to_md import html_to_markdown
+
+        html = """
+        <html>
+          <body>
+            <header class="site-header">
+              <nav><a href="/home">Home</a> <a href="/politics">Politics</a></nav>
+            </header>
+            <div class="cookie-consent-banner">Accept all cookies to continue browsing our platform.</div>
+            <main>
+              <article>
+                <header class="entry-header">
+                  <div class="cat-links">Politics</div>
+                  <h1>Regulatory Reform Act</h1>
+                  <div class="byline">By Jane Doe | Shared 400 times</div>
+                </header>
+                <div class="entry-content">
+                  <p>Article 1 establishes the new <a href="https://news.example.org/ref">supervisory authority</a> over financial institutions across all member states.</p>
+                  <p>Article 2 sets out the transition period and compliance reporting obligations for regulated entities.</p>
+                </div>
+              </article>
+              <section id="comments" class="comments-area">
+                <h3>User Comments</h3>
+                <p>Great article! Click here to subscribe to our newsletter.</p>
+              </section>
+              <div class="related-posts">
+                <h3>Related Stories</h3>
+                <ul>
+                  <li><a href="https://news.example.org/a">Story A</a></li>
+                  <li><a href="https://news.example.org/b">Story B</a></li>
+                </ul>
+              </div>
+            </main>
+            <aside class="sidebar">Popular Posts...</aside>
+            <footer>Copyright 2026</footer>
+          </body>
+        </html>
+        """
+        md = html_to_markdown(
+            html,
+            base_url="https://news.example.org/articles/1",
+            content_xpath=None,
+        )
+        assert "# Regulatory Reform Act" in md
+        assert "Article 1 establishes the new supervisory authority" in md
+        assert "Article 2 sets out the transition period" in md
+        assert "(https://news.example.org/ref)" not in md
+        for forbidden in (
+            "Accept all cookies",
+            "User Comments",
+            "Click here to subscribe",
+            "Related Stories",
+            "Popular Posts",
+            "Copyright 2026",
+        ):
+            assert forbidden not in md, f"Unexpected boilerplate {forbidden!r} in Markdown:\n{md}"
+
+    def test_unscoped_aspnet_or_cms_form_wrapping_main_content_preserves_document_body_and_strips_form_controls(
+        self,
+    ) -> None:
+        """Unscoped pages wrapped inside a root form preserve main content while stripping form controls and hidden state."""
+        from wlh.processor.extractors.html.html_to_md import html_to_markdown
+
+        html = """
+        <html>
+          <body>
+            <form id="aspnetForm" method="post" action="/page.aspx">
+              <input type="hidden" name="__VIEWSTATE" value="dDwxMjM0NTY3ODkwO3Q8O2w8aTwxPjs+O2w8dDw7bDxpPDA+Oz47bDx0PHA8cDxsPFRleHQ7PjtsPFZhbHVlOz4+Pjs7Pjs+Pjs+Pjs+" />
+              <select><option>Filter</option></select>
+              <div id="MainContent" class="post-content">
+                <h1>Notice of Public Hearing</h1>
+                <p>The commission will hold a public hearing on environmental standards on May 12.</p>
+                <pre><code>CASE-ID: ENV-2026-09\nSTATUS: OPEN</code></pre>
+              </div>
+            </form>
+          </body>
+        </html>
+        """
+        md = html_to_markdown(
+            html,
+            base_url="https://portal.example.org/page.aspx",
+            content_xpath=None,
+        )
+        assert "# Notice of Public Hearing" in md
+        assert (
+            "The commission will hold a public hearing on environmental standards on May 12." in md
+        )
+        assert "CASE-ID: ENV-2026-09" in md
+        assert "Filter" not in md
+        assert "__VIEWSTATE" not in md
+
+    def test_unscoped_forum_thread_inside_noscript_crawler_outlet_and_inline_mod_form_extracts_all_posts(
+        self,
+    ) -> None:
+        """Unscoped forum threads inside noscript crawler outlets or moderation forms retain all discussion posts."""
+        from wlh.processor.extractors.html.html_to_md import html_to_markdown
+
+        html_noscript_forum = """
+        <html>
+          <body>
+            <section id="d-splash">Loading...</section>
+            <noscript>
+              <div id="main-outlet">
+                <div id="post_1" class="topic-body crawler-post">
+                  <div class="post">
+                    <p>First post explaining the network bridge DNS resolution issue in detail.</p>
+                  </div>
+                </div>
+                <div id="post_2" class="topic-body crawler-post">
+                  <div class="post">
+                    <p>Second post providing the custom bridge network workaround and verification steps.</p>
+                  </div>
+                </div>
+              </div>
+            </noscript>
+          </body>
+        </html>
+        """
+        md_a = html_to_markdown(
+            html_noscript_forum,
+            base_url="https://forum.example.org/t/10",
+            content_xpath=None,
+        )
+        assert "First post explaining the network bridge" in md_a
+        assert "Second post providing the custom bridge network workaround" in md_a
+
+        html_inline_mod_forum = """
+        <html>
+          <body>
+            <form action="inline-mod/post/switch" method="post" class="InlineModForm section">
+              <ol class="messageList" id="messageList">
+                <li id="post-101" class="message">
+                  <div class="messageInfo primaryContent">
+                    <div class="messageContent">
+                      <article>
+                        <blockquote class="messageText">
+                          Question regarding municipal zoning variance application procedures for corner lots.
+                        </blockquote>
+                      </article>
+                    </div>
+                  </div>
+                </li>
+                <li id="post-102" class="message">
+                  <div class="messageInfo primaryContent">
+                    <div class="messageContent">
+                      <article>
+                        <blockquote class="messageText">
+                          You must submit Form Z-14 along with a certified site survey at least 30 days prior to the hearing.
+                        </blockquote>
+                      </article>
+                    </div>
+                  </div>
+                </li>
+              </ol>
+            </form>
+          </body>
+        </html>
+        """
+        md_b = html_to_markdown(
+            html_inline_mod_forum,
+            base_url="https://forum.example.org/threads/20",
+            content_xpath=None,
+        )
+        assert "Question regarding municipal zoning variance application procedures" in md_b
+        assert "You must submit Form Z-14 along with a certified site survey" in md_b
+
+    def test_unscoped_scientific_html_with_mathml_latex_annotations_and_currency_amounts_formats_formulas_and_escapes_currency_dollars(
+        self,
+    ) -> None:
+        """Unscoped scientific HTML converts MathML, KaTeX annotations, and formula images to LaTeX while escaping currency dollar signs."""
+        from wlh.processor.extractors.html.html_to_md import html_to_markdown
+
+        html = """
+        <html>
+          <body>
+            <main>
+              <h1> Quantitative Assessment of Statutory Penalties</h1>
+              <p>The ratio is defined as <math xmlns="http://www.w3.org/1998/Math/MathML"><msub><mi>R</mi><mn>1</mn></msub><mo>=</mo><mfrac><msub><mi>t</mi><mi>j</mi></msub><msub><mi>t</mi><mn>2</mn></msub></mfrac></math> for all intervals.</p>
+              <p>The threshold scale is <span class="katex"><span class="katex-mathml"><math><semantics><mrow><msup><mn>2</mn><mn>20</mn></msup><mo>+</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">{2}^{20}+1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true">220+1</span></span> units.</p>
+              <p>Decay channel: <img src="http://latex.codecogs.com/gif.latex?W%20%5Cto%20e%20%5Cnu_e" /> in standard notation.</p>
+              <p>The filing fee is $50 and the maximum statutory penalty is $5,000.00 per violation.</p>
+            </main>
+          </body>
+        </html>
+        """
+        md = html_to_markdown(
+            html,
+            base_url="https://science.example.org/papers/1",
+            content_xpath=None,
+        )
+        assert "${2}^{20}+1$" in md
+        assert "220+1" not in md
+        assert r"$W \to e \nu_e$" in md
+        assert r"\frac" in md
+        assert r"\$50" in md
+        assert r"\$5,000.00" in md
+
+    def test_unscoped_layout_and_empty_tables_do_not_emit_bogus_markdown_table_grids_while_data_tables_preserve_structure(
+        self,
+    ) -> None:
+        """Unscoped extraction drops empty tables, unwraps single-cell layout tables into normal blocks, and preserves genuine data tables."""
+        from wlh.processor.extractors.html.html_to_md import html_to_markdown
+
+        html = """
+        <html>
+          <body>
+            <main>
+              <table><tr><td></td><td></td></tr></table>
+              <table border="0">
+                <tr>
+                  <td>
+                    <h2>Section Title</h2>
+                    <p>Paragraph inside layout table.</p>
+                    <pre>def run():\n    return True</pre>
+                  </td>
+                </tr>
+              </table>
+              <table>
+                <thead>
+                  <tr><th>Metric</th><th>Value</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>Latency</td><td>12ms</td></tr>
+                  <tr><td>Throughput</td><td>1000 rps</td></tr>
+                </tbody>
+              </table>
+            </main>
+          </body>
+        </html>
+        """
+        md = html_to_markdown(
+            html,
+            base_url="https://docs.example.org/guide",
+            content_xpath=None,
+        )
+        assert "|  |" not in md
+        assert "## Section Title" in md
+        assert "| ## Section Title" not in md
+        assert "Paragraph inside layout table." in md
+        assert "def run():\n    return True" in md
+        assert "| Metric | Value |" in md
+        assert "| Latency | 12ms |" in md
+
+    def test_self_closing_iframe_inside_noscript_does_not_swallow_subsequent_body_content(
+        self,
+    ) -> None:
+        """Self-closing iframe tags inside noscript blocks do not consume subsequent main body content."""
+        from wlh.processor.extractors.html.html_to_md import html_to_markdown
+
+        html = """
+        <html>
+          <body>
+            <noscript><iframe src="https://tagmanager.example.org/ns.html" height="0" width="0" style="display:none;visibility:hidden" /></noscript>
+            <main>
+              <h1>Service Overview</h1>
+              <p>Reliable cloud infrastructure for distributed engineering teams.</p>
+            </main>
+          </body>
+        </html>
+        """
+        md = html_to_markdown(
+            html,
+            base_url="https://cloud.example.org/overview",
+            content_xpath=None,
+        )
+        assert "# Service Overview" in md
+        assert "Reliable cloud infrastructure for distributed engineering teams." in md

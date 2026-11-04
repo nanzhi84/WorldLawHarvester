@@ -14,15 +14,23 @@ from wlh.core import WlhError
 etree: Any = _etree
 
 FRAGMENT = re.compile(r"^\s*<(?:!doctype|html|head|body)\b", re.I)
+_SELF_CLOSING_RAWTEXT_RE = re.compile(r"<(iframe|textarea|title|style)\b([^>]*?)/\s*>", re.I)
+_SELF_CLOSING_RAWTEXT_BYTES_RE = re.compile(rb"<(iframe|textarea|title|style)\b([^>]*?)/\s*>", re.I)
 
 
 def document_tree(text: str | bytes) -> Any:
     try:
         if isinstance(text, bytes):
-            parser = LexborHTMLParser(text, encoding=True, scripting=False)
+            sanitized_bytes = _SELF_CLOSING_RAWTEXT_BYTES_RE.sub(rb"<\1\2></\1>", text)
+            parser = LexborHTMLParser(sanitized_bytes, encoding=True, scripting=False)
             normalized = parser.html
         else:
-            raw = text if FRAGMENT.match(text) else f"<!DOCTYPE html><html><body>{text}</body></html>"
+            sanitized_text = _SELF_CLOSING_RAWTEXT_RE.sub(r"<\1\2></\1>", text)
+            raw = (
+                sanitized_text
+                if FRAGMENT.match(sanitized_text)
+                else f"<!DOCTYPE html><html><body>{sanitized_text}</body></html>"
+            )
             normalized = LexborHTMLParser(raw, scripting=False).html or raw
         if not normalized:
             raise ValueError
@@ -47,7 +55,7 @@ def decode(data: bytes, charset: str | None = None) -> tuple[str, str]:
     detected: str | None = charset
     if not detected:
         match: re.Match[bytes] | None = re.search(
-            br'<meta\b[^>]*charset=["\']?\s*([a-zA-Z0-9._-]+)', data[:4096], re.I
+            rb'<meta\b[^>]*charset=["\']?\s*([a-zA-Z0-9._-]+)', data[:4096], re.I
         )
         if match:
             detected = match.group(1).decode("ascii", errors="ignore")
