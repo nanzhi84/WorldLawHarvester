@@ -453,6 +453,7 @@ class TestBenchmarkOfflineExecutionPurity:
             text=True,
             check=False,
             env=blackhole_env,
+            timeout=60,
         )
         assert proc.returncode == 0, f"Benchmark run attempted network connection! stderr:\n{proc.stderr}"
         report_file = out_dir / "benchmark_report.json"

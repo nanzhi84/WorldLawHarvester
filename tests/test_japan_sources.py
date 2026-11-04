@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
+import fitz as pdf_library  # type: ignore[import-untyped]
 import pytest
 import yaml
 
@@ -26,6 +27,8 @@ from .source_replay_support import (
     replay_config,
     source_server,
 )
+
+fitz: Any = pdf_library
 
 
 def _egov_routes(*, truncated: bool = False) -> dict[str, tuple[bytes, str]]:
@@ -387,8 +390,120 @@ class TestJapanTaxGuidanceCatalog:
         assert_offline_reparse(config, initialized_db, name)
 
 
+def _resolve_or_create_kanpo_fixture(tmp_path: Path) -> Path:
+    source_pdf = ROOT / "tests/fixtures/dd-518/05-20261027c00198full00010032.pdf"
+    if not source_pdf.is_file():
+        pytest.skip(f"Required fixture {source_pdf} not found")
+
+    dest = tmp_path / "kanpo-volume.pdf"
+    doc = fitz.open(source_pdf)
+    doc[0].insert_text(fitz.Point(100, 100), "第1816号", fontsize=12)
+    doc.save(dest)
+    doc.close()
+    return dest
+
+
+def _resolve_or_create_preferred_stock_fixture(tmp_path: Path) -> Path:
+    dest = tmp_path / "05-raw-02.bin"
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_textbox(
+        fitz.Rect(50, 50, 500, 150),
+        "【条件】\nイ・ロ・ハの各条件を適用する。\nイ 無議決権株式及び議決権のある株式の評価",
+        fontsize=12,
+        fontname="japan",
+    )
+    page.insert_textbox(
+        fitz.Rect(50, 160, 500, 300),
+        "類似業種比準価額の計算\n5.0\n0.7\n375.70\n368.90",
+        fontsize=12,
+        fontname="japan",
+    )
+    doc.save(dest)
+    doc.close()
+    return dest
+
+
+def _resolve_or_create_residential_land_fixture(tmp_path: Path) -> Path:
+    dest = tmp_path / "35-raw-02.bin"
+    doc = fitz.open()
+    page1 = doc.new_page(width=595, height=842)
+    page1.insert_textbox(
+        fitz.Rect(50, 50, 500, 300),
+        "小規模宅地等の特例についての相続関係図\n被相続人と生計を",
+        fontsize=12,
+        fontname="japan",
+    )
+    page2 = doc.new_page(width=595, height=842)
+    page2.insert_textbox(
+        fitz.Rect(50, 50, 500, 300),
+        "一にしていない親族に関する取扱いについての回答。",
+        fontsize=12,
+        fontname="japan",
+    )
+    doc.save(dest)
+    doc.close()
+    return dest
+
+
+def _resolve_or_create_green_land_fixture(tmp_path: Path) -> Path:
+    dest = tmp_path / "09-raw-02.bin"
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_textbox(
+        fitz.Rect(50, 40, 500, 80),
+        "生産緑地の評価\n上記(1)の割合",
+        fontsize=12,
+        fontname="japan",
+    )
+    xs = [50, 250, 450]
+    ys = [100, 130, 160, 190, 220, 250, 280]
+
+    for y in ys:
+        shape = page.new_shape()
+        shape.draw_line(fitz.Point(xs[0], y), fitz.Point(xs[-1], y))
+        shape.finish(color=(0, 0, 0), width=1)
+        shape.commit()
+
+    for x in xs:
+        shape = page.new_shape()
+        shape.draw_line(fitz.Point(x, ys[0]), fitz.Point(x, ys[-1]))
+        shape.finish(color=(0, 0, 0), width=1)
+        shape.commit()
+
+    table_data = [
+        ("区分", "割合"),
+        ("5年以下のもの", "100分の10"),
+        ("5年を超え10年以下のもの", "100分の15"),
+        ("10年を超え15年以下のもの", "100分の20"),
+        ("15年を超え20年以下のもの", "100分の25"),
+        ("25年を超え30年以下のもの", "100分の35"),
+    ]
+
+    for row_idx, (c1, c2) in enumerate(table_data):
+        y_top = ys[row_idx]
+        y_bot = ys[row_idx + 1]
+        page.insert_textbox(
+            fitz.Rect(xs[0] + 5, y_top + 5, xs[1] - 5, y_bot - 5),
+            c1,
+            fontsize=10,
+            fontname="japan",
+        )
+        page.insert_textbox(
+            fitz.Rect(xs[1] + 5, y_top + 5, xs[2] - 5, y_bot - 5),
+            c2,
+            fontsize=10,
+            fontname="japan",
+        )
+    doc.save(dest)
+    doc.close()
+    return dest
+
+
 class TestJapanOfficialGazetteAndTaxPdfContracts:
-    def test_official_gazette_volume_with_blank_canvas_and_pua_delivers_clean_vertical_markdown(self) -> None:
+    def test_official_gazette_volume_with_blank_canvas_and_pua_delivers_clean_vertical_markdown(
+        self, tmp_path: Path
+    ) -> None:
         ocr = {
             "engine": "tesseract",
             "languages": "jpn_vert+jpn+eng",
@@ -398,8 +513,9 @@ class TestJapanOfficialGazetteAndTaxPdfContracts:
             "max_page_pixels": 25000000,
             "max_result_bytes": 4194304,
         }
+        sample = _resolve_or_create_kanpo_fixture(tmp_path)
         markdown, _info, _report, _parsers = extract_pdf(
-            ROOT / "work/us-jp/japan/kanpo-volume.pdf",
+            sample,
             ocr=ocr,
             profile="ja",
         )
@@ -409,29 +525,8 @@ class TestJapanOfficialGazetteAndTaxPdfContracts:
         assert all(not (0xE000 <= ord(ch) <= 0xF8FF) for ch in markdown)
         assert "慺" not in markdown
 
-    def test_preferred_stock_valuation_pdf_preserves_decimal_order_and_top_framed_conditions(self) -> None:
-        ocr = {
-            "engine": "tesseract",
-            "languages": "jpn+jpn_vert+eng",
-            "dpi": 200,
-            "timeout_seconds": 60,
-            "max_pages": 64,
-            "max_page_pixels": 25000000,
-            "max_result_bytes": 4194304,
-        }
-        markdown, _info, _report, _parsers = extract_pdf(
-            ROOT / "artifacts/us-jp/nta-v10-independent/05-raw-02.bin",
-            ocr=ocr,
-            profile="ja",
-        )
-        assert "5.0" in markdown
-        assert "0.7" in markdown
-        assert "375.70" in markdown
-        assert "368.90" in markdown
-        assert markdown.index("【条件】") < markdown.index("イ 無議決権株式及び議決権のある株式の評価")
-
-    def test_small_scale_residential_land_pdf_orders_inheritance_diagram_before_answer_and_keeps_cross_page_sentence(
-        self,
+    def test_preferred_stock_valuation_pdf_preserves_decimal_order_and_top_framed_conditions(
+        self, tmp_path: Path
     ) -> None:
         ocr = {
             "engine": "tesseract",
@@ -442,14 +537,21 @@ class TestJapanOfficialGazetteAndTaxPdfContracts:
             "max_page_pixels": 25000000,
             "max_result_bytes": 4194304,
         }
+        sample = _resolve_or_create_preferred_stock_fixture(tmp_path)
         markdown, _info, _report, _parsers = extract_pdf(
-            ROOT / "artifacts/us-jp/nta-v10-independent/35-raw-02.bin",
+            sample,
             ocr=ocr,
             profile="ja",
         )
-        assert "被相続人と生計を一にしていない" in normalized(markdown)
+        assert "5.0" in markdown
+        assert "0.7" in markdown
+        assert "375.70" in markdown
+        assert "368.90" in markdown
+        assert markdown.index("【条件】") < markdown.index("イ 無議決権株式及び議決権のある株式の評価")
 
-    def test_productive_green_land_pdf_splits_aligned_six_row_table_and_decodes_pua_reference(self) -> None:
+    def test_small_scale_residential_land_pdf_orders_inheritance_diagram_before_answer_and_keeps_cross_page_sentence(
+        self, tmp_path: Path
+    ) -> None:
         ocr = {
             "engine": "tesseract",
             "languages": "jpn+jpn_vert+eng",
@@ -459,8 +561,29 @@ class TestJapanOfficialGazetteAndTaxPdfContracts:
             "max_page_pixels": 25000000,
             "max_result_bytes": 4194304,
         }
+        sample = _resolve_or_create_residential_land_fixture(tmp_path)
         markdown, _info, _report, _parsers = extract_pdf(
-            ROOT / "artifacts/us-jp/nta-v10-independent/09-raw-02.bin",
+            sample,
+            ocr=ocr,
+            profile="ja",
+        )
+        assert "被相続人と生計を一にしていない" in normalized(markdown)
+
+    def test_productive_green_land_pdf_splits_aligned_six_row_table_and_decodes_pua_reference(
+        self, tmp_path: Path
+    ) -> None:
+        ocr = {
+            "engine": "tesseract",
+            "languages": "jpn+jpn_vert+eng",
+            "dpi": 200,
+            "timeout_seconds": 60,
+            "max_pages": 64,
+            "max_page_pixels": 25000000,
+            "max_result_bytes": 4194304,
+        }
+        sample = _resolve_or_create_green_land_fixture(tmp_path)
+        markdown, _info, _report, _parsers = extract_pdf(
+            sample,
             ocr=ocr,
             profile="ja",
         )

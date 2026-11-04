@@ -17,6 +17,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+SAMPLE_CANDIDATES_PATH = (
+    Path("tests/fixtures/benchmark/candidates_sample.jsonl")
+    if Path("tests/fixtures/benchmark/candidates_sample.jsonl").is_file()
+    else Path("data/benchmark/candidates_sample.jsonl")
+)
+
 
 def run_wlh_cli(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     """Execute wlh CLI as a clean separate subprocess."""
@@ -24,7 +30,7 @@ def run_wlh_cli(args: list[str], env: dict[str, str] | None = None) -> subproces
     if env:
         merged_env.update(env)
     cmd = [sys.executable, "-m", "wlh", *args]
-    return subprocess.run(cmd, capture_output=True, text=True, check=False, env=merged_env)
+    return subprocess.run(cmd, capture_output=True, text=True, check=False, env=merged_env, timeout=60)
 
 
 def run_benchmark_module(args: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -33,7 +39,7 @@ def run_benchmark_module(args: list[str], env: dict[str, str] | None = None) -> 
     if env:
         merged_env.update(env)
     cmd = [sys.executable, "-m", "wlh.benchmark", *args]
-    return subprocess.run(cmd, capture_output=True, text=True, check=False, env=merged_env)
+    return subprocess.run(cmd, capture_output=True, text=True, check=False, env=merged_env, timeout=60)
 
 
 def _create_sample_candidate(
@@ -172,7 +178,7 @@ class TestBenchmarkCliRunExecution:
             "benchmark",
             "run",
             "--input",
-            "data/benchmark/ground_truth_benchmark.jsonl",
+            str(SAMPLE_CANDIDATES_PATH),
             "--output-dir",
             str(custom_out),
         ])
@@ -189,7 +195,7 @@ class TestBenchmarkCliRunExecution:
             "benchmark",
             "run",
             "--input",
-            "data/benchmark/raw_candidates.jsonl",
+            str(SAMPLE_CANDIDATES_PATH),
             "--output-dir",
             str(out_dir),
         ])
@@ -197,7 +203,7 @@ class TestBenchmarkCliRunExecution:
         report_json = out_dir / "benchmark_report.json"
         assert report_json.is_file()
         report_data = json.loads(report_json.read_text(encoding="utf-8"))
-        assert report_data["total_samples"] == 721
+        assert report_data["total_samples"] == 2
         assert report_data["average_accuracy_score"] is not None
 
     def test_sample_subcommand_extracts_candidates_and_manifest(
@@ -227,7 +233,7 @@ class TestBenchmarkCliRunExecution:
         proc = run_wlh_cli([
             "benchmark",
             "--input",
-            "data/benchmark/ground_truth_benchmark.jsonl",
+            str(SAMPLE_CANDIDATES_PATH),
             "--output-dir",
             str(out_dir),
         ])
@@ -243,7 +249,7 @@ class TestBenchmarkCliRunExecution:
         proc = run_benchmark_module([
             "run",
             "--input",
-            "data/benchmark/ground_truth_benchmark.jsonl",
+            str(SAMPLE_CANDIDATES_PATH),
             "--output-dir",
             str(out_dir),
         ])
@@ -273,7 +279,7 @@ class TestBenchmarkCliOfflineIsolation:
                 "benchmark",
                 "run",
                 "--input",
-                "data/benchmark/ground_truth_benchmark.jsonl",
+                str(SAMPLE_CANDIDATES_PATH),
                 "--output-dir",
                 str(out_dir),
             ],

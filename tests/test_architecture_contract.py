@@ -424,6 +424,15 @@ class TestArchitectureContract:
         )
         assert gaz_md.startswith("# Gazette Notice\n\n") and "Gazette body" in gaz_md
 
+    def test_all_test_files_registered_in_pyramid_markers_contract(self) -> None:
+        """Every test_*.py in tests/ must have an explicit pyramid marker in conftest.PYRAMID_MARKERS_BY_FILE."""
+        from tests.conftest import PYRAMID_MARKERS_BY_FILE
+
+        all_test_files = {p.name for p in (REPO_ROOT / "tests").glob("test_*.py")}
+        missing = all_test_files - set(PYRAMID_MARKERS_BY_FILE.keys())
+        assert not missing, f"Test files missing pyramid marker registration: {sorted(missing)}"
+
+
 
 class TestSourceConfigContract:
     def test_five_stage_source_config_accepts_valid_universal_parsers_and_hooks(self) -> None:

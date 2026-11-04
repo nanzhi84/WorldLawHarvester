@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import pwd
+import re
+import select
 import threading
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -21,16 +23,20 @@ j = Jsonb
 DbConn = psycopg.Connection[dict[str, Any]]
 _POOL_LOCK = threading.Lock()
 _CONN_POOL: dict[tuple[int, str], list[DbConn]] = {}
+TEST_DB_NAME_RE = re.compile(r"^wlh_test(_.*)?$")
+_TEST_DB_NAME_RE = TEST_DB_NAME_RE
 ALLOWED_DATABASES = frozenset({"wlh", "wlh_samples", "wlh_test"})
 
 
 def dsn() -> str:
     url = os.environ.get("WLH_DATABASE_URL", "postgresql://wlh:wlh@127.0.0.1:15432/wlh")
     db_name = urlsplit(url).path.lstrip("/")
-    if db_name not in ALLOWED_DATABASES:
-        raise WlhError("test_database_isolation_violation")
-    if "PYTEST_CURRENT_TEST" in os.environ and db_name != "wlh_test":
-        raise WlhError("test_database_isolation_violation")
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        if not _TEST_DB_NAME_RE.match(db_name):
+            raise WlhError("test_database_isolation_violation")
+    else:
+        if db_name not in ALLOWED_DATABASES:
+            raise WlhError("test_database_isolation_violation")
     return url
 
 
@@ -45,7 +51,14 @@ def _acquire_conn(url: str) -> DbConn:
                 and not conn.autocommit
                 and conn.info.transaction_status == TransactionStatus.IDLE
             ):
-                return conn
+                try:
+                    fileno = conn.fileno()
+                    if fileno >= 0:
+                        r, _, _ = select.select([fileno], [], [], 0)
+                        if not r:
+                            return conn
+                except Exception:
+                    pass
             try:
                 conn.close()
             except Exception:

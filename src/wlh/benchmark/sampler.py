@@ -664,12 +664,33 @@ def extract_representative_candidates(
         tuple of (candidates_list, manifest_dict)
     """
     cached_data = load_cached_samples(html_path)
-    needs_hydration = any(
-        not str(item.get("raw_payload") or item.get("markdown") or "").strip()
-        for items in cached_data.values()
-        for item in items
+    local_jsonl = DEFAULT_OUTPUT_DIR / "raw_candidates.jsonl"
+    if local_jsonl.exists():
+        by_id: dict[str, dict[str, Any]] = {}
+        with local_jsonl.open("r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    row = json.loads(line)
+                    by_id[str(row.get("id", ""))] = row
+        for idx, (sid, s_idx, _, _) in enumerate(plan, start=1):
+            cid = f"cand_{idx:02d}"
+            if (
+                cid in by_id
+                and sid in cached_data
+                and s_idx < len(cached_data[sid])
+            ):
+                target = cached_data[sid][s_idx]
+                if not target.get("raw_payload"):
+                    target["raw_payload"] = by_id[cid].get("raw_payload", "")
+                if not target.get("markdown"):
+                    target["markdown"] = by_id[cid].get("markdown", "")
+
+    plan_needs_hydration = any(
+        not str(cached_data[sid][s_idx].get("raw_payload") or cached_data[sid][s_idx].get("markdown") or "").strip()
+        for sid, s_idx, _, _ in plan
+        if sid in cached_data and s_idx < len(cached_data[sid])
     )
-    if needs_hydration:
+    if plan_needs_hydration:
         from wlh.runbook_samples import hydrate_samples_from_store
 
         try:
@@ -677,26 +698,7 @@ def extract_representative_candidates(
                 cached_data, full=False, csv_path=csv_path
             )
         except Exception:
-            local_jsonl = DEFAULT_OUTPUT_DIR / "raw_candidates.jsonl"
-            if local_jsonl.exists():
-                by_id: dict[str, dict[str, Any]] = {}
-                with local_jsonl.open("r", encoding="utf-8") as f:
-                    for line in f:
-                        if line.strip():
-                            row = json.loads(line)
-                            by_id[str(row.get("id", ""))] = row
-                for idx, (sid, s_idx, _, _) in enumerate(CANDIDATE_PLAN, start=1):
-                    cid = f"cand_{idx:02d}"
-                    if (
-                        cid in by_id
-                        and sid in cached_data
-                        and s_idx < len(cached_data[sid])
-                    ):
-                        target = cached_data[sid][s_idx]
-                        if not target.get("raw_payload"):
-                            target["raw_payload"] = by_id[cid].get("raw_payload", "")
-                        if not target.get("markdown"):
-                            target["markdown"] = by_id[cid].get("markdown", "")
+            pass
     source_meta = load_source_metadata(csv_path)
 
     candidates: list[dict[str, Any]] = []

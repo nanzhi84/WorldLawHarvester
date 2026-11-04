@@ -117,12 +117,21 @@ def _reparse(config: Path, env: dict[str, str], name: str, blocked: bool) -> Non
         return
     code, stdout, stderr = run_wlh_cli("reparse", str(config), "--no-progress", env=env)
     result: dict[str, Any] = json.loads(stdout)
+    (ARTIFACTS / name).mkdir(parents=True, exist_ok=True)
     (ARTIFACTS / name / "reparse.json").write_text(
         json.dumps({"exit_code": code, "result": result, "stderr": stderr}, indent=2)
     )
     assert result["report"]["external_requests"] == 0
+    cfg: dict[str, Any] = yaml.safe_load(config.read_text())
+    source_id = str(cfg.get("id") or config.stem)
     with psycopg.connect(env["WLH_DATABASE_URL"]) as connection:
-        count = connection.execute("SELECT count(*) FROM wlh.document_row").fetchone()
+        count = connection.execute(
+            """SELECT count(*) FROM wlh.document_row d
+            JOIN wlh.resource r ON r.current_version_id = d.version_id
+            JOIN wlh.frontier f ON f.id = r.frontier_id
+            WHERE f.source_id = %s""",
+            (source_id,),
+        ).fetchone()
     assert count == (0,), "Offline reparse must not turn rejected raw text into a delivered version"
     assert code != 0 and result.get("status") not in {None, "complete"}
     assert (

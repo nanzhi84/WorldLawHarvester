@@ -513,7 +513,7 @@ storage:
             srv.server_close()
 
     @pytest.mark.asyncio
-    async def test_procrastinate_queue_enqueues_recovers_unqueued_runs_and_executes_worker_once(
+    async def test_task_queue_enqueues_recovers_unqueued_runs_and_executes_worker_once(
         self, initialized_db: dict[str, str], tmp_path: Path
     ) -> None:
         """`prepare_run(..., enqueue=True)` defers a Procrastinate job, `recover_unqueued` / `recover_stalled` restores missing `job_id`s, and `worker(once=True)` executes the queued crawl job to completion."""

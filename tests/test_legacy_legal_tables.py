@@ -16,9 +16,18 @@ from urllib.parse import urlsplit
 import pytest
 
 from .legacy_table_browser import compare_tables, html5_reader, missing_fragments
-from .test_kfs_content_fidelity import FIXTURES, OUTPUT
-from .test_kfs_content_fidelity import _receipt as write_receipt  # pyright: ignore[reportPrivateUsage]
-from .test_kfs_content_fidelity import _run as run_complete_case  # pyright: ignore[reportPrivateUsage]
+from .source_replay_support import (
+    KFS_FIXTURES as FIXTURES,
+)
+from .source_replay_support import (
+    KFS_OUTPUT as OUTPUT,
+)
+from .source_replay_support import (
+    create_test_receipt as write_receipt,
+)
+from .source_replay_support import (
+    create_test_run as run_complete_case,
+)
 
 
 @dataclass(frozen=True)

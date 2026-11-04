@@ -1,7 +1,8 @@
 # Universal Harness runtime & verification sandboxes
 work/
 artifacts/
-tests/fixtures/
+tests/fixtures/*
+!tests/fixtures/benchmark/
 experiments/**/.kanpo_ocr_cache.json
 .agents/teamwork/
 

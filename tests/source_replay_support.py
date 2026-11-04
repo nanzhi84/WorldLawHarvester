@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
+import tempfile
 import threading
 import unicodedata
 from collections.abc import Callable, Generator
@@ -11,9 +14,10 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import parse_qs, urlsplit, urlunsplit
+from urllib.parse import parse_qs, urljoin, urlsplit, urlunsplit
 
 import psycopg
+import pytest
 import yaml
 from lxml import html as html_library  # type: ignore[import-untyped]
 from markdown_it import MarkdownIt
@@ -22,8 +26,14 @@ from psycopg.rows import dict_row
 from .conftest import run_wlh_cli
 
 ROOT = Path(__file__).resolve().parents[1]
-ARTIFACTS = ROOT / "artifacts" / "us-jp"
+DEFAULT_TEST_ARTIFACTS = Path(tempfile.gettempdir()) / "wlh_test_artifacts" / "us-jp"
+ARTIFACTS = Path(os.environ.get("WLH_TEST_ARTIFACTS_DIR", str(DEFAULT_TEST_ARTIFACTS)))
 Route = tuple[bytes, str]
+
+KFS_FIXTURES = ROOT / "tests" / "fixtures" / "dd-582" / "content"
+KFS_OUTPUT = ARTIFACTS / "kfs-content-contract" / os.environ.get("WLH_KFS_ACCEPTANCE_STAGE", "latest")
+_HREF = re.compile(r"(<a\b[^>]*?\bhref\s*=\s*)([\"'])(.*?)(\2)", re.I | re.S)
+_BODY_CONTROL = "本文中の引用語句「トップに戻る」は原文の内容として保持する。"
 
 
 def recorded_redirect(source_id: str, path: str, primary_host: str) -> tuple[int, str] | None:
@@ -171,11 +181,17 @@ def replay_config(
 
 
 def collect_artifact(
-    source_id: str, config: Path, env: dict[str, str], name: str, requests: list[str]
+    source_id: str,
+    config: Path,
+    env: dict[str, str],
+    name: str,
+    requests: list[str],
+    output_dir: Path | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     from wlh.storage.cas import Objects
 
-    directory = ARTIFACTS / name
+    base_dir = output_dir or ARTIFACTS
+    directory = base_dir / name
     directory.mkdir(parents=True, exist_ok=True)
     code, stdout, stderr = run_wlh_cli("collect", str(config), "--no-progress", env=env)
     report: dict[str, Any] = {"exit_code": code, "stdout": stdout, "stderr": stderr}
@@ -201,10 +217,176 @@ def collect_artifact(
     return report, rows
 
 
-def assert_offline_reparse(config: Path, env: dict[str, str], name: str) -> None:
+def assert_offline_reparse(
+    config: Path, env: dict[str, str], name: str, output_dir: Path | None = None
+) -> None:
     code, stdout, stderr = run_wlh_cli("reparse", str(config), "--no-progress", env=env)
-    (ARTIFACTS / name / "reparse.json").write_text(stdout or stderr)
+    base_dir = output_dir or ARTIFACTS
+    target_dir = base_dir / name
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "reparse.json").write_text(stdout or stderr)
     assert code == 0, (stdout, stderr)
     result = json.loads(stdout)
     assert result["status"] == "complete", result
     assert result["report"]["external_requests"] == 0
+
+
+def compute_test_signature(env: dict[str, str], source_id: str = "dd-582") -> list[list[str]]:
+    with psycopg.connect(env["WLH_DATABASE_URL"]) as conn:
+        rows = conn.execute(
+            "SELECT d.detail_url,d.role,d.title,d.markdown_hash FROM wlh.document_row d "
+            "JOIN wlh.resource r ON r.current_version_id=d.version_id "
+            "JOIN wlh.frontier f ON f.id=r.frontier_id WHERE f.source_id=%s "
+            "ORDER BY d.detail_url,d.row_index",
+            (source_id,),
+        ).fetchall()
+    return [[str(value) for value in row] for row in rows]
+
+
+def kfs_case_routes(
+    case: str,
+    name: str,
+    *,
+    body_control: bool = False,
+    output_dir: Path | None = None,
+) -> dict[str, Route]:
+    if not (KFS_FIXTURES / "manifest.json").is_file():
+        pytest.skip(f"Private fixture directory {KFS_FIXTURES} not present")
+    manifest: dict[str, Any] = json.loads((KFS_FIXTURES / "manifest.json").read_text())
+    base = f"/service/JP/{case}/"
+    catalog = {
+        "/service/index.html",
+        "/service/JP/index.html",
+        f"/service/JP/idx/{case.split('/')[0]}.html",
+    }
+    selected = [r for r in manifest["routes"] if r["path"] in catalog or r["path"].startswith(base)]
+    allowed = {r["path"] for r in selected}
+    routes: dict[str, Route] = {}
+    evidence: list[dict[str, Any]] = []
+    parser: Any = html_library
+    for spec in selected:
+        payload = (KFS_FIXTURES / spec["fixture"]).read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == spec["sha256"]
+        changes: list[str] = []
+        if "text/html" in spec["content_type"]:
+            text = payload.decode(spec["encoding"])
+            original = parser.fromstring(text)
+            protected: set[str] = set()
+            if spec["role"] == "original_full_document":
+                protected = set(
+                    original.xpath('//*[@id="main"]//a[not(ancestor::*[@id="pankuzu"])]/@href')
+                )
+
+            def restrict(match: re.Match[str]) -> str:
+                href = match.group(3)
+                path = urlsplit(urljoin(spec["source_url"], href)).path
+                if href.startswith("#") or href in protected or path in allowed:
+                    return match.group(0)
+                changes.append(href)
+                return match.group(1) + match.group(2) + "#unselected" + match.group(4)
+
+            text = _HREF.sub(restrict, text)
+            if body_control and spec["path"] == base + "bessi.html":
+                marker = '<p class="pagetop"><a href="#header">'
+                assert text.count(marker) == 1
+                text = text.replace(marker, f"<p>{_BODY_CONTROL}</p>\n" + marker)
+            payload = text.encode(spec["encoding"])
+        routes[spec["path"]] = (payload, spec["content_type"])
+        evidence.append(
+            {
+                "path": spec["path"],
+                "source_sha256": spec["sha256"],
+                "replay_sha256_before_origin_rewrite": hashlib.sha256(payload).hexdigest(),
+                "unselected_navigation_hrefs": changes,
+            }
+        )
+    base_out = output_dir or KFS_OUTPUT
+    directory = base_out / name
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "scope.json").write_text(
+        json.dumps(
+            {
+                "scope": "One complete original parent and all required annexes via full recorded directories",
+                "source_config": "sources/dd-582.yaml; original extraction rules unchanged",
+                "live_census_claimed": False,
+                "synthetic_body_control": body_control,
+                "routes": evidence,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return routes
+
+
+def create_test_run(
+    case: str,
+    name: str,
+    env: dict[str, str],
+    tmp_path: Path,
+    *,
+    body_control: bool = False,
+    output_dir: Path | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, bool]]:
+    base_out = output_dir or KFS_OUTPUT
+    target_dir = base_out / name
+    target_dir.mkdir(parents=True, exist_ok=True)
+    routes = kfs_case_routes(case, name, body_control=body_control, output_dir=base_out)
+    with source_server(routes, ["www.kfs.go.jp"]) as (origin, requests):
+        config = replay_config("dd-582", origin, tmp_path)
+        cfg: dict[str, Any] = yaml.safe_load(config.read_text())
+        cfg["scheduler"]["budget"] = {
+            "requests": 40,
+            "documents": 10,
+            "seconds": 90,
+            "response_bytes": 10485760,
+        }
+        config.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False))
+        report, rows = collect_artifact(
+            "dd-582", config, env, name, requests, output_dir=base_out
+        )
+        required = {path for path in routes if path.endswith(".html")}
+        transport_ok = required <= set(requests) and not (set(requests) - set(routes) - {"/robots.txt"})
+    before = compute_test_signature(env)
+    code, stdout, stderr = run_wlh_cli("reparse", str(config), "--no-progress", env=env)
+    offline: dict[str, Any] = {"exit_code": code, "stderr": stderr}
+    try:
+        offline_result: dict[str, Any] = json.loads(stdout)
+    except json.JSONDecodeError:
+        offline_result = {}
+        offline["stdout"] = stdout
+    offline["result"] = offline_result
+    after = compute_test_signature(env)
+    (target_dir / "reparse.json").write_text(json.dumps(offline, ensure_ascii=False, indent=2))
+    report["offline"] = offline
+    offline_report: dict[str, Any] = offline_result.get("report", {})
+    common: dict[str, bool] = {
+        "all_full_parent_and_annex_responses_fetched_without_missing_routes": transport_ok,
+        "offline_reparse_external_requests_zero": offline_report.get("external_requests") == 0,
+        "offline_reparse_preserves_visible_current_delivery": before == after,
+    }
+    return report, rows, common
+
+
+def create_test_receipt(
+    name: str,
+    checks: dict[str, bool],
+    output_dir: Path | None = None,
+    **details: Any,
+) -> None:
+    base_out = output_dir or KFS_OUTPUT
+    target_dir = base_out / name
+    target_dir.mkdir(parents=True, exist_ok=True)
+    result = {"checks": checks, "passed": all(checks.values()), **details}
+    (target_dir / "assertions.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2, default=str)
+    )
+    assert result["passed"], {"failed": [k for k, v in checks.items() if not v], **details}
+
+
+# Backward-compatible aliases
+_signature = compute_test_signature
+_run = create_test_run
+_receipt = create_test_receipt
+_routes = kfs_case_routes
+

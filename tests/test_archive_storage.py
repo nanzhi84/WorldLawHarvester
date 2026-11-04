@@ -47,7 +47,7 @@ class TestDatabaseInitialization:
             found = {r[0] for r in rows}
             assert expected_tables.issubset(found), f"Missing tables: {expected_tables - found}"
 
-    def test_pytest_runtime_rejects_non_test_database_and_non_test_s3_bucket(
+    def test_test_environment_guard_rejects_non_test_database_and_non_test_s3_bucket(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """During pytest execution, connecting to a non-test database or non-test S3 bucket raises an isolation error."""
@@ -56,10 +56,15 @@ class TestDatabaseInitialization:
 
         from wlh.core import WlhError
         from wlh.storage.cas import Objects
+        from wlh.storage.db import TEST_DB_NAME_RE as _TEST_DB_NAME_RE
         from wlh.storage.db import connect, dsn, initialize
 
         active_db = urlsplit(os.environ["WLH_DATABASE_URL"]).path.lstrip("/")
-        assert active_db.endswith("_test") or active_db.startswith("test_")
+        assert (
+            active_db.endswith("_test")
+            or active_db.startswith("test_")
+            or bool(_TEST_DB_NAME_RE.match(active_db))
+        )
         assert active_db not in {"wlh", "wlh_issue4_full"}
 
         active_bucket = os.environ["WLH_S3_BUCKET"]
@@ -103,6 +108,7 @@ class TestDatabaseInitialization:
         from tests.conftest import ensure_test_db_and_bucket
         from wlh.core import WlhError
         from wlh.storage.cas import Objects
+        from wlh.storage.db import TEST_DB_NAME_RE as _TEST_DB_NAME_RE
         from wlh.storage.db import dsn
 
         allowed_dbs = {"postgres", "wlh", "wlh_samples", "wlh_test"}
@@ -167,7 +173,10 @@ class TestDatabaseInitialization:
                 ).fetchall()
                 found_dbs = {str(r[0]) for r in db_rows}
             assert stray_db not in found_dbs
-            assert found_dbs.issubset(allowed_dbs)
+            assert all(
+                db in allowed_dbs or bool(_TEST_DB_NAME_RE.match(db))
+                for db in found_dbs
+            )
 
             remaining_buckets = {
                 str(b.get("Name", ""))

@@ -772,7 +772,7 @@ class TestBenchmarkCommandLineInterface:
             "--output-dir",
             str(tmp_path),
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
         assert proc.returncode == 0, f"CLI failed with stderr:\n{proc.stderr}\nstdout:\n{proc.stdout}"
 
         json_file = tmp_path / "benchmark_report.json"
@@ -796,7 +796,7 @@ class TestBenchmarkCommandLineInterface:
             "--output-dir",
             str(tmp_path),
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
         assert proc.returncode == 0, f"wlh benchmark failed:\n{proc.stderr}\nstdout:\n{proc.stdout}"
 
         json_file = tmp_path / "benchmark_report.json"
@@ -813,5 +813,5 @@ class TestBenchmarkCommandLineInterface:
             "--input",
             "data/benchmark/non_existent_file.jsonl",
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
         assert proc.returncode != 0

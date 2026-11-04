@@ -15,6 +15,7 @@ from urllib.parse import urljoin, urlsplit
 
 import psycopg
 import pytest
+from lxml import html as html_library  # type: ignore[import-untyped]
 
 from .conftest import run_wlh_cli
 from .kfs_literal_browser import application_lines, capture_document, subtitle_position
@@ -36,10 +37,23 @@ from .source_replay_support import (
     replay_config,
     source_server,
 )
-from .test_kfs_content_fidelity import FIXTURES, HTML, OUTPUT
-from .test_kfs_content_fidelity import _receipt as write_receipt  # pyright: ignore[reportPrivateUsage]
-from .test_kfs_content_fidelity import _run as run_complete_case  # pyright: ignore[reportPrivateUsage]
-from .test_kfs_content_fidelity import _signature as db_signature  # pyright: ignore[reportPrivateUsage]
+from .source_replay_support import (
+    KFS_FIXTURES as FIXTURES,
+)
+from .source_replay_support import (
+    KFS_OUTPUT as OUTPUT,
+)
+from .source_replay_support import (
+    compute_test_signature as db_signature,
+)
+from .source_replay_support import (
+    create_test_receipt as write_receipt,
+)
+from .source_replay_support import (
+    create_test_run as run_complete_case,
+)
+
+HTML: Any = html_library
 
 LITERAL_FIXTURES = ROOT / "tests/fixtures/dd-582/literal-fidelity"
 LITERAL_OUTPUT = ARTIFACTS / "kfs-literal-contract"

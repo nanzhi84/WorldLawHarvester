@@ -45,7 +45,7 @@ class TestLegacyVietnameseAndDisguisedOfficeExtraction:
         assert "Luật Doanh nghiệp" in md_rtf
         assert info_rtf["detected_format"] == "rtf"
 
-    def test_scanned_image_docx_with_only_signature_text_falls_back_to_ocr_or_rejects_stub(
+    def test_scanned_image_word_document_with_only_signature_text_falls_back_to_ocr_or_rejects_stub(
         self, tmp_path: Path
     ) -> None:
         """A `.docx` containing only a 56-char signature text block and an embedded scan image in `word/media/image1.png` triggers OCR fallback or rejects the stub."""

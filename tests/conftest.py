@@ -7,13 +7,134 @@ and real local extraction binaries (PyMuPDF, LibreOffice, Tesseract) — zero mo
 from __future__ import annotations
 
 import os
+import re
 import subprocess
+import sys
 from collections.abc import Generator
 from pathlib import Path
 
 import pytest
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT = ROOT_DIR
+
+
+def _is_valid_fixtures_dir(path: Path) -> bool:
+    """Return True if path exists as a directory and contains readable dd-* fixtures."""
+    try:
+        if not path.is_dir():
+            return False
+        return any(item.name.startswith("dd-") and item.is_dir() for item in path.iterdir())
+    except OSError:
+        return False
+
+
+def _find_source_fixtures_dir() -> Path | None:
+    """Locate a valid tests/fixtures directory from parent repo, git common dir, or known paths."""
+    # 1. Environment variable override
+    env_dir = os.environ.get("WLH_FIXTURES_DIR")
+    if env_dir:
+        cand = Path(env_dir)
+        if _is_valid_fixtures_dir(cand):
+            return cand
+
+    # 2. Git common dir (resolves parent git repo root in git worktrees)
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=str(ROOT_DIR),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            common_git = Path(proc.stdout.strip())
+            if not common_git.is_absolute():
+                common_git = (ROOT_DIR / common_git).resolve()
+            cand = common_git.parent / "tests" / "fixtures"
+            if _is_valid_fixtures_dir(cand):
+                return cand
+    except Exception:
+        pass
+
+    # 3. Git worktree list
+    try:
+        proc = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=str(ROOT_DIR),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if proc.returncode == 0:
+            for line in proc.stdout.splitlines():
+                if line.startswith("worktree "):
+                    wt_path = Path(line.split(" ", 1)[1].strip())
+                    cand = wt_path / "tests" / "fixtures"
+                    if _is_valid_fixtures_dir(cand):
+                        return cand
+    except Exception:
+        pass
+
+    # 4. Known local fallback paths
+    for cand in (
+        Path("/Users/yoryon/WorldLawHarvester/tests/fixtures"),
+        ROOT_DIR.parent / "WorldLawHarvester" / "tests" / "fixtures",
+        ROOT_DIR.parent / "tests" / "fixtures",
+    ):
+        if _is_valid_fixtures_dir(cand):
+            return cand
+
+    return None
+
+
+def ensure_worktree_fixtures() -> None:
+    """Auto-heal missing or broken `tests/fixtures` in worktrees via dynamic symlinking."""
+    fixtures_dir = ROOT_DIR / "tests" / "fixtures"
+    if _is_valid_fixtures_dir(fixtures_dir):
+        return
+
+    source_dir = _find_source_fixtures_dir()
+    if not source_dir:
+        return
+
+    if fixtures_dir.is_symlink() or fixtures_dir.is_file():
+        fixtures_dir.unlink()
+    elif fixtures_dir.is_dir():
+        for item in list(fixtures_dir.iterdir()):
+            if item.is_symlink() or item.is_file():
+                try:
+                    item.unlink()
+                except OSError:
+                    pass
+            elif item.is_dir():
+                try:
+                    item.rmdir()
+                except OSError:
+                    pass
+        try:
+            fixtures_dir.rmdir()
+        except OSError:
+            pass
+
+    if not fixtures_dir.exists() and not fixtures_dir.is_symlink():
+        fixtures_dir.symlink_to(source_dir.resolve(), target_is_directory=True)
+    elif fixtures_dir.is_dir():
+        for src_item in source_dir.iterdir():
+            if src_item.name.startswith("dd-") and src_item.is_dir():
+                target_link = fixtures_dir / src_item.name
+                if not target_link.exists() and not target_link.is_symlink():
+                    try:
+                        target_link.symlink_to(src_item.resolve(), target_is_directory=True)
+                    except OSError:
+                        pass
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Pytest startup hook: ensure worktree fixtures exist before test collection."""
+    ensure_worktree_fixtures()
 
 
 def _close_pooled_connections() -> None:
@@ -25,6 +146,7 @@ def _close_pooled_connections() -> None:
         pass
 
 
+_TEST_DB_NAME_RE = re.compile(r"^wlh_test(_.*)?$")
 ALLOWED_POSTGRES_DATABASES = frozenset({"postgres", "wlh", "wlh_samples", "wlh_test"})
 ALLOWED_S3_BUCKETS = frozenset({"wlh-archive", "wlh-archive-test"})
 
@@ -40,7 +162,7 @@ def ensure_test_db_and_bucket(env: dict[str, str]) -> None:
 
     parsed = urlsplit(env["WLH_DATABASE_URL"])
     db_name = parsed.path.lstrip("/")
-    if db_name != "wlh_test":
+    if not _TEST_DB_NAME_RE.match(db_name):
         raise RuntimeError(
             f"Refusing to run tests against non-whitelisted PostgreSQL database: {db_name!r}"
         )
@@ -59,7 +181,10 @@ def ensure_test_db_and_bucket(env: dict[str, str]) -> None:
             ).fetchall()
         ]
         for existing_db in all_dbs:
-            if existing_db not in ALLOWED_POSTGRES_DATABASES:
+            if (
+                existing_db not in ALLOWED_POSTGRES_DATABASES
+                and not _TEST_DB_NAME_RE.match(existing_db)
+            ):
                 conn.execute(
                     sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
                         sql.Identifier(existing_db)
@@ -100,6 +225,7 @@ def ensure_test_db_and_bucket(env: dict[str, str]) -> None:
 
 def _ensure_dev_env() -> dict[str, str]:
     """Force environment variables to isolated test PostgreSQL (`wlh_test`) and MinIO bucket (`wlh-archive-test`)."""
+    ensure_worktree_fixtures()
     test_db_url = os.environ.get(
         "WLH_TEST_DATABASE_URL", "postgresql://wlh:wlh@127.0.0.1:15432/wlh_test"
     )
@@ -136,6 +262,10 @@ _PYRAMID_MARKERS_BY_FILE: dict[str, str] = {
     "test_runbook_publication.py": "contract",
     "test_runbook_sample_store.py": "contract",
     "test_source_document_qualification.py": "contract",
+    "test_benchmark.py": "contract",
+    "test_benchmark_candidates.py": "contract",
+    "test_benchmark_dataset.py": "contract",
+    "test_benchmark_invariants_stress.py": "contract",
     "test_document_extraction.py": "extractor",
     "test_html_extraction.py": "extractor",
     "test_office_extraction.py": "extractor",
@@ -153,6 +283,7 @@ _PYRAMID_MARKERS_BY_FILE: dict[str, str] = {
     "test_session_replay.py": "pipeline",
     "test_source_collection_failures.py": "pipeline",
     "test_japan_pipeline_recovery.py": "pipeline",
+    "test_benchmark_cli.py": "pipeline",
     "test_source_adapters.py": "replay",
     "test_fixture_replay.py": "replay",
     "test_bridge_adapters.py": "replay",
@@ -161,6 +292,7 @@ _PYRAMID_MARKERS_BY_FILE: dict[str, str] = {
     "test_taiwan_judicial_sources.py": "replay",
     "test_taiwan_source_delivery.py": "replay",
 }
+PYRAMID_MARKERS_BY_FILE = _PYRAMID_MARKERS_BY_FILE
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -218,7 +350,11 @@ def initialized_db(wlh_env: dict[str, str]) -> Generator[dict[str, str], None, N
     import psycopg
 
     db_name = urlsplit(wlh_env["WLH_DATABASE_URL"]).path.lstrip("/")
-    if not (db_name.endswith("_test") or db_name.startswith("test_")):
+    if not (
+        _TEST_DB_NAME_RE.match(db_name)
+        or db_name.endswith("_test")
+        or db_name.startswith("test_")
+    ):
         raise RuntimeError(
             f"Refusing to reset schema on non-test database: {db_name!r}"
         )
@@ -226,14 +362,26 @@ def initialized_db(wlh_env: dict[str, str]) -> Generator[dict[str, str], None, N
     _close_pooled_connections()
     needs_ddl_init = False
     with psycopg.connect(wlh_env["WLH_DATABASE_URL"], autocommit=True) as conn:
+        conn.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND pid != pg_backend_pid()"
+        )
         conn.execute("DROP SCHEMA IF EXISTS wlh_sandbox CASCADE")
         conn.execute("DROP SCHEMA IF EXISTS wlh_samples_backup CASCADE")
         tbl_cnt_row = conn.execute(
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'wlh'"
         ).fetchone()
         if tbl_cnt_row and int(tbl_cnt_row[0]) >= 19:
+            conn.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND pid != pg_backend_pid()"
+            )
             conn.execute(TRUNCATE_TABLES_SQL)
         else:
+            conn.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND pid != pg_backend_pid()"
+            )
             conn.execute("DROP SCHEMA IF EXISTS wlh CASCADE")
             needs_ddl_init = True
 
@@ -301,11 +449,16 @@ def make_scanned_pdf(path: Path, pages_text: list[str]) -> Path:
 
 def run_wlh_cli(*args: str, env: dict[str, str] | None = None) -> tuple[int, str, str]:
     """Execute `python -m wlh` as a black-box subprocess."""
-    merged_env = dict(os.environ)
-    if env:
-        merged_env.update(env)
+    merged_env = {**os.environ, **(env or {})}
+    src_dir = str(ROOT_DIR / "src")
+    existing_pythonpath = merged_env.get("PYTHONPATH")
+    if existing_pythonpath:
+        if src_dir not in existing_pythonpath.split(os.pathsep):
+            merged_env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_pythonpath}"
+    else:
+        merged_env["PYTHONPATH"] = src_dir
     proc = subprocess.run(
-        ["uv", "run", "python", "-m", "wlh", *args],
+        [sys.executable, "-m", "wlh", *args],
         cwd=str(ROOT_DIR),
         env=merged_env,
         capture_output=True,
@@ -313,3 +466,4 @@ def run_wlh_cli(*args: str, env: dict[str, str] | None = None) -> tuple[int, str
         timeout=120,
     )
     return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
