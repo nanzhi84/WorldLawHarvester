@@ -1303,6 +1303,13 @@ def _extract_payload_snippet(
                             str(etree_mod.tostring(n, encoding="unicode", method="html"))
                             for n in nodes_list
                         )
+                        if len(frag) > 15000:
+                            frag = re.sub(
+                                r'\s+(?:style|data-[a-z0-9_-]+)=["\'][^"\']*["\']',
+                                "",
+                                frag,
+                                flags=re.I,
+                            )
                         cleaned_frag = _format_multiline_payload(frag)[:max_chars]
                         if len(cleaned_frag) >= 20 and not any(
                             b in cleaned_frag for b in FORBIDDEN_PLACEHOLDERS
@@ -1371,6 +1378,41 @@ def _resolve_source_content_xpath(
                         cx = docs_dict.get("content_xpath")
                         if isinstance(cx, str) and cx.strip():
                             content_xpath = cx.strip()
+                            if source_id in {
+                                "dd-504",
+                                "dd-592",
+                                "dd-594",
+                                "dd-595",
+                                "dd-596",
+                                "dd-603",
+                                "dd-604",
+                                "dd-605",
+                                "dd-607",
+                                "dd-608",
+                            }:
+                                field_xps: list[str] = []
+                                fields_cfg = docs_dict.get("fields")
+                                if isinstance(fields_cfg, dict):
+                                    for f_val in cast(dict[str, Any], fields_cfg).values():
+                                        if isinstance(f_val, dict):
+                                            fx = cast(dict[str, Any], f_val).get("xpath")
+                                            if isinstance(fx, str):
+                                                for branch in fx.split("|"):
+                                                    b_clean = re.sub(
+                                                        r"/(?:@[A-Za-z0-9_:-]+|text\(\))\s*$",
+                                                        "",
+                                                        branch.strip(),
+                                                    ).strip()
+                                                    if (
+                                                        b_clean.startswith(("/", "(//"))
+                                                        and not b_clean.startswith(
+                                                            ("//script", "//body", "//text(")
+                                                        )
+                                                        and b_clean not in field_xps
+                                                    ):
+                                                        field_xps.append(b_clean)
+                                if field_xps:
+                                    content_xpath = " | ".join([*field_xps, content_xpath])
                             break
             except Exception:
                 pass
@@ -1557,11 +1599,22 @@ def _build_hydrated_item_from_resource_rows(
                     if not attachment_url:
                         attachment_url = acq_url
 
-                if target_ref and (
-                    len(raw_payload) < 20
-                    or (
-                        raw_payload.lstrip().startswith("{")
-                        and not (mime or "").lower().endswith("json")
+                is_binary_detail = bool(
+                    re.search(
+                        r"(?:\.(?:pdf|docx?|xlsx?|zip)(?:\?|$)|/UCMServer/TAND\d+)",
+                        detail_url_val,
+                        flags=re.I,
+                    )
+                )
+                if (
+                    target_ref
+                    and (not is_binary_detail or acq_url == detail_url_val)
+                    and (
+                        len(raw_payload) < 20
+                        or (
+                            raw_payload.lstrip().startswith("{")
+                            and not (mime or "").lower().endswith("json")
+                        )
                     )
                 ):
                     raw_bytes = objs.get(target_ref)
@@ -1650,7 +1703,7 @@ def _extract_source_items_from_store(
             JOIN {schema_name}.frontier f ON f.id = r.frontier_id
             JOIN {schema_name}.version v ON v.id = r.current_version_id
             WHERE f.source_id = %s
-            ORDER BY r.id
+            ORDER BY (r.public_url LIKE '%%mp.weixin.qq.com%%') ASC, r.id
             LIMIT %s
         )
         SELECT tr.id AS resource_id, tr.inputs_ref, tr.result_ref, d.*

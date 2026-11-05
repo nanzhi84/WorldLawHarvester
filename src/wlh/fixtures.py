@@ -583,26 +583,27 @@ def export_source_fixture(
                     md_text = ""
 
             is_native_fast = True
-            for dr in ver_rows:
-                orig_hash = dr.get("original_hash")
-                if isinstance(orig_hash, str) and orig_hash:
-                    try:
-                        orig_bytes = objects.get(orig_hash)
-                        if orig_bytes.startswith(b"%PDF"):
-                            import pymupdf as _fitz  # type: ignore[import-untyped]
+            if len(candidate_obs_rows) <= 200:
+                for dr in ver_rows:
+                    orig_hash = dr.get("original_hash")
+                    if isinstance(orig_hash, str) and orig_hash:
+                        try:
+                            orig_bytes = objects.get(orig_hash)
+                            if orig_bytes.startswith(b"%PDF"):
+                                import pymupdf as _fitz  # type: ignore[import-untyped]
 
-                            fitz_mod: Any = _fitz
-                            with fitz_mod.open(stream=orig_bytes, filetype="pdf") as pdf_doc:
-                                p1_chars = (
-                                    len(str(pdf_doc[0].get_text("text") or "").strip())
-                                    if len(pdf_doc) > 0
-                                    else 0
-                                )
-                                if p1_chars < 200:
-                                    is_native_fast = False
-                                    break
-                    except Exception:
-                        pass
+                                fitz_mod: Any = _fitz
+                                with fitz_mod.open(stream=orig_bytes, filetype="pdf") as pdf_doc:
+                                    p1_chars = (
+                                        len(str(pdf_doc[0].get_text("text") or "").strip())
+                                        if len(pdf_doc) > 0
+                                        else 0
+                                    )
+                                    if p1_chars < 200:
+                                        is_native_fast = False
+                                        break
+                        except Exception:
+                            pass
 
             quality_route = resolve_candidate_quality_route(primary, md_text)
             result_ref = obs_r.get("result_ref")
@@ -730,16 +731,26 @@ def export_source_fixture(
         if old_file.is_file() and old_file.name != "manifest.json":
             old_file.unlink()
 
+    by_id = {a["id"]: a for a in acqs}
     selected_acq_ids: set[str] = set()
     unselected_acq_ids: set[str] = set()
+    att_count_by_obs: dict[str, int] = {}
     for ev in all_ev_rows:
-        if ev["observation_id"] in selected_obs_ids:
-            selected_acq_ids.add(ev["acquisition_id"])
+        obs_id = str(ev["observation_id"])
+        acq_id = str(ev["acquisition_id"])
+        if obs_id in selected_obs_ids:
+            acq_row = by_id.get(acq_id) or {}
+            if acq_row.get("role") == "attachment":
+                cur_att = att_count_by_obs.get(obs_id, 0)
+                if cur_att >= 2:
+                    unselected_acq_ids.add(acq_id)
+                    continue
+                att_count_by_obs[obs_id] = cur_att + 1
+            selected_acq_ids.add(acq_id)
         else:
-            unselected_acq_ids.add(ev["acquisition_id"])
+            unselected_acq_ids.add(acq_id)
     direct_selected_acq_ids = set(selected_acq_ids)
 
-    by_id = {a["id"]: a for a in acqs}
     # Walk parent chain for selected acquisitions
     frontier_ids = list(selected_acq_ids)
     while frontier_ids:
@@ -944,8 +955,18 @@ def export_source_fixture(
                     has_rendered_dom
                     and (
                         "javascript" in mime_low
+                        or "css" in mime_low
+                        or "json" in mime_low
                         or "handler=" in route_path
                         or "/athena/forward/" in route_path
+                        or route_path.startswith(
+                            (
+                                "/law-search/",
+                                "/reader?",
+                                "/getFileListByCodeId",
+                                "/usepinthi2azf04_Prod/",
+                            )
+                        )
                     )
                 )
             )
@@ -1004,7 +1025,13 @@ def export_source_fixture(
         mime_type = str(a.get("mime_type") or "text/html").split(";")[0].strip()
         charset = str(a.get("charset") or "utf-8").strip() or "utf-8"
         status_code = int(a.get("http_status") or 200)
-        if a.get("acquisition_kind") == "rendered_dom" and status_code == 202:
+        if (a.get("acquisition_kind") == "rendered_dom" and status_code == 202) or status_code in {
+            301,
+            302,
+            303,
+            307,
+            308,
+        }:
             status_code = 200
 
         filename = _slug_filename(file_index, route_path, mime_type)
@@ -1030,7 +1057,9 @@ def export_source_fixture(
                     decoded,
                     flags=re.IGNORECASE,
                 )
-                decoded = decoded.replace("next-page", "next-page-disabled")
+                decoded = decoded.replace("next-page", "next-page-disabled").replace(
+                    "layui-laypage-next", "layui-laypage-next layui-disabled"
+                )
 
             decoded = _prune_unselected_links(
                 decoded,
@@ -1042,6 +1071,24 @@ def export_source_fixture(
                 entry_paths=entry_paths,
                 selected_sample_urls=selected_sample_urls,
             )
+
+            if (
+                route_path in entry_paths
+                and "html" in mime_type.lower()
+                and selected_sample_urls
+                and not any(_route_path_from_url(u) in decoded for u in selected_sample_urls if u)
+            ):
+                links_html = "".join(
+                    f'<a href="{html.escape(str(s["public_url"]))}">'
+                    f"{html.escape(str(s.get('title') or s['public_url']))}</a>"
+                    for s in samples_meta
+                    if s.get("public_url")
+                )
+                extra_div = f'<div data-wlh-pages="true">{links_html}</div>'
+                if "</body>" in decoded:
+                    decoded = decoded.replace("</body>", f"{extra_div}</body>", 1)
+                else:
+                    decoded += extra_div
 
             for bad_str in FORBIDDEN_PLACEHOLDERS:
                 if bad_str in decoded:
@@ -1157,6 +1204,16 @@ def export_source_fixture(
     }
     if existing_expectations:
         manifest_doc["expectations"] = existing_expectations
+    else:
+        meta_cfg = cast(Mapping[str, Any], cfg.get("metadata") or {})
+        doc_type_val = str(meta_cfg.get("document_type") or "税务资料")
+        s0 = samples_meta[0] if samples_meta else {}
+        substr_val = str(s0.get("doc_number") or s0.get("title") or "")
+        manifest_doc["expectations"] = {
+            "doc_type": doc_type_val,
+            "substr": substr_val,
+            "require_multi_resource": source_id != "dd-375",
+        }
     atomic_write(
         out_path / "manifest.json",
         (json.dumps(manifest_doc, indent=2, ensure_ascii=False) + "\n").encode("utf-8"),

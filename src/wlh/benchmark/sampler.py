@@ -634,8 +634,30 @@ def _build_full_runbook_plan(
 
     seen: set[tuple[str, int]] = {(sid, sidx) for sid, sidx, _, _ in _CORE_CANDIDATE_PLAN}
     expanded: list[tuple[str, int, str, str]] = list(_CORE_CANDIDATE_PLAN)
+    new_tax_p0_sids = {
+        "dd-500",
+        "dd-504",
+        "dd-566",
+        "dd-592",
+        "dd-593",
+        "dd-594",
+        "dd-595",
+        "dd-596",
+        "dd-599",
+        "dd-600",
+        "dd-601",
+        "dd-602",
+        "dd-603",
+        "dd-604",
+        "dd-605",
+        "dd-606",
+        "dd-607",
+        "dd-608",
+        "dd-611",
+        "dd-612",
+    }
 
-    for sid in sorted(cached.keys()):
+    for sid in sorted(cached.keys(), key=lambda s: (s in new_tax_p0_sids, s)):
         if allowed_sids is not None and sid not in allowed_sids:
             continue
         smeta = meta.get(sid, {})
@@ -785,8 +807,10 @@ def extract_representative_candidates(
         raw_item = samples_for_source[sample_idx]
         smeta = source_meta.get(source_id, {})
 
-        # Ensure raw_payload is non-empty (fall back to markdown for PDF-native sources)
-        raw_payload = str(raw_item.get("raw_payload") or raw_item.get("markdown") or "").strip()
+        # Ensure raw_payload is non-empty (fall back to markdown[:4000] for PDF-native sources)
+        raw_payload = str(
+            raw_item.get("raw_payload") or (raw_item.get("markdown") or "")[:4000]
+        ).strip()
         if not raw_payload:
             raise ValueError(
                 f"Candidate {cand_id} ({source_id}[{sample_idx}]) has empty raw_payload"
@@ -1145,7 +1169,31 @@ def export_processor_batch_bundle(
     tasks: list[ProcessorBenchmarkTask] = []
     for sid in all_sids:
         tasks.extend(list_tasks_by_source.get(sid, [])[:max_list_per_source])
-        tasks.extend(content_tasks_by_source.get(sid, [])[:max_content_per_source])
+        c_tasks = content_tasks_by_source.get(sid, [])
+        if sid in {
+            "dd-500",
+            "dd-504",
+            "dd-566",
+            "dd-592",
+            "dd-593",
+            "dd-594",
+            "dd-595",
+            "dd-596",
+            "dd-599",
+            "dd-600",
+            "dd-601",
+            "dd-602",
+            "dd-603",
+            "dd-604",
+            "dd-605",
+            "dd-606",
+            "dd-607",
+            "dd-608",
+            "dd-611",
+            "dd-612",
+        }:
+            c_tasks = sorted(c_tasks, key=lambda t: 0 if "_cand_" in t.id else 1)
+        tasks.extend(c_tasks[:max_content_per_source])
 
     # Write output
     with out_file.open("w", encoding="utf-8") as f:

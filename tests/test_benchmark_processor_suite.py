@@ -13,6 +13,7 @@ Adheres strictly to Universal Harness guidelines:
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import subprocess
@@ -20,7 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
-from wlh.benchmark.arbitrator import merge_resolutions
+from wlh.benchmark.arbitrator import merge_resolutions, validate_ground_truth_integrity
 from wlh.benchmark.evaluator import extract_with_processor
 from wlh.benchmark.metrics import (
     evaluate_accuracy,
@@ -199,7 +200,7 @@ class TestProcessorBatchBundle:
         assert entries == {"annotation_pipeline.json", "ground_truth_benchmark.jsonl"}
 
     def test_annotation_pipeline_ledger_validates_progressive_four_stage_schema(self) -> None:
-        """annotation_pipeline.json validates progressive 4-stage lifecycle schema and exact counts."""
+        """annotation_pipeline.json validates progressive 4-stage lifecycle schema and conservation invariants."""
         ledger_path = Path("data/benchmark/annotation_pipeline.json")
         assert ledger_path.is_file()
         data: dict[str, Any] = json.loads(ledger_path.read_text(encoding="utf-8"))
@@ -215,16 +216,15 @@ class TestProcessorBatchBundle:
         assert required_top_keys.issubset(set(data.keys()))
 
         summary = cast(dict[str, Any], data["summary"])
-        assert summary["total_candidates"] == 668
-        assert summary["stage1_admitted"] == 430
-        assert summary["stage1_excluded"] == 238
-        assert summary["stage2_paired_valid"] == 417
-        assert summary["stage3_consensus"] == 101
-        assert summary["stage3_arbitrated"] == 316
-        assert summary["golden_set_exported"] == 417
-
         items = cast(list[dict[str, Any]], data["items"])
-        assert len(items) == 668
+        assert summary["total_candidates"] > 668
+        assert summary["total_candidates"] == len(items)
+        assert summary["stage1_admitted"] > 430
+        assert (
+            summary["stage1_admitted"] + summary["stage1_excluded"] == summary["total_candidates"]
+        )
+        assert summary["stage2_paired_valid"] > 417
+        assert summary["golden_set_exported"] == summary["stage2_paired_valid"]
 
         expected_item_keys = {
             "id",
@@ -282,17 +282,35 @@ class TestProcessorBatchBundle:
                 assert arbitration["status"] == "ARBITRATED"
                 assert "authoritative_ground_truth" in arbitration
 
-        assert counts_by_status["EXCLUDED_STAGE1"] == 238
-        assert counts_by_status["REJECTED_STAGE2"] == 13
-        assert counts_by_status["CONSENSUS"] == 101
-        assert counts_by_status["ARBITRATED"] == 316
+        assert summary["stage1_excluded"] == counts_by_status["EXCLUDED_STAGE1"]
+        assert (
+            summary["stage2_paired_valid"]
+            == counts_by_status["CONSENSUS"] + counts_by_status["ARBITRATED"]
+        )
+        assert (
+            summary["stage1_admitted"]
+            == summary["stage2_paired_valid"] + counts_by_status["REJECTED_STAGE2"]
+        )
+        assert summary["stage3_consensus"] == counts_by_status["CONSENSUS"]
+        assert summary["stage3_arbitrated"] == counts_by_status["ARBITRATED"]
+
+        tax_p0_matrix_path = Path("docs/runbooks/tax-p0-delivery-matrix.csv")
+        with tax_p0_matrix_path.open("r", encoding="utf-8") as f:
+            tax_p0_sources = {str(r["Source ID"]).strip() for r in csv.DictReader(f)}
+        assert len(tax_p0_sources) == 21
+        item_source_ids = {str(item["source_id"]) for item in items}
+        assert tax_p0_sources.issubset(item_source_ids)
 
     def test_ground_truth_benchmark_golden_set_contains_pure_fields_without_process_metadata(
         self,
     ) -> None:
-        """ground_truth_benchmark.jsonl contains 417 pure golden-set items with zero process metadata."""
+        """ground_truth_benchmark.jsonl contains expanded pure golden-set items with zero process metadata."""
         gt_path = Path("data/benchmark/ground_truth_benchmark.jsonl")
         assert gt_path.is_file()
+
+        ledger_path = Path("data/benchmark/annotation_pipeline.json")
+        assert ledger_path.is_file()
+        ledger_data: dict[str, Any] = json.loads(ledger_path.read_text(encoding="utf-8"))
 
         rows: list[dict[str, Any]] = []
         with gt_path.open("r", encoding="utf-8") as f:
@@ -300,7 +318,16 @@ class TestProcessorBatchBundle:
                 if line.strip():
                     rows.append(cast(dict[str, Any], json.loads(line)))
 
-        assert len(rows) == 417
+        assert len(rows) > 417
+        assert len(rows) == ledger_data["summary"]["golden_set_exported"]
+
+        tax_p0_matrix_path = Path("docs/runbooks/tax-p0-delivery-matrix.csv")
+        with tax_p0_matrix_path.open("r", encoding="utf-8") as f:
+            tax_p0_sources = {str(r["Source ID"]).strip() for r in csv.DictReader(f)}
+        assert len(tax_p0_sources) == 21
+        row_source_ids = {str(row["source_id"]) for row in rows}
+        assert tax_p0_sources.issubset(row_source_ids)
+
         expected_keys = {
             "id",
             "task_type",
@@ -317,6 +344,57 @@ class TestProcessorBatchBundle:
             assert "arbitration_notes" not in row
             assert "adjudication_metadata" not in row
             assert set(row.keys()) == expected_keys
+
+    def test_tax_p0_ground_truth_markdown_is_strictly_grounded_in_raw_payload(self) -> None:
+        """All 21 Tax P0 sources in ground_truth_benchmark.jsonl and annotation_pipeline.json pass the raw_payload grounding gate."""
+        tax_p0_matrix_path = Path("docs/runbooks/tax-p0-delivery-matrix.csv")
+        with tax_p0_matrix_path.open("r", encoding="utf-8") as f:
+            tax_p0_sources = {str(r["Source ID"]).strip() for r in csv.DictReader(f)}
+        assert len(tax_p0_sources) == 21
+
+        gt_path = Path("data/benchmark/ground_truth_benchmark.jsonl")
+        assert gt_path.is_file()
+        tax_p0_rows: list[dict[str, Any]] = []
+        with gt_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                row = cast(dict[str, Any], json.loads(line))
+                if str(row["source_id"]) in tax_p0_sources:
+                    tax_p0_rows.append(row)
+
+        assert {str(r["source_id"]) for r in tax_p0_rows} == tax_p0_sources
+        for row in tax_p0_rows:
+            is_valid, reason = validate_ground_truth_integrity(
+                row["ground_truth"],
+                row["task_type"],
+                raw_payload=row["raw_payload"],
+                request_url=row["request_url"],
+            )
+            assert is_valid is True, (
+                f"{row['id']} ({row['source_id']}) failed grounding gate: {reason}"
+            )
+
+        ledger_path = Path("data/benchmark/annotation_pipeline.json")
+        assert ledger_path.is_file()
+        ledger_data: dict[str, Any] = json.loads(ledger_path.read_text(encoding="utf-8"))
+        ledger_items = cast(list[dict[str, Any]], ledger_data["items"])
+        for item in ledger_items:
+            if str(item["source_id"]) not in tax_p0_sources:
+                continue
+            status = str(item["lifecycle_status"])
+            if status not in {"CONSENSUS", "ARBITRATED"}:
+                continue
+            arbitration = cast(dict[str, Any], item["arbitration"])
+            is_valid, reason = validate_ground_truth_integrity(
+                arbitration["authoritative_ground_truth"],
+                item["task_type"],
+                raw_payload=item["raw_payload"],
+                request_url=item["request_url"],
+            )
+            assert is_valid is True, (
+                f"annotation_pipeline {item['id']} ({item['source_id']}) failed grounding gate: {reason}"
+            )
 
 
 class TestBenchmarkCliSubcommands:
@@ -490,3 +568,125 @@ class TestBenchmarkArbitrationAndReporting:
         assert "Pillar 3: Metadata & Attachment Accuracy" in md
         assert "Pillar 4: Content DOM Boundary Fidelity" in md
         assert "Pillar 5: Text Cleanliness (干净度)" in md
+
+    def test_validate_ground_truth_integrity_rejects_ungrounded_commentary_and_hallucinated_content(
+        self,
+    ) -> None:
+        """validate_ground_truth_integrity enforces strict raw_payload grounding and rejects LLM commentary or fabricated text."""
+        raw_html = (
+            "<html><body>"
+            "<h1>国家税务总局关于增值税留抵退税政策的通知</h1>"
+            "<div class='meta'>发文字号：税总发〔2026〕12号 发布日期：2026-03-15</div>"
+            "<div class='content'>"
+            "<p>为进一步支持小微企业和制造业发展，现将增值税期末留抵退税有关政策通知如下：符合条件的纳税人可以向主管税务机关申请退还增量留抵税额。</p>"
+            "<a href='/files/annex1.pdf'>附件1：退税申请表.pdf</a>"
+            "</div>"
+            "</body></html>"
+        )
+        request_url = "https://fgk.chinatax.gov.cn/zcfgk/c100012/c52001/content.html"
+
+        # 1. Faithful grounded extraction (including relative URL resolved against request_url) -> (True, ...)
+        faithful_gt = {
+            "records": [
+                {
+                    "title": "国家税务总局关于增值税留抵退税政策的通知",
+                    "doc_number": "税总发〔2026〕12号",
+                    "published_at": "2026-03-15",
+                    "effective_at": None,
+                    "issuer": "国家税务总局",
+                    "doc_type": "通知",
+                    "attachment_urls": ["https://fgk.chinatax.gov.cn/files/annex1.pdf"],
+                    "markdown": (
+                        "# 国家税务总局关于增值税留抵退税政策的通知\n\n"
+                        "发文字号：税总发〔2026〕12号 发布日期：2026-03-15\n\n"
+                        "为进一步支持小微企业和制造业发展，现将增值税期末留抵退税有关政策通知如下："
+                        "符合条件的纳税人可以向主管税务机关申请退还增量留抵税额。\n\n"
+                        "[附件1：退税申请表.pdf](https://fgk.chinatax.gov.cn/files/annex1.pdf)"
+                    ),
+                }
+            ]
+        }
+        ok_faithful, reason_faithful = validate_ground_truth_integrity(
+            faithful_gt,
+            "content_page",
+            raw_payload=raw_html,
+            request_url=request_url,
+        )
+        assert ok_faithful is True, (
+            f"Expected faithful ground truth to pass, got: {reason_faithful}"
+        )
+
+        # 2. Unattested LLM commentary not present in raw_payload -> (False, ...)
+        for commentary in (
+            "（正文内容通过 OFD 阅读器加载，此处无直接文本正文）",
+            "（此处为元数据摘要）",
+            "（正文内容见附件预览）",
+        ):
+            commentary_gt = {
+                "records": [
+                    {
+                        "title": "国家税务总局关于增值税留抵退税政策的通知",
+                        "doc_type": "通知",
+                        "markdown": (
+                            "# 国家税务总局关于增值税留抵退税政策的通知\n\n"
+                            "发文字号：税总发〔2026〕12号 发布日期：2026-03-15\n\n"
+                            f"{commentary}"
+                        ),
+                    }
+                ]
+            }
+            ok_comm, _ = validate_ground_truth_integrity(
+                commentary_gt,
+                "content_page",
+                raw_payload=raw_html,
+                request_url=request_url,
+            )
+            assert ok_comm is False
+
+        # 3. Unattested Chinese bold metadata label ('**状态**：有效' when '状态' is absent in raw_payload) -> (False, ...)
+        unattested_label_gt = {
+            "records": [
+                {
+                    "title": "国家税务总局关于增值税留抵退税政策的通知",
+                    "doc_type": "通知",
+                    "markdown": (
+                        "# 国家税务总局关于增值税留抵退税政策的通知\n\n"
+                        "- **发文字号**：税总发〔2026〕12号\n"
+                        "- **状态**：有效\n\n"
+                        "为进一步支持小微企业和制造业发展，现将增值税期末留抵退税有关政策通知如下："
+                        "符合条件的纳税人可以向主管税务机关申请退还增量留抵税额。"
+                    ),
+                }
+            ]
+        }
+        ok_label, _ = validate_ground_truth_integrity(
+            unattested_label_gt,
+            "content_page",
+            raw_payload=raw_html,
+            request_url=request_url,
+        )
+        assert ok_label is False
+
+        # 4. Hallucinated paragraphs / duplicated numbers not in raw_payload -> (False, ...)
+        hallucinated_gt = {
+            "records": [
+                {
+                    "title": "国家税务总局关于增值税留抵退税政策的通知",
+                    "doc_type": "通知",
+                    "markdown": (
+                        "# 国家税务总局关于增值税留抵退税政策的通知\n\n"
+                        "为进一步支持小微企业和制造业发展，现将增值税期末留抵退税有关政策通知如下："
+                        "符合条件的纳税人可以向主管税务机关申请退还增量留抵税额。\n\n"
+                        "第二条 纳税人信用等级为A级或B级的，退税比例提高至百分之百（100%），"
+                        "并于2026年4月1日起施行，逾期未申报的视为自动放弃退税资格999888777。"
+                    ),
+                }
+            ]
+        }
+        ok_hallucinated, _ = validate_ground_truth_integrity(
+            hallucinated_gt,
+            "content_page",
+            raw_payload=raw_html,
+            request_url=request_url,
+        )
+        assert ok_hallucinated is False

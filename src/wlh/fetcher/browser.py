@@ -174,7 +174,7 @@ class Browser:
                 if browser_request["url"].startswith(("data:", "blob:", "about:")):
                     await session.send("Fetch.continueRequest", {"requestId": request_id})
                     return
-                if rtype not in {"Document", "Script", "XHR", "Fetch"}:
+                if rtype not in {"Document", "Script", "XHR", "Fetch", "Stylesheet"}:
                     await session.send(
                         "Fetch.failRequest",
                         {"requestId": request_id, "errorReason": "BlockedByClient"},

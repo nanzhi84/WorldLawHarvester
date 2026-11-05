@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import re
 import unicodedata
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence, cast
@@ -887,16 +889,32 @@ def export_disputes(
     return disputes
 
 
+_UNATTESTED_COMMENTARY_MARKERS = (
+    "正文内容通过",
+    "通过 OFD 阅读器加载",
+    "通过阅读器加载",
+    "此处无直接文本",
+    "此处为元数据摘要",
+    "正文内容见附件",
+    "正文内容位于附件",
+)
+
+
 def validate_ground_truth_integrity(
-    gt: object, task_type: str = "content_page"
+    gt: object,
+    task_type: str = "content_page",
+    raw_payload: str | None = None,
+    request_url: str | None = None,
 ) -> tuple[bool, str]:
-    """Verify ground truth output integrity and filter out truncated or degraded annotations.
+    """Verify ground truth output integrity, anti-commentary rules, and raw_payload grounding.
 
     Enforces that:
     1. List pages have valid HTTP(S) URL targets.
-    2. Content pages have non-empty markdown (>20 chars) without truncation markers
-       ('...(truncated)', 'Content fallback', 'Content extraction truncated').
+    2. Content pages have non-empty markdown without truncation or LLM commentary markers.
     3. Markdown does not terminate with trailing severed syntax.
+    4. When raw_payload is provided, markdown tokens and character multisets are strictly
+       grounded in raw_payload (and request_url) without unattested metadata labels or
+       hallucinated prose/numbers.
     """
     if not isinstance(gt, Mapping):
         return False, "Ground truth is not a valid dictionary object"
@@ -944,6 +962,47 @@ def validate_ground_truth_integrity(
             return False, f"Record {idx} ends with trailing escape slash"
         if md.count("[") > md.count("]") and md.endswith("["):
             return False, f"Record {idx} ends with unclosed markdown link"
+
+        for marker in _UNATTESTED_COMMENTARY_MARKERS:
+            if marker in md and (raw_payload is None or marker not in raw_payload):
+                return False, f"Record {idx} contains unattested LLM commentary marker: {marker}"
+
+        if raw_payload is not None and raw_payload.strip():
+            raw_no_ws = re.sub(r"\s+", "", raw_payload)
+            if not raw_payload.lstrip().startswith(("{", "[", "<?xml", "<doc")):
+                for label in re.findall(r"\*\*([^*:：]{1,12})\*\*\s*[:：]", md):
+                    lbl_no_ws = re.sub(r"\s+", "", label)
+                    if re.search(r"[\u4e00-\u9fff]", lbl_no_ws) and lbl_no_ws not in raw_no_ws:
+                        return False, f"Record {idx} contains unattested metadata label: {label}"
+
+            stripped_md = re.sub(r"\]\((?:https?://|/)[^)]+\)", "]", md)
+            clean_md = unicodedata.normalize("NFKC", html.unescape(stripped_md)).lower()
+            dec_raw = re.sub(
+                r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), raw_payload
+            )
+            pool_text = dec_raw + (" " + request_url if request_url else "")
+            pool = unicodedata.normalize("NFKC", html.unescape(pool_text)).lower()
+
+            tokens = re.findall(r"[\u4e00-\u9fff]|[\u3040-\u30ff]+|[a-z0-9]+", clean_md)
+            if tokens:
+                missing = [t for t in tokens if t not in pool]
+                tok_ratio = (len(tokens) - len(missing)) / len(tokens)
+                if tok_ratio < 0.98:
+                    return (
+                        False,
+                        f"Record {idx} token grounding ratio {tok_ratio:.4f} < 0.98 (unattested: {missing[:5]})",
+                    )
+
+            m_chars = re.sub(r"[^\w\u4e00-\u9fff]", "", clean_md)
+            p_chars = re.sub(r"[^\w\u4e00-\u9fff]", "", pool)
+            if m_chars:
+                cm, cp = Counter(m_chars), Counter(p_chars)
+                multiset_ratio = sum(min(cnt, cp[ch]) for ch, cnt in cm.items()) / len(m_chars)
+                if multiset_ratio < 0.95:
+                    return (
+                        False,
+                        f"Record {idx} character multiset grounding ratio {multiset_ratio:.4f} < 0.95",
+                    )
 
     return True, "Valid content page ground truth"
 
@@ -1073,7 +1132,14 @@ def merge_resolutions(
     for rec in merged_records:
         t_type = str(rec.get("task_type", "content_page"))
         gt_obj = rec.get("ground_truth", {})
-        is_valid, reason = validate_ground_truth_integrity(gt_obj, t_type)
+        raw_p = rec.get("raw_payload")
+        req_u = rec.get("request_url")
+        is_valid, reason = validate_ground_truth_integrity(
+            gt_obj,
+            t_type,
+            raw_payload=raw_p if isinstance(raw_p, str) else None,
+            request_url=req_u if isinstance(req_u, str) else None,
+        )
         if is_valid:
             valid_records.append(rec)
         else:

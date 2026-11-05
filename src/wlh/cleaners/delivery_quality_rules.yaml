@@ -215,3 +215,7 @@ jurisdictions:
       - fr
       - it
 
+  GL:
+    languages:
+      - en
+
