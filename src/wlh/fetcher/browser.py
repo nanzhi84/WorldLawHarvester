@@ -6,15 +6,12 @@ import asyncio
 import base64
 import contextlib
 import hashlib
-import logging
 import re
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import urlsplit
-
-from yarl import URL
 
 from wlh.core import WlhError, guard, request_key
+from wlh.fetcher.browser_cookies import capture_cookies, seed_cookies
 from wlh.fetcher.challenges import resolve_challenge_redirect
 from wlh.fetcher.transport import (
     REDIRECTS,
@@ -24,8 +21,6 @@ from wlh.fetcher.transport import (
     budget_cfg,
     fetcher_cfg,
 )
-
-logger = logging.getLogger(__name__)
 
 _budget_cfg = budget_cfg
 _fetcher_cfg = fetcher_cfg
@@ -355,33 +350,7 @@ class Browser:
                 ignore_https_errors=False,
                 service_workers="block",
             )
-            if self.transport.session is not None:
-                try:
-                    target_host = urlsplit(url).hostname or ""
-                    cookies_to_add: list[Any] = []
-                    for cookie in self.transport.session.cookie_jar:
-                        raw_domain = cookie.get("domain") or ""
-                        clean_domain = raw_domain.lstrip(".")
-                        if clean_domain and clean_domain in allowed_hosts:
-                            dom = raw_domain
-                        elif not clean_domain and target_host in allowed_hosts:
-                            dom = target_host
-                        else:
-                            continue
-                        cookies_to_add.append(
-                            {
-                                "name": cookie.key,
-                                "value": cookie.value,
-                                "domain": dom,
-                                "path": cookie.get("path") or "/",
-                            }
-                        )
-                    if cookies_to_add:
-                        await context.add_cookies(cookies_to_add)
-                except Exception as exc:
-                    logger.debug(
-                        "Failed to inject cookies into browser context for %s: %s", url, exc
-                    )
+            await seed_cookies(context, self.transport.session, url, allowed_hosts)
             page = await context.new_page()
             session = await context.new_cdp_session(page)
 
@@ -476,8 +445,7 @@ class Browser:
                     error="response_byte_budget_exceeded",
                 )
             self.budget.active()
-            ref = self.transport.objects.put(data)
-            self.transport.objects.get(ref)
+            ref = await self.transport.cas_io.run(self.transport.objects.put, data)
             self.budget.active()
         except asyncio.CancelledError:
             self.recorder.finish(identity, "cancelled", outcome="cancelled", error="interrupted")
@@ -499,18 +467,8 @@ class Browser:
                 await asyncio.gather(*tuple(pending), return_exceptions=True)
             if context is not None:
                 try:
-                    if self.transport.session is not None:
-                        allowed_hosts = set(_allowed_hosts(self.config))
-                        browser_cookies = await context.cookies()
-                        for c in browser_cookies:
-                            domain = c.get("domain", "").lstrip(".")
-                            if domain in allowed_hosts:
-                                self.transport.session.cookie_jar.update_cookies(
-                                    {c["name"]: c["value"]}, URL(f"https://{domain}")
-                                )
-                except Exception as exc:
-                    logger.debug(
-                        "Failed to collect cookies from browser context for %s: %s", url, exc
+                    await capture_cookies(
+                        context, self.transport.session, url, set(_allowed_hosts(self.config))
                     )
                 finally:
                     with contextlib.suppress(Exception):

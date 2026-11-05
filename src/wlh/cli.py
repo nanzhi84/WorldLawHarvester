@@ -166,7 +166,10 @@ def main() -> int:
         print(json.dumps({"error": "interrupted"}))
         return 130
     except WlhError as exc:
-        print(json.dumps({"error": exc.code}))
+        error = {"error": exc.code}
+        if exc.code == "invalid_cas_workers":
+            error.update(parameter="WLH_CAS_WORKERS", expected="integer from 1 to 8")
+        print(json.dumps(error))
         return 2
     except Exception as exc:
         print(json.dumps({"error": "operation_failed", "category": type(exc).__name__}))

@@ -6,6 +6,7 @@ import atexit
 import json
 import os
 import re
+import threading
 import time
 from collections import OrderedDict
 from functools import cache
@@ -19,7 +20,9 @@ from botocore.exceptions import BotoCoreError, ClientError  # type: ignore[impor
 
 from wlh.core import WlhError, canonical, digest
 
-_VERIFIED_CACHE: OrderedDict[tuple[str, str], bytes] = OrderedDict()
+_CacheKey = tuple[Any, str, str]
+_VERIFIED_CACHE: OrderedDict[_CacheKey, bytes] = OrderedDict()
+_CACHE_LOCK = threading.RLock()
 _verified_cache_bytes: int = 0
 _MAX_CACHE_ITEM_BYTES: int = 67108864
 _MAX_CACHE_TOTAL_BYTES: int = 536870912
@@ -27,22 +30,36 @@ _MAX_CACHE_ENTRIES: int = 512
 ALLOWED_BUCKETS = frozenset({"wlh-archive", "wlh-archive-test"})
 
 
-def _cache_verified(bucket: str, key: str, body: bytes) -> None:
+def _cached(key: _CacheKey) -> bytes | None:
+    with _CACHE_LOCK:
+        body = _VERIFIED_CACHE.get(key)
+        if body is not None:
+            _VERIFIED_CACHE.move_to_end(key)
+        return body
+
+
+def _discard_cached(key: _CacheKey) -> None:
+    global _verified_cache_bytes
+    with _CACHE_LOCK:
+        old = _VERIFIED_CACHE.pop(key, None)
+        if old is not None:
+            _verified_cache_bytes -= len(old)
+
+
+def _cache_verified(key: _CacheKey, body: bytes) -> None:
     global _verified_cache_bytes
     if len(body) > _MAX_CACHE_ITEM_BYTES:
         return
-    cache_key = (bucket, key)
-    old = _VERIFIED_CACHE.pop(cache_key, None)
-    if old is not None:
-        _verified_cache_bytes -= len(old)
-    while _VERIFIED_CACHE and (
-        len(_VERIFIED_CACHE) >= _MAX_CACHE_ENTRIES
-        or _verified_cache_bytes + len(body) > _MAX_CACHE_TOTAL_BYTES
-    ):
-        _, evicted = _VERIFIED_CACHE.popitem(last=False)
-        _verified_cache_bytes -= len(evicted)
-    _VERIFIED_CACHE[cache_key] = body
-    _verified_cache_bytes += len(body)
+    with _CACHE_LOCK:
+        _discard_cached(key)
+        while _VERIFIED_CACHE and (
+            len(_VERIFIED_CACHE) >= _MAX_CACHE_ENTRIES
+            or _verified_cache_bytes + len(body) > _MAX_CACHE_TOTAL_BYTES
+        ):
+            _, evicted = _VERIFIED_CACHE.popitem(last=False)
+            _verified_cache_bytes -= len(evicted)
+        _VERIFIED_CACHE[key] = body
+        _verified_cache_bytes += len(body)
 
 
 @cache
@@ -126,7 +143,10 @@ class Objects:
 
     def put(self, body: bytes) -> str:
         key = digest(body)
-        if (self.bucket, key) in _VERIFIED_CACHE:
+        # Client identity partitions endpoint, credentials and region. A verified
+        # object in another store must never satisfy this store's write/read.
+        cache_key = (self.client, self.bucket, key)
+        if _cached(cache_key) is not None:
             return key
         try:
             self.client.put_object(
@@ -145,7 +165,7 @@ class Objects:
             return key
         except (BotoCoreError, OSError):
             raise WlhError("archive_write_failed") from None
-        _VERIFIED_CACHE.pop((self.bucket, key), None)
+        _discard_cached(cache_key)
         self.get(key)
         return key
 
@@ -155,11 +175,11 @@ class Objects:
         self.key(key)
         if deadline is not None and time.monotonic() >= deadline:
             raise WlhError("archive_read_timeout")
-        cached = _VERIFIED_CACHE.get((self.bucket, key))
+        cache_key = (self.client, self.bucket, key)
+        cached = _cached(cache_key)
         if cached is not None:
             if max_bytes is not None and len(cached) > max_bytes:
                 raise WlhError("archive_too_large")
-            _VERIFIED_CACHE.move_to_end((self.bucket, key))
             return cached
         try:
             response = self.client.get_object(Bucket=self.bucket, Key=key)
@@ -196,7 +216,7 @@ class Objects:
             raise WlhError("archive_unreadable") from None
         if digest(body) != key:
             raise WlhError("archive_corrupt")
-        _cache_verified(self.bucket, key, body)
+        _cache_verified(cache_key, body)
         return body
 
     def put_json(self, value: Any) -> str:

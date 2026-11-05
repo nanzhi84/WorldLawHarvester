@@ -17,6 +17,7 @@ from wlh.core import WlhError, digest, uid
 from wlh.processor.manifest import manifest, require_runtime
 from wlh.processor.parsers import normalize_parser_config
 from wlh.scheduler.run_state import TERMINAL_STATES, eligibility_error, exhaustion_error
+from wlh.storage.cas_io import worker_count
 from wlh.storage.db import DbConn, connect, j, locked_run, one
 
 if TYPE_CHECKING:
@@ -267,6 +268,7 @@ def _execute_attempt(
 def execute_run(
     run_id: str, progress: ProgressPanel | None = None, cancel_event: Event | None = None
 ) -> dict[str, Any]:
+    worker_count()
     with connect() as owner:
         source_id = one(owner, "SELECT source_id FROM wlh.run WHERE id=%s", (run_id,))["source_id"]
         keys = [run_id, "frontier:" + source_id]
@@ -297,6 +299,7 @@ def prepare_run(path: str | Path, mode: str, *, enqueue: bool = False) -> str:
     from wlh.config import load_file
     from wlh.storage.db import decision
 
+    worker_count()
     config = load_file(path).model_dump()
     fingerprint = digest(config)
     frozen = manifest(config)

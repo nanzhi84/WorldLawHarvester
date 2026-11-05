@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "run_rtx_pro6000_annotator.py"
+ANNOTATOR_MODULE = "wlh.benchmark.annotator"
 PAYLOAD = "<article><h1>示例法规</h1><p>第一条：完整保留中文正文。</p></article>"
 MARKDOWN = "# 示例法规\n\n第一条：完整保留中文正文。"
 TOKENIZERS = {
@@ -64,6 +64,7 @@ def run_cli(
     directory.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env.update(
+        PYTHONPATH=str(ROOT / "src"),
         CUDA_VISIBLE_DEVICES="",
         HF_HUB_OFFLINE="1",
         TRANSFORMERS_OFFLINE="1",
@@ -74,7 +75,7 @@ def run_cli(
         env.update(
             HF_HOME=cache, HF_HUB_CACHE=cache, HUGGINGFACE_HUB_CACHE=cache, TRANSFORMERS_CACHE=cache
         )
-    command = [sys.executable, str(SCRIPT), *args]
+    command = [sys.executable, "-m", ANNOTATOR_MODULE, *args]
     result = subprocess.run(
         command, cwd=directory, env=env, capture_output=True, text=True, timeout=40
     )

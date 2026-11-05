@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+# Hitting a document cap must not starve already admitted targets of inputs.
+STOPPING = {"request_budget_exceeded", "crawl_time_budget_exceeded"}
 TERMINAL_STATES = {"complete", "failed"}
 
 

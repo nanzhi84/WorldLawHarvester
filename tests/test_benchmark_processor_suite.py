@@ -452,17 +452,24 @@ class TestBenchmarkCliSubcommands:
         assert proc.returncode == 0
         assert "passed" in proc.stdout
 
-    def test_dry_run_annotator_script_executes_successfully(self, tmp_path: Path) -> None:
-        """Zero-dependency RTX PRO 6000 annotator script executes dry-run smoke test and batching."""
+    def test_dry_run_annotator_module_executes_successfully(self, tmp_path: Path) -> None:
+        """Annotator module executes dry-run smoke test and batching from an isolated directory."""
+        root = Path(__file__).resolve().parents[1]
         out_dir = tmp_path / "isolated_annotations"
         cmd = [
             sys.executable,
-            "scripts/run_rtx_pro6000_annotator.py",
+            "-m",
+            "wlh.benchmark.annotator",
             "--dry-run",
+            "--input",
+            str(root / "data/benchmark/ground_truth_benchmark.jsonl"),
             "--output-dir",
             str(out_dir),
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
+        env = {**os.environ, "PYTHONPATH": str(root / "src")}
+        proc = subprocess.run(
+            cmd, cwd=tmp_path, env=env, capture_output=True, text=True, check=False, timeout=60
+        )
         assert proc.returncode == 0
         assert "Smoke Test: PASSED" in proc.stdout
         assert "Dual-blind batch annotation completed successfully" in proc.stdout

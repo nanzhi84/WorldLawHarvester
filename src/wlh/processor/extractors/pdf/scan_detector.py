@@ -33,7 +33,7 @@ from wlh.processor.extractors.quirks.vi_tcvn3 import normalize_detected_tcvn3
 
 fitz: Any = _fitz
 
-PDF_CONTRACT = "wlh.pdf-scan.v15"
+PDF_CONTRACT = "wlh.pdf-scan.v16"
 SCAN_TEXT_CHARS = 30
 SCAN_INK_RATIO = 0.003
 INK_THRESHOLD = 210
@@ -155,47 +155,24 @@ def analyze(path: str | Path | Any) -> tuple[dict[str, Any], list[str]]:
                     (int(img[0]), page.get_image_rects(int(img[0])))
                     for img in page.get_images(full=True)
                 ]
-                coverage = [
-                    r.width * r.height / page_area
-                    for _, rects in image_rects
-                    for r in rects
-                    if r.width > 1.5 and r.height > 1.5
-                ]
-                non_space = [c for c in decoded_raw if not c.isspace()]
-                has_cc = any(unicodedata.category(c) == "Cc" for c in non_space)
-                heavy_pua = sum(unicodedata.category(c) == "Co" for c in non_space) > 0.05 * len(
-                    non_space
-                )
-                needs_raster = (
-                    len(non_space) < NORMAL_PAGE_TEXT_CHARS
-                    or has_cc
-                    or heavy_pua
-                    or any(c >= 0.95 for c in coverage)
-                    or sum(c >= 0.1 for c in coverage) >= 2
-                    or sum(coverage) >= 0.25
-                )
-                pix = (
-                    page.get_pixmap(
-                        matrix=fitz.Matrix(ANALYSIS_SCALE, ANALYSIS_SCALE), colorspace=fitz.csGRAY
-                    )
-                    if needs_raster
-                    else None
+                # Quality gates need measured ink even for rich native text: a text
+                # layer may be invisible. Skipping the raster is not a blank page.
+                pix = page.get_pixmap(
+                    matrix=fitz.Matrix(ANALYSIS_SCALE, ANALYSIS_SCALE), colorspace=fitz.csGRAY
                 )
                 text, unreadable_body = _inspect_native_encoding(page, decoded_raw, pix)
                 native = len(text.strip())
-                samples = bytes(pix.samples) if pix is not None else b""
-                ink = samples.translate(_INK_LUT).count(1) / len(samples) if samples else 0.0
+                samples = bytes(pix.samples)
+                if not samples:
+                    raise WlhError("pdf_ink_measurement_failed")
+                ink = samples.translate(_INK_LUT).count(1) / len(samples)
                 placed_rects: list[Any] = []
                 overlay_xrefs: list[int] = []
                 for xref, rects in image_rects:
                     if not _xref_has_ink(document, xref):
                         continue
                     for r in rects:
-                        if (
-                            r.width <= 1.5
-                            or r.height <= 1.5
-                            or (pix is not None and not _rect_has_ink(pix, r, rect))
-                        ):
+                        if r.width <= 1.5 or r.height <= 1.5 or not _rect_has_ink(pix, r, rect):
                             continue
                         cov = (r.width * r.height) / page_area
                         if (
