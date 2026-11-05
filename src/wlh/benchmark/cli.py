@@ -33,6 +33,12 @@ def configure_benchmark_parser(parser: argparse.ArgumentParser) -> None:
         default=Path("artifacts/benchmark"),
         help="Directory where benchmark_report.json and benchmark_report.md will be saved",
     )
+    parser.add_argument(
+        "--split",
+        choices=["all", "dev", "test"],
+        default="all",
+        help="Dataset split to evaluate: all (default), dev (60%%), or test (40%%)",
+    )
 
     subparsers = parser.add_subparsers(dest="subcommand")
 
@@ -57,6 +63,12 @@ def configure_benchmark_parser(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=Path("artifacts/benchmark"),
         help="Directory where benchmark_report.json and benchmark_report.md will be saved",
+    )
+    run_parser.add_argument(
+        "--split",
+        choices=["all", "dev", "test"],
+        default="all",
+        help="Dataset split to evaluate: all (default), dev (60%%), or test (40%%)",
     )
 
     # sample subcommand
@@ -212,16 +224,23 @@ def run_benchmark_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         gt_path = DEFAULT_GROUND_TRUTH_PATH
 
     out_dir = Path(getattr(args, "output_dir", None) or "artifacts/benchmark")
+    split_arg = str(getattr(args, "split", None) or "all")
 
-    report = evaluate_benchmark_dataset(input_path, ground_truth_path_or_records=gt_path)
+    report = evaluate_benchmark_dataset(
+        input_path,
+        ground_truth_path_or_records=gt_path,
+        split=split_arg,
+    )
     json_path, md_path = write_benchmark_reports(report, out_dir)
 
     return {
         "status": "success",
+        "evaluated_split": report.evaluated_split,
         "total_samples": report.total_samples,
         "average_overall_score": report.average_overall_score,
         "average_cleanliness_score": report.average_cleanliness_score,
         "average_accuracy_score": report.average_accuracy_score,
+        "split_scores": report.split_scores,
         "json_report": str(json_path),
         "markdown_report": str(md_path),
     }

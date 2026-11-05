@@ -588,6 +588,113 @@ def load_cached_samples(html_path: Path) -> dict[str, list[dict[str, Any]]]:
     return out
 
 
+SYNTHETIC_TEST_STUB_IDS: frozenset[str] = frozenset(
+    {"dd-910", "dd-911", "dd-912", "dd-913", "dd-914", "dd-915", "dd-997"}
+)
+
+
+def assign_stratified_splits(
+    records: Sequence[Mapping[str, Any]],
+    dev_ratio: float = 0.6,
+) -> dict[str, str]:
+    """Deterministically stratify benchmark records per source into dev (60%) and test (40%).
+
+    Ensures every source with >=2 content_page samples (or >=2 total samples) is represented in
+    both dev and test splits while preserving task_type and length-strata balance.
+    """
+    import math
+
+    by_source: dict[str, list[Mapping[str, Any]]] = {}
+    splits: dict[str, str] = {}
+
+    for rec in records:
+        rid = str(rec.get("id") or rec.get("sample_id") or "")
+        if not rid:
+            continue
+        explicit = rec.get("split")
+        if explicit in ("dev", "test"):
+            splits[rid] = str(explicit)
+            continue
+        src_id = str(rec.get("source_id") or "")
+        by_source.setdefault(src_id, []).append(rec)
+
+    single_content_sources: list[
+        tuple[str, list[Mapping[str, Any]], list[Mapping[str, Any]]]
+    ] = []
+    multi_sources_with_list: list[tuple[str, list[Mapping[str, Any]]]] = []
+
+    for src_id in sorted(by_source.keys()):
+        items = sorted(
+            by_source[src_id],
+            key=lambda x: str(x.get("id") or x.get("sample_id") or ""),
+        )
+        c_items = [x for x in items if x.get("task_type") != "list_page"]
+        l_items = [x for x in items if x.get("task_type") == "list_page"]
+
+        n_c = len(c_items)
+        if n_c >= 2:
+            k_dev = max(1, min(n_c - 1, round(n_c * dev_ratio)))
+            dev_indices = {
+                round(i * (n_c - 1) / (k_dev - 1)) if k_dev > 1 else 0
+                for i in range(k_dev)
+            }
+            while len(dev_indices) < k_dev:
+                for idx in range(n_c):
+                    if idx not in dev_indices:
+                        dev_indices.add(idx)
+                        if len(dev_indices) == k_dev:
+                            break
+            for idx, item in enumerate(c_items):
+                rid = str(item.get("id") or item.get("sample_id") or "")
+                splits[rid] = "dev" if idx in dev_indices else "test"
+            if l_items:
+                multi_sources_with_list.append((src_id, l_items))
+        else:
+            single_content_sources.append((src_id, c_items, l_items))
+
+    l_flat = [item for _, l_items in multi_sources_with_list for item in l_items]
+    n_l = len(l_flat)
+    if n_l > 0:
+        k_l_dev = round(n_l * dev_ratio)
+        for idx, item in enumerate(l_flat):
+            rid = str(item.get("id") or item.get("sample_id") or "")
+            is_dev = math.floor((idx + 1) * k_l_dev / n_l) > math.floor(
+                idx * k_l_dev / n_l
+            )
+            splits[rid] = "dev" if is_dev else "test"
+
+    for idx, (_src_id, c_items, l_items) in enumerate(single_content_sources):
+        is_dev = (idx % 5) in (0, 1, 2)
+        if c_items and l_items:
+            c_rid = str(c_items[0].get("id") or c_items[0].get("sample_id") or "")
+            splits[c_rid] = "dev" if is_dev else "test"
+            for li in l_items:
+                l_rid = str(li.get("id") or li.get("sample_id") or "")
+                splits[l_rid] = "test" if is_dev else "dev"
+        elif len(l_items) >= 2:
+            n_li = len(l_items)
+            k_li_dev = max(1, min(n_li - 1, round(n_li * dev_ratio)))
+            dev_li_indices = {
+                round(i * (n_li - 1) / (k_li_dev - 1)) if k_li_dev > 1 else 0
+                for i in range(k_li_dev)
+            }
+            while len(dev_li_indices) < k_li_dev:
+                for li_idx in range(n_li):
+                    if li_idx not in dev_li_indices:
+                        dev_li_indices.add(li_idx)
+                        if len(dev_li_indices) == k_li_dev:
+                            break
+            for li_idx, li in enumerate(l_items):
+                l_rid = str(li.get("id") or li.get("sample_id") or "")
+                splits[l_rid] = "dev" if li_idx in dev_li_indices else "test"
+        else:
+            for item in c_items + l_items:
+                rid = str(item.get("id") or item.get("sample_id") or "")
+                splits[rid] = "dev" if is_dev else "test"
+
+    return splits
+
+
 def load_source_metadata(csv_path: Path) -> dict[str, dict[str, str]]:
     """Load source metadata from source-adaptation-matrix.csv."""
     if not csv_path.is_file():
@@ -597,9 +704,13 @@ def load_source_metadata(csv_path: Path) -> dict[str, dict[str, str]]:
         for row in csv.DictReader(handle):
             source_id = (row.get("Source ID") or "").strip()
             if source_id:
+                jname = (row.get("法域/国家") or "").strip()
+                prefix = jname.split(" ")[0] if " " in jname else ""
+                jur_code = _JUR_PREFIX_MAP.get(prefix, "CN")
                 metadata[source_id] = {
                     "source_name": (row.get("来源名称") or "").strip(),
-                    "jurisdiction_name": (row.get("法域/国家") or "").strip(),
+                    "jurisdiction": jur_code,
+                    "jurisdiction_name": jname,
                     "region": (row.get("大洲/区域") or "").strip(),
                     "doc_type": (row.get("资料类型") or "").strip(),
                     "priority": (row.get("优先级") or "").strip(),
@@ -958,6 +1069,8 @@ def export_processor_batch_bundle(
             continue
 
         sid = mdata.get("source_id") or mf.parent.name
+        if sid in SYNTHETIC_TEST_STUB_IDS or (source_metadata and sid not in source_metadata):
+            continue
         meta = source_metadata.get(sid, {})
         jur = meta.get("jurisdiction") or "CN"
         sample_urls = [s.get("public_url") for s in mdata.get("samples", []) if s.get("public_url")]
@@ -1127,6 +1240,8 @@ def export_processor_batch_bundle(
 
         for it in cand_items:
             sid = it.get("source_id", "")
+            if sid in SYNTHETIC_TEST_STUB_IDS or (source_metadata and sid not in source_metadata):
+                continue
             raw_payload = str(it.get("raw_payload") or "")
             if not raw_payload.strip() or raw_payload.strip().endswith("…(truncated)"):
                 continue

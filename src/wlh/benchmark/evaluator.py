@@ -459,28 +459,100 @@ def load_records(path_or_records: Any) -> list[dict[str, Any]]:
 _load_records = load_records
 
 
+def _summarize_split_group(group: list[SampleEvaluationResult]) -> dict[str, Any]:
+    """Compute aggregate 5-pillar and composite metrics for a split subset (dev or test)."""
+    cnt = len(group)
+    if cnt == 0:
+        return {
+            "sample_count": 0,
+            "overall": 0.0,
+            "list_discovery_f1": None,
+            "record_split_f1": None,
+            "accuracy": None,
+            "content_fidelity": None,
+            "cleanliness": 0.0,
+        }
+    ovr = round(sum(s.overall_score for s in group) / cnt, 2)
+    disc = [s.discovery.target_url_f1 for s in group if s.discovery is not None]
+    rs = [s.record_split.record_split_f1 for s in group if s.record_split is not None]
+    acc = [s.accuracy.score for s in group if s.accuracy is not None]
+    fid = [s.content_fidelity.content_f1 for s in group if s.content_fidelity is not None]
+    cln = [s.cleanliness.score for s in group if s.cleanliness is not None]
+    return {
+        "sample_count": cnt,
+        "overall": ovr,
+        "list_discovery_f1": round(sum(disc) / len(disc), 2) if disc else None,
+        "record_split_f1": round(sum(rs) / len(rs), 2) if rs else None,
+        "accuracy": round(sum(acc) / len(acc), 2) if acc else None,
+        "content_fidelity": round(sum(fid) / len(fid), 2) if fid else None,
+        "cleanliness": round(sum(cln) / len(cln), 2) if cln else 0.0,
+    }
+
+
 def evaluate_benchmark_dataset(
     dataset_path_or_records: Any,
     ground_truth_path_or_records: Any | None = None,
+    *,
+    split: str = "all",
 ) -> BenchmarkSummaryReport:
-    """Evaluate an entire dataset and compute aggregate quality metrics across all dimensions."""
+    """Evaluate an entire dataset (or a stratified dev/test split) and compute aggregate metrics."""
+    from wlh.benchmark.sampler import assign_stratified_splits
+
+    normalized_split = (split or "all").strip().lower()
+    if normalized_split not in ("all", "dev", "test"):
+        raise ValueError(f"Unsupported benchmark split '{split}'; expected 'all', 'dev', or 'test'.")
+
     records = _load_records(dataset_path_or_records)
 
     gt_map: dict[str, dict[str, Any]] = {}
+    gt_outer_map: dict[str, dict[str, Any]] = {}
     if ground_truth_path_or_records is not None:
         gt_records = _load_records(ground_truth_path_or_records)
         for item in gt_records:
-            if "id" in item:
-                gt_map[str(item["id"])] = item.get("ground_truth") or item
+            gid = str(item.get("id") or item.get("sample_id") or "")
+            if gid:
+                gt_map[gid] = item.get("ground_truth") or item
+                gt_outer_map[gid] = item
+
+    if gt_outer_map:
+        enriched_records: list[dict[str, Any]] = []
+        for item in records:
+            sid_candidate = str(item.get("id") or item.get("sample_id") or "")
+            src_candidate = str(item.get("source_id") or "")
+            lookup_key = (
+                sid_candidate
+                if sid_candidate in gt_outer_map
+                else f"content_{src_candidate}_{sid_candidate}"
+            )
+            gt_outer = gt_outer_map.get(lookup_key)
+            if gt_outer is not None:
+                merged_item = dict(item)
+                for meta_key in ("source_id", "jurisdiction", "task_type", "split"):
+                    if not merged_item.get(meta_key) and gt_outer.get(meta_key):
+                        merged_item[meta_key] = gt_outer[meta_key]
+                enriched_records.append(merged_item)
+            else:
+                enriched_records.append(item)
+        records = enriched_records
+
+    split_map = assign_stratified_splits(records)
+
+    if normalized_split in ("dev", "test"):
+        records = [
+            item
+            for item in records
+            if split_map.get(str(item.get("id") or item.get("sample_id") or "")) == normalized_split
+        ]
 
     sample_results: list[SampleEvaluationResult] = []
     evaluated_pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
     for item in records:
-        sid = str(item.get("id") or "")
+        sid = str(item.get("id") or item.get("sample_id") or "")
         src_id = str(item.get("source_id") or "")
         jur = str(item.get("jurisdiction") or "")
         t_type = str(item.get("task_type") or "")
+        item_split = split_map.get(sid) or str(item.get("split") or "dev")
 
         # Determine prediction and ground truth pair
         lookup_id = sid if sid in gt_map else f"content_{src_id}_{sid}"
@@ -519,6 +591,7 @@ def evaluate_benchmark_dataset(
             jurisdiction=jur,
             task_type=t_type,
         )
+        res.split = item_split
         sample_results.append(res)
         if res.task_type == "content_page" and gt_map_val is not None:
             raw_p_recs = pred_map.get("records")
@@ -538,6 +611,7 @@ def evaluate_benchmark_dataset(
         return BenchmarkSummaryReport(
             total_samples=0,
             evaluated_at=datetime.now(timezone.utc).isoformat(),
+            evaluated_split=normalized_split,
             average_overall_score=0.0,
             average_cleanliness_score=0.0,
         )
@@ -548,10 +622,10 @@ def evaluate_benchmark_dataset(
     disc_scores = [s.discovery.target_url_f1 for s in sample_results if s.discovery is not None]
     avg_list_discovery = round(sum(disc_scores) / len(disc_scores), 2) if disc_scores else None
 
-    split_scores = [
+    split_f1_scores = [
         s.record_split.record_split_f1 for s in sample_results if s.record_split is not None
     ]
-    avg_record_split = round(sum(split_scores) / len(split_scores), 2) if split_scores else None
+    avg_record_split = round(sum(split_f1_scores) / len(split_f1_scores), 2) if split_f1_scores else None
 
     valid_clean = [s.cleanliness for s in sample_results if s.cleanliness is not None]
     if valid_clean:
@@ -648,6 +722,17 @@ def evaluate_benchmark_dataset(
             "sample_count": float(cnt),
         }
 
+    # Stratified split breakdown (dev vs test)
+    split_groups: dict[str, list[SampleEvaluationResult]] = {"dev": [], "test": []}
+    for s in sample_results:
+        sp_key = s.split if s.split in ("dev", "test") else "dev"
+        split_groups[sp_key].append(s)
+    split_breakdown: dict[str, dict[str, Any]] = {
+        sp_name: _summarize_split_group(sp_group)
+        for sp_name, sp_group in split_groups.items()
+        if sp_group
+    }
+
     # Worst-performing samples diagnostics
     sorted_samples = sorted(sample_results, key=lambda x: x.overall_score)
     worst_samples: list[dict[str, Any]] = []
@@ -734,6 +819,7 @@ def evaluate_benchmark_dataset(
     return BenchmarkSummaryReport(
         total_samples=total_samples,
         evaluated_at=datetime.now(timezone.utc).isoformat(),
+        evaluated_split=normalized_split,
         average_overall_score=avg_overall,
         average_list_discovery_f1=avg_list_discovery,
         average_record_split_f1=avg_record_split,
@@ -744,12 +830,13 @@ def evaluate_benchmark_dataset(
         accuracy_dimension_scores=acc_dims,
         jurisdiction_scores=jur_scores,
         source_scores=source_scores,
+        split_scores=split_breakdown,
         worst_performing_samples=worst_samples,
         field_discrepancies=field_discrepancies,
         sample_results=sample_results,
     )
 
 
-def evaluate_dataset(dataset: list[dict[str, Any]]) -> BenchmarkReport:
+def evaluate_dataset(dataset: list[dict[str, Any]], *, split: str = "all") -> BenchmarkReport:
     """Evaluate dataset alias matching PROJECT.md interface contract."""
-    return evaluate_benchmark_dataset(dataset)
+    return evaluate_benchmark_dataset(dataset, split=split)

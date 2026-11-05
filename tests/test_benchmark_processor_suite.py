@@ -39,7 +39,7 @@ from wlh.benchmark.models import (
     RecordSplitResult,
 )
 from wlh.benchmark.reporter import render_benchmark_markdown_report
-from wlh.benchmark.sampler import run_preflight_checks
+from wlh.benchmark.sampler import export_processor_batch_bundle, run_preflight_checks
 from wlh.benchmark.schema import (
     get_content_page_json_schema,
     get_list_page_json_schema,
@@ -396,6 +396,50 @@ class TestProcessorBatchBundle:
                 f"annotation_pipeline {item['id']} ({item['source_id']}) failed grounding gate: {reason}"
             )
 
+    def test_benchmark_excludes_synthetic_contract_test_stubs(self, tmp_path: Path) -> None:
+        """Benchmark datasets and batch bundle export exclude synthetic contract test stubs and only include registered Source IDs."""
+        synthetic_stubs = {
+            "dd-910",
+            "dd-911",
+            "dd-912",
+            "dd-913",
+            "dd-914",
+            "dd-915",
+            "dd-997",
+        }
+
+        matrix_path = Path("docs/runbooks/source-adaptation-matrix.csv")
+        assert matrix_path.is_file()
+        with matrix_path.open("r", encoding="utf-8-sig") as f:
+            registered_source_ids = {
+                str(r["Source ID"]).strip() for r in csv.DictReader(f) if r.get("Source ID")
+            }
+        assert registered_source_ids.isdisjoint(synthetic_stubs)
+
+        ledger_path = Path("data/benchmark/annotation_pipeline.json")
+        assert ledger_path.is_file()
+        ledger_data: dict[str, Any] = json.loads(ledger_path.read_text(encoding="utf-8"))
+        ledger_items = cast(list[dict[str, Any]], ledger_data["items"])
+        ledger_source_ids = {str(item["source_id"]) for item in ledger_items}
+        assert ledger_source_ids.isdisjoint(synthetic_stubs)
+        assert ledger_source_ids.issubset(registered_source_ids)
+
+        gt_path = Path("data/benchmark/ground_truth_benchmark.jsonl")
+        assert gt_path.is_file()
+        gt_source_ids: set[str] = set()
+        with gt_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    row = cast(dict[str, Any], json.loads(line))
+                    gt_source_ids.add(str(row["source_id"]))
+        assert gt_source_ids.isdisjoint(synthetic_stubs)
+        assert gt_source_ids.issubset(registered_source_ids)
+
+        tasks = export_processor_batch_bundle(output_path=tmp_path / "bundle.jsonl")
+        bundle_source_ids = {t.source_id for t in tasks}
+        assert bundle_source_ids.isdisjoint(synthetic_stubs)
+        assert bundle_source_ids.issubset(registered_source_ids)
+
 
 class TestBenchmarkCliSubcommands:
     """Subprocess black-box verification of benchmark CLI subcommands."""
@@ -690,3 +734,138 @@ class TestBenchmarkArbitrationAndReporting:
             request_url=request_url,
         )
         assert ok_hallucinated is False
+
+
+class TestBenchmarkStratifiedSplits:
+    """Black-box verification of per-source stratified dev (60%) / test (40%) splitting."""
+
+    def test_per_source_stratified_split_conservation_and_coverage(self) -> None:
+        """Every multi-sample source is represented in both dev and test splits at ~60/40 ratio."""
+        from collections import Counter, defaultdict
+
+        from wlh.benchmark.sampler import assign_stratified_splits
+
+        gt_path = Path("data/benchmark/ground_truth_benchmark.jsonl")
+        rows = [
+            cast(dict[str, Any], json.loads(line))
+            for line in gt_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert len(rows) == 584
+
+        splits = assign_stratified_splits(rows, dev_ratio=0.6)
+        assert len(splits) == len(rows)
+        counts = Counter(splits.values())
+        dev_ratio_actual = counts["dev"] / len(rows)
+        assert 0.55 <= dev_ratio_actual <= 0.65
+
+        by_src_split: dict[str, Counter[str]] = defaultdict(Counter)
+        for r in rows:
+            by_src_split[str(r["source_id"])][splits[str(r["id"])]] += 1
+
+        for src_id, sc in by_src_split.items():
+            if sum(sc.values()) >= 2:
+                assert sc["dev"] >= 1 and sc["test"] >= 1, (
+                    f"Source {src_id} with {sum(sc.values())} samples missing from dev or test: {sc}"
+                )
+
+        ledger_data = json.loads(
+            Path("data/benchmark/annotation_pipeline.json").read_text(encoding="utf-8")
+        )
+        assert ledger_data["summary"]["dev_split_count"] == counts["dev"]
+        assert ledger_data["summary"]["test_split_count"] == counts["test"]
+
+    def test_evaluate_benchmark_dataset_filters_by_dev_and_test_splits(self) -> None:
+        """evaluate_benchmark_dataset supports split='dev', 'test', and 'all', and rejects invalid splits."""
+        import pytest
+
+        from wlh.benchmark.evaluator import evaluate_benchmark_dataset
+
+        synthetic_records = [
+            {
+                "id": f"content_dd-501_0{i}",
+                "task_type": "content_page",
+                "source_id": "dd-501",
+                "jurisdiction": "CN",
+                "current_extracted": {
+                    "title": f"测试法规 {i}",
+                    "doc_type": "法律法规",
+                    "markdown": f"# 测试法规 {i}\n\n第一条 规范内容 {i}。",
+                },
+                "ground_truth": {
+                    "records": [
+                        {
+                            "title": f"测试法规 {i}",
+                            "doc_type": "法律法规",
+                            "markdown": f"# 测试法规 {i}\n\n第一条 规范内容 {i}。",
+                        }
+                    ]
+                },
+            }
+            for i in range(1, 6)
+        ]
+
+        rep_all = evaluate_benchmark_dataset(synthetic_records, split="all")
+        rep_dev = evaluate_benchmark_dataset(synthetic_records, split="dev")
+        rep_test = evaluate_benchmark_dataset(synthetic_records, split="test")
+
+        assert rep_all.total_samples == 5
+        assert rep_dev.total_samples == 3
+        assert rep_test.total_samples == 2
+        assert rep_all.split_scores["dev"]["sample_count"] == 3
+        assert rep_all.split_scores["test"]["sample_count"] == 2
+
+        with pytest.raises(ValueError, match="Unsupported benchmark split"):
+            evaluate_benchmark_dataset(synthetic_records, split="invalid_split")
+
+        # Verify list-only multi-sample source stratification and sample_id / external GT metadata enrichment
+        from wlh.benchmark.sampler import assign_stratified_splits
+
+        list_only_records = [
+            {"sample_id": "list_dd-501_01", "task_type": "list_page", "source_id": "dd-501"},
+            {"sample_id": "list_dd-501_02", "task_type": "list_page", "source_id": "dd-501"},
+        ]
+        list_splits = assign_stratified_splits(list_only_records)
+        assert set(list_splits.values()) == {"dev", "test"}
+
+        sample_id_predictions = [
+            {
+                "sample_id": f"content_dd-501_0{i}",
+                "current_extracted": {
+                    "title": f"测试法规 {i}",
+                    "doc_type": "法律法规",
+                    "markdown": f"# 测试法规 {i}\n\n第一条 规范内容 {i}。",
+                },
+            }
+            for i in range(1, 3)
+        ]
+        external_gt = [
+            {
+                "id": f"content_dd-501_0{i}",
+                "source_id": "dd-501",
+                "jurisdiction": "CN",
+                "task_type": "content_page",
+                "ground_truth": {
+                    "records": [
+                        {
+                            "title": f"测试法规 {i}",
+                            "doc_type": "法律法规",
+                            "markdown": f"# 测试法规 {i}\n\n第一条 规范内容 {i}。",
+                        }
+                    ]
+                },
+            }
+            for i in range(1, 3)
+        ]
+        rep_ext_test = evaluate_benchmark_dataset(
+            sample_id_predictions,
+            ground_truth_path_or_records=external_gt,
+            split="test",
+        )
+        assert rep_ext_test.total_samples == 1
+        assert rep_ext_test.sample_results[0].sample_id in {"content_dd-501_01", "content_dd-501_02"}
+        assert rep_ext_test.sample_results[0].split == "test"
+        assert rep_ext_test.split_scores["test"]["sample_count"] == 1
+        assert "dev" not in rep_ext_test.split_scores
+
+

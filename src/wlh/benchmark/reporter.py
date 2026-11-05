@@ -33,6 +33,7 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
         "# WorldLawHarvester Quantitative Benchmark Evaluation Report",
         "",
         f"> **Generated At**: {report.evaluated_at or 'N/A'}  ",
+        f"> **Evaluated Split**: `{report.evaluated_split}`  ",
         f"> **Total Evaluated Samples**: {report.total_samples}  ",
         f"> **Overall Composite Score**: **{overall:.2f} / 100.0**  ",
         f"> **Cleanliness Score**: **{cleanliness:.2f} / 100.0**  ",
@@ -76,6 +77,36 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
     lines.append(
         f"| **Pillar 5: Text Cleanliness (干净度)** | **{cleanliness:.2f}** | >= {clean_target:.1f} | {'✅ PASS' if cleanliness >= clean_target else '⚠️ NEEDS REVIEW'} |"
     )
+
+    if report.split_scores:
+        lines.extend(
+            [
+                "",
+                "### 1.1 Stratified Split Breakdown (Dev 60% vs Test 40%)",
+                "",
+                "| Split | Sample Count | Overall Score | List Discovery F1 | Record Split F1 | Accuracy | Content Fidelity | Cleanliness |",
+                "| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
+            ]
+        )
+        for sp_key in ("dev", "test"):
+            sp_data = report.split_scores.get(sp_key)
+            if not sp_data:
+                continue
+            sp_cnt = int(sp_data.get("sample_count", 0))
+            sp_ovr = float(sp_data.get("overall", 0.0))
+            sp_disc = sp_data.get("list_discovery_f1")
+            sp_rs = sp_data.get("record_split_f1")
+            sp_acc = sp_data.get("accuracy")
+            sp_fid = sp_data.get("content_fidelity")
+            sp_cln = float(sp_data.get("cleanliness", 0.0))
+            lines.append(
+                f"| **`{sp_key}`** | {sp_cnt} | **{sp_ovr:.2f}** | "
+                f"{f'{sp_disc:.2f}' if sp_disc is not None else 'N/A'} | "
+                f"{f'{sp_rs:.2f}' if sp_rs is not None else 'N/A'} | "
+                f"{f'{sp_acc:.2f}' if sp_acc is not None else 'N/A'} | "
+                f"{f'{sp_fid:.2f}' if sp_fid is not None else 'N/A'} | "
+                f"{sp_cln:.2f} |"
+            )
 
     lines.extend(
         [

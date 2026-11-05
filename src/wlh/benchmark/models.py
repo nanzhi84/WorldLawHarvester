@@ -360,6 +360,7 @@ class SampleEvaluationResult(BaseModel):
     task_type: Literal["list_page", "content_page"] = "content_page"
     source_id: str = ""
     jurisdiction: str = ""
+    split: str | None = None
     discovery: DiscoveryResult | None = None
     record_split: RecordSplitResult | None = None
     accuracy: AccuracyResult | None = None
@@ -381,6 +382,7 @@ class BenchmarkSummaryReport(BaseModel):
 
     total_samples: int
     evaluated_at: str = ""
+    evaluated_split: str = "all"
     average_overall_score: float = Field(ge=0.0, le=100.0)
     average_list_discovery_f1: float | None = None
     average_record_split_f1: float | None = None
@@ -391,6 +393,7 @@ class BenchmarkSummaryReport(BaseModel):
     accuracy_dimension_scores: dict[str, float] = Field(default_factory=_empty_field_scores)
     jurisdiction_scores: dict[str, dict[str, float]] = Field(default_factory=_empty_jur_scores)
     source_scores: dict[str, dict[str, float]] = Field(default_factory=dict)
+    split_scores: dict[str, dict[str, Any]] = Field(default_factory=dict)
     worst_performing_samples: list[dict[str, Any]] = Field(default_factory=_empty_worst_samples)
     field_discrepancies: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
