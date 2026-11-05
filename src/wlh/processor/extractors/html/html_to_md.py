@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from collections.abc import Sequence
@@ -127,15 +128,26 @@ def json_to_markdown(value: str) -> str:
 
 
 def html_to_markdown(
-    html: str | bytes,
+    html: str | bytes | Any,
     base_url: str | None = None,
     content_xpath: str | None = None,
     *,
-    quirks: Sequence[str] | None = None,
+    quirks: Sequence[str] | set[str] | None = None,
+    title: str | None = None,
+    already_cleaned: bool = False,
 ) -> str:
+    quirks = tuple(quirks) if quirks is not None else None
     scoped = bool(content_xpath)
     try:
-        tree = document_tree(html)
+        if isinstance(html, (str, bytes)):
+            if not html.strip():
+                raise WlhError("html_empty")
+            tree = document_tree(html)
+            already_cleaned = False
+        else:
+            tree = html if already_cleaned else copy.deepcopy(html)
+            if hasattr(tree, "getroot"):
+                tree = tree.getroot()
         for comment in list(tree.xpath("//comment()")):
             _remove_element(comment)
         nodes: list[Any] = (
@@ -145,8 +157,9 @@ def html_to_markdown(
         raise WlhError("html_unparseable") from None
     if not nodes or any(not isinstance(n, etree._Element) for n in nodes):
         raise WlhError("content_region_missing")
-    for n in nodes:
-        clean_html_tree(n, quirks=quirks)
+    if not already_cleaned:
+        for n in nodes:
+            clean_html_tree(n, quirks=quirks)
 
     def inline(text: str | None) -> str:
         return re.sub(r"\s+", " ", text or "")
@@ -372,4 +385,7 @@ def html_to_markdown(
     joined = "\n\n".join(parts)
     if not scoped:
         joined = escape_currency_dollars(joined)
-    return normalized(joined)
+    md = normalized(joined)
+    if not md:
+        raise WlhError("html_empty")
+    return normalized(f"# {title}\n\n{md}") if title else md

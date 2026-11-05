@@ -697,3 +697,182 @@ class TestPdfExtractionAndOcrFallback:
         assert info["method"] == "native"
         assert "Core R&D activities" in md
         assert "Systematic, investigative or experimental activities" in md
+
+
+class TestOfflineExtractorAndContainerContracts:
+    def test_preparsed_dom_root_converts_to_identical_markdown_as_html_string(self) -> None:
+        """Passing a pre-parsed DOM root to html_to_markdown produces identical Markdown to parsing the raw HTML string."""
+        from typing import Any
+
+        from wlh.processor.extractors.html.dom_tree import document_tree
+        from wlh.processor.extractors.html.html_to_md import html_to_markdown
+
+        raw_html = (
+            "<!DOCTYPE html><html><body>"
+            "<nav>Menu</nav>"
+            "<main>"
+            "<h1>Clean Air Regulation</h1>"
+            "<p>Article 1. Ambient air quality standards shall apply nationwide.</p>"
+            "<h2>Section 2. Emission Limits</h2>"
+            "<table>"
+            "<thead><tr><th>Pollutant</th><th>Limit</th></tr></thead>"
+            "<tbody><tr><td>SO2</td><td>50 ug/m3</td></tr></tbody>"
+            "</table>"
+            "</main>"
+            "</body></html>"
+        )
+        root = document_tree(raw_html)
+        html_to_md_fn: Any = html_to_markdown
+        md_from_str = html_to_md_fn(raw_html, "https://example.gov/law/1")
+        md_from_tree = html_to_md_fn(root, "https://example.gov/law/1")
+        assert md_from_tree == md_from_str
+        assert "Clean Air Regulation" in md_from_tree
+        assert "Menu" not in md_from_tree
+
+    def test_pdf_scan_detector_accepts_preopened_document_handle_and_matches_path_analysis(
+        self, tmp_path: Path
+    ) -> None:
+        """The PDF scan detector accepts a pre-opened document handle and produces the same analysis tuple as a filesystem Path."""
+        from typing import Any
+
+        import fitz as pdf_lib  # type: ignore[import-untyped]
+
+        from wlh.processor.extractors.pdf.scan_detector import analyze
+
+        pdf_path = make_native_pdf(
+            tmp_path / "doc.pdf",
+            [
+                "Article 1. Environmental standards. " * 15,
+                "Article 2. Compliance rules. " * 15,
+            ],
+        )
+        pdf_mod: Any = pdf_lib
+        analyze_fn: Any = analyze
+        analysis_path, native_path = analyze_fn(pdf_path)
+        with pdf_mod.open(stream=pdf_path.read_bytes(), filetype="pdf") as doc:
+            analysis_doc, native_doc = analyze_fn(doc)
+            assert not doc.is_closed
+
+        assert (analysis_doc, native_doc) == (analysis_path, native_path)
+        assert analysis_doc["page_count"] == 2
+        assert analysis_doc["suspected_scan_pages"] == []
+
+    def test_batch_json_and_large_xml_containers_populate_and_reuse_records_cache(self) -> None:
+        """Batch JSON payloads and large (>1 MB) multi-record XML containers populate and reuse `_records_cache` keyed by archive_ref and actual_url."""
+        import json
+
+        from wlh.processor.parsers.json.parser import JsonParser
+        from wlh.processor.parsers.xml.parser import XmlParser
+
+        json_parser = JsonParser(
+            {
+                "id": "dd-901",
+                "scheduler": {
+                    "entry_urls": ["https://example.gov/api/laws?page=1"],
+                    "allowed_hosts": ["example.gov"],
+                },
+                "processor": {
+                    "parser": {
+                        "type": "json",
+                        "options": {
+                            "items_path": "data.items",
+                            "detail_url_template": "https://example.gov/api/laws/{id}",
+                        },
+                    }
+                },
+                "storage": {"metadata": {"document_type": "法律法规"}},
+            }
+        )
+        payload_bytes = json.dumps(
+            {
+                "data": {
+                    "items": [
+                        {
+                            "id": "101",
+                            "title": "Clean Air Act 101",
+                            "document_number": "No. 101",
+                            "date": "2026-01-10",
+                            "text": "Article 1. Emission standards for industrial boilers.",
+                        },
+                        {
+                            "id": "102",
+                            "title": "Water Quality Act 102",
+                            "document_number": "No. 102",
+                            "date": "2026-01-11",
+                            "text": "Article 1. Effluent discharge limits for rivers.",
+                        },
+                        {
+                            "id": "103",
+                            "title": "Soil Protection Act 103",
+                            "document_number": "No. 103",
+                            "date": "2026-01-12",
+                            "text": "Article 1. Remediation standards for contaminated land.",
+                        },
+                    ]
+                }
+            }
+        ).encode("utf-8")
+        json_acq = {
+            "archive_ref": "sha256:1111",
+            "actual_url": "https://example.gov/api/laws?page=1",
+            "request_url": "https://example.gov/api/laws?page=1",
+            "charset": "utf-8",
+        }
+        recs = json_parser.records(payload_bytes, json_acq)
+        assert len(recs) == 3
+        json_cache = getattr(json_parser, "_records_cache", {})
+        assert any(
+            k == ("sha256:1111", "https://example.gov/api/laws?page=1")
+            or (
+                isinstance(k, tuple)
+                and k[:2] == ("sha256:1111", "https://example.gov/api/laws?page=1")
+            )
+            for k in json_cache
+        )
+        assert json_parser.records(payload_bytes, json_acq) == recs
+
+        xml_parser = XmlParser(
+            {
+                "id": "dd-902",
+                "scheduler": {
+                    "entry_urls": ["https://example.gov/laws.xml"],
+                    "allowed_hosts": ["example.gov"],
+                },
+                "processor": {"parser": {"type": "xml"}},
+                "storage": {"metadata": {"document_type": "法律法规"}},
+            }
+        )
+        chunk = "Article 1. Statutory environmental protection provision. " * 9500
+        xml_bytes = (
+            "<?xml version='1.0' encoding='utf-8'?>"
+            "<Laws>"
+            "<Law id='law-1'>"
+            "<LawName>Environmental Law 1</LawName>"
+            "<LawNo>Act No. 1</LawNo>"
+            "<LawURL>https://example.gov/laws/1</LawURL>"
+            f"<LawContent>{chunk}</LawContent>"
+            "</Law>"
+            "<Law id='law-2'>"
+            "<LawName>Environmental Law 2</LawName>"
+            "<LawNo>Act No. 2</LawNo>"
+            "<LawURL>https://example.gov/laws/2</LawURL>"
+            f"<LawContent>{chunk}</LawContent>"
+            "</Law>"
+            "</Laws>"
+        ).encode("utf-8")
+        xml_acq = {
+            "archive_ref": "sha256:2222",
+            "actual_url": "https://example.gov/laws.xml",
+            "request_url": "https://example.gov/laws.xml",
+            "charset": "utf-8",
+        }
+        xml_recs = xml_parser.records(xml_bytes, xml_acq)
+        assert len(xml_recs) == 2
+        assert sum(len(str(r.get("text") or "")) for r in xml_recs) > 1_050_000
+        xml_cache = getattr(xml_parser, "_records_cache", {})
+        assert any(
+            k == ("sha256:2222", "https://example.gov/laws.xml")
+            or (isinstance(k, tuple) and k[:2] == ("sha256:2222", "https://example.gov/laws.xml"))
+            for k in xml_cache
+        )
+        assert xml_parser.records(xml_bytes, xml_acq) == xml_recs

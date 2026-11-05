@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping, cast
@@ -22,6 +23,13 @@ from wlh.benchmark.models import (
     ContentFidelityResult,
     SampleEvaluationResult,
 )
+
+_PROCESSOR_CACHE: dict[tuple[str, str], tuple[dict[str, Any], Any]] = {}
+
+
+def clear_processor_cache() -> None:
+    """Invalidate source configurations and parsers after configuration changes."""
+    _PROCESSOR_CACHE.clear()
 
 
 def _extract_prediction_dict(raw: Mapping[str, Any]) -> dict[str, Any]:
@@ -46,7 +54,9 @@ def _extract_prediction_dict(raw: Mapping[str, Any]) -> dict[str, Any]:
     return base
 
 
-def extract_with_processor(task: Mapping[str, Any]) -> dict[str, Any]:
+def extract_with_processor(
+    task: Mapping[str, Any], *, sources_dir: Path = Path("sources")
+) -> dict[str, Any]:
     """Run offline processor pipeline on a ProcessorBenchmarkTask."""
     source_id = str(task.get("source_id", ""))
     task_type = str(task.get("task_type", "content_page"))
@@ -54,7 +64,8 @@ def extract_with_processor(task: Mapping[str, Any]) -> dict[str, Any]:
     raw_payload = str(task.get("raw_payload", ""))
     mime_type = str(task.get("mime_type", "text/html"))
 
-    yaml_path = Path(f"sources/{source_id}.yaml")
+    sources_dir = Path(sources_dir)
+    yaml_path = sources_dir / f"{source_id}.yaml"
     if not yaml_path.is_file():
         if task_type == "list_page":
             return {"target_urls": []}
@@ -67,12 +78,21 @@ def extract_with_processor(task: Mapping[str, Any]) -> dict[str, Any]:
 
         from wlh.processor.parsers import load, normalize_parser_config
 
-        with yaml_path.open("r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
+        cache_key = (str(sources_dir.resolve()), source_id)
+        if cache_key not in _PROCESSOR_CACHE:
+            with yaml_path.open("r", encoding="utf-8") as f:
+                cfg = yaml.load(f, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
+            norm_cfg = normalize_parser_config(cfg)
+            parser = load(norm_cfg["adapter"])(norm_cfg)
+            _PROCESSOR_CACHE[cache_key] = (norm_cfg, parser)
+        norm_cfg, parser = _PROCESSOR_CACHE[cache_key]
+        # Per-sample discovery state must not leak through the cached parser.
+        if hasattr(parser, "detail_url"):
+            parser.detail_url = None
+        if hasattr(parser, "truncated"):
+            parser.truncated = None
 
-        norm_cfg = normalize_parser_config(cfg)
-        parser_cls = load(norm_cfg["adapter"])
-        parser = parser_cls(norm_cfg)
+        from wlh.core import digest
 
         payload_bytes = raw_payload.encode("utf-8")
 
@@ -115,7 +135,7 @@ def extract_with_processor(task: Mapping[str, Any]) -> dict[str, Any]:
             "request_url": request_url,
             "mime_type": mime_type,
             "charset": "utf-8",
-            "archive_ref": f"bench/{source_id}",
+            "archive_ref": digest(payload_bytes),
             "state": "archived",
         }
 
@@ -489,18 +509,96 @@ def _summarize_split_group(group: list[SampleEvaluationResult]) -> dict[str, Any
     }
 
 
+def _prepare_eval_work_item(
+    item: dict[str, Any],
+    *,
+    gt_map: dict[str, dict[str, Any]],
+    split_map: dict[str, str],
+) -> tuple[dict[str, Any], dict[str, Any] | None, str]:
+    sid = str(item.get("id") or item.get("sample_id") or "")
+    src_id = str(item.get("source_id") or "")
+    item_split = split_map.get(sid) or str(item.get("split") or "dev")
+    lookup_id = sid if sid in gt_map else f"content_{src_id}_{sid}"
+    matched_gt = gt_map.get(lookup_id)
+    return (item, matched_gt, item_split)
+
+
+def _evaluate_work_item(
+    work_item: tuple[dict[str, Any], dict[str, Any] | None, str],
+) -> tuple[SampleEvaluationResult, tuple[dict[str, Any], dict[str, Any]] | None]:
+    item, matched_gt, item_split = work_item
+    sid = str(item.get("id") or item.get("sample_id") or "")
+    src_id = str(item.get("source_id") or "")
+    jur = str(item.get("jurisdiction") or "")
+    t_type = str(item.get("task_type") or "")
+
+    # Determine prediction and ground truth pair
+    if matched_gt is not None:
+        prediction = item.get("current_extracted") or item
+        ground_truth: Any = matched_gt
+    elif "current_extracted" in item and "ground_truth" in item:
+        prediction = item["current_extracted"]
+        ground_truth = item["ground_truth"]
+    elif "ground_truth" in item:
+        prediction = item.get("current_extracted") or item
+        ground_truth = item["ground_truth"]
+    else:
+        prediction = item.get("current_extracted") or item
+        ground_truth = None
+
+    pred_map: Mapping[str, Any] = (
+        cast(Mapping[str, Any], prediction) if isinstance(prediction, Mapping) else {}
+    )
+    if "raw_payload" in pred_map and "markdown" not in pred_map and "target_urls" not in pred_map:
+        pred_map = extract_with_processor(pred_map)
+
+    gt_map_val: Mapping[str, Any] | None = (
+        cast(Mapping[str, Any], ground_truth) if isinstance(ground_truth, Mapping) else None
+    )
+
+    res = evaluate_sample(
+        prediction=pred_map,
+        ground_truth=gt_map_val,
+        sample_id=sid,
+        source_id=src_id,
+        jurisdiction=jur,
+        task_type=t_type,
+    )
+    res.split = item_split
+    pair: tuple[dict[str, Any], dict[str, Any]] | None = None
+    if res.task_type == "content_page" and gt_map_val is not None:
+        raw_p_recs = pred_map.get("records")
+        if isinstance(raw_p_recs, list) and raw_p_recs and isinstance(raw_p_recs[0], Mapping):
+            p_rec_dict = _extract_prediction_dict(cast(Mapping[str, Any], raw_p_recs[0]))
+        else:
+            p_rec_dict = _extract_prediction_dict(pred_map)
+        raw_g_recs = gt_map_val.get("records")
+        if isinstance(raw_g_recs, list) and raw_g_recs and isinstance(raw_g_recs[0], Mapping):
+            g_rec_dict = dict(cast(Mapping[str, Any], raw_g_recs[0]))
+        else:
+            g_rec_dict = dict(gt_map_val)
+        pair = (p_rec_dict, g_rec_dict)
+
+    return res, pair
+
+
 def evaluate_benchmark_dataset(
     dataset_path_or_records: Any,
     ground_truth_path_or_records: Any | None = None,
     *,
     split: str = "all",
+    workers: int = 1,
 ) -> BenchmarkSummaryReport:
     """Evaluate an entire dataset (or a stratified dev/test split) and compute aggregate metrics."""
     from wlh.benchmark.sampler import assign_stratified_splits
 
+    if workers < 1:
+        raise ValueError("workers must be >= 1")
     normalized_split = (split or "all").strip().lower()
     if normalized_split not in ("all", "dev", "test"):
-        raise ValueError(f"Unsupported benchmark split '{split}'; expected 'all', 'dev', or 'test'.")
+        raise ValueError(
+            f"Unsupported benchmark split '{split}'; expected 'all', 'dev', or 'test'."
+        )
 
     records = _load_records(dataset_path_or_records)
 
@@ -547,64 +645,21 @@ def evaluate_benchmark_dataset(
     sample_results: list[SampleEvaluationResult] = []
     evaluated_pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
-    for item in records:
-        sid = str(item.get("id") or item.get("sample_id") or "")
-        src_id = str(item.get("source_id") or "")
-        jur = str(item.get("jurisdiction") or "")
-        t_type = str(item.get("task_type") or "")
-        item_split = split_map.get(sid) or str(item.get("split") or "dev")
-
-        # Determine prediction and ground truth pair
-        lookup_id = sid if sid in gt_map else f"content_{src_id}_{sid}"
-        if lookup_id in gt_map:
-            prediction = item.get("current_extracted") or item
-            ground_truth = gt_map[lookup_id]
-        elif "current_extracted" in item and "ground_truth" in item:
-            prediction = item["current_extracted"]
-            ground_truth = item["ground_truth"]
-        elif "ground_truth" in item:
-            prediction = item.get("current_extracted") or item
-            ground_truth = item["ground_truth"]
-        else:
-            prediction = item.get("current_extracted") or item
-            ground_truth = None
-
-        pred_map: Mapping[str, Any] = (
-            cast(Mapping[str, Any], prediction) if isinstance(prediction, Mapping) else {}
-        )
-        if (
-            "raw_payload" in pred_map
-            and "markdown" not in pred_map
-            and "target_urls" not in pred_map
-        ):
-            pred_map = extract_with_processor(pred_map)
-
-        gt_map_val: Mapping[str, Any] | None = (
-            cast(Mapping[str, Any], ground_truth) if isinstance(ground_truth, Mapping) else None
-        )
-
-        res = evaluate_sample(
-            prediction=pred_map,
-            ground_truth=gt_map_val,
-            sample_id=sid,
-            source_id=src_id,
-            jurisdiction=jur,
-            task_type=t_type,
-        )
-        res.split = item_split
+    work_items = [
+        _prepare_eval_work_item(item, gt_map=gt_map, split_map=split_map) for item in records
+    ]
+    if workers > 1 and len(work_items) > 1:
+        # Processes isolate mutable parser state and parallelize CPU-bound extraction.
+        worker_count = min(workers, len(work_items))
+        chunksize = max(1, len(work_items) // (worker_count * 4))
+        with ProcessPoolExecutor(max_workers=worker_count) as pool:
+            evaluated = list(pool.map(_evaluate_work_item, work_items, chunksize=chunksize))
+    else:
+        evaluated = [_evaluate_work_item(w) for w in work_items]
+    for res, pair in evaluated:
         sample_results.append(res)
-        if res.task_type == "content_page" and gt_map_val is not None:
-            raw_p_recs = pred_map.get("records")
-            if isinstance(raw_p_recs, list) and raw_p_recs and isinstance(raw_p_recs[0], Mapping):
-                p_rec_dict = _extract_prediction_dict(cast(Mapping[str, Any], raw_p_recs[0]))
-            else:
-                p_rec_dict = _extract_prediction_dict(pred_map)
-            raw_g_recs = gt_map_val.get("records")
-            if isinstance(raw_g_recs, list) and raw_g_recs and isinstance(raw_g_recs[0], Mapping):
-                g_rec_dict = dict(cast(Mapping[str, Any], raw_g_recs[0]))
-            else:
-                g_rec_dict = dict(gt_map_val)
-            evaluated_pairs.append((p_rec_dict, g_rec_dict))
+        if pair is not None:
+            evaluated_pairs.append(pair)
 
     total_samples = len(sample_results)
     if total_samples == 0:
@@ -625,7 +680,9 @@ def evaluate_benchmark_dataset(
     split_f1_scores = [
         s.record_split.record_split_f1 for s in sample_results if s.record_split is not None
     ]
-    avg_record_split = round(sum(split_f1_scores) / len(split_f1_scores), 2) if split_f1_scores else None
+    avg_record_split = (
+        round(sum(split_f1_scores) / len(split_f1_scores), 2) if split_f1_scores else None
+    )
 
     valid_clean = [s.cleanliness for s in sample_results if s.cleanliness is not None]
     if valid_clean:
@@ -837,6 +894,8 @@ def evaluate_benchmark_dataset(
     )
 
 
-def evaluate_dataset(dataset: list[dict[str, Any]], *, split: str = "all") -> BenchmarkReport:
+def evaluate_dataset(
+    dataset: list[dict[str, Any]], *, split: str = "all", workers: int = 1
+) -> BenchmarkReport:
     """Evaluate dataset alias matching PROJECT.md interface contract."""
-    return evaluate_benchmark_dataset(dataset, split=split)
+    return evaluate_benchmark_dataset(dataset, split=split, workers=workers)

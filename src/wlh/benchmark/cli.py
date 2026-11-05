@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Any, cast
@@ -40,6 +41,10 @@ def configure_benchmark_parser(parser: argparse.ArgumentParser) -> None:
         help="Dataset split to evaluate: all (default), dev (60%%), or test (40%%)",
     )
 
+    parser.add_argument(
+        "--workers", type=int, default=1, help="Number of parallel evaluation workers (default: 1)."
+    )
+
     subparsers = parser.add_subparsers(dest="subcommand")
 
     # run subcommand
@@ -69,6 +74,10 @@ def configure_benchmark_parser(parser: argparse.ArgumentParser) -> None:
         choices=["all", "dev", "test"],
         default="all",
         help="Dataset split to evaluate: all (default), dev (60%%), or test (40%%)",
+    )
+
+    run_parser.add_argument(
+        "--workers", type=int, default=1, help="Number of parallel evaluation workers (default: 1)."
     )
 
     # sample subcommand
@@ -206,6 +215,9 @@ DEFAULT_GROUND_TRUTH_PATH = Path("data/benchmark/ground_truth_benchmark.jsonl")
 
 def run_benchmark_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     """Execute offline benchmark evaluation workflow from parsed arguments."""
+    workers = int(getattr(args, "workers", 1))
+    if workers < 1:
+        raise WlhError("invalid_workers")
     input_arg = getattr(args, "input", None)
     if input_arg is None:
         raise ValueError("Missing required argument --input for benchmark evaluation.")
@@ -230,6 +242,7 @@ def run_benchmark_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         input_path,
         ground_truth_path_or_records=gt_path,
         split=split_arg,
+        workers=workers,
     )
     json_path, md_path = write_benchmark_reports(report, out_dir)
 
@@ -436,7 +449,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except KeyboardInterrupt:
         return 130
-    except (ValueError, FileNotFoundError, WlhError) as exc:
+    except WlhError as exc:
+        print(json.dumps({"error": exc.code}))
+        return 2
+    except (ValueError, FileNotFoundError) as exc:
         print(f"Error during benchmark execution: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:

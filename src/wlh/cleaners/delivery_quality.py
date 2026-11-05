@@ -5,7 +5,7 @@ snapshot verification to prevent silent data corruption (boilerplate titles,
 duplicate titles across distinct resources, polluted document numbers,
 signature-only OCR stubs, duplicated DOM body paragraphs, and projection drift).
 Language- and jurisdiction-specific rules are loaded declaratively from
-`delivery_quality_rules.yaml`.
+`delivery_quality_rules.py`.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from typing import Any, cast
 
 import yaml
 
+from wlh.cleaners.delivery_quality_rules import DELIVERY_QUALITY_RULES
 from wlh.config import DOCUMENT_TYPES
 from wlh.core import WlhError
 from wlh.storage.cas import Objects
@@ -27,7 +28,6 @@ from wlh.storage.document_store import load_source_delivery_rows
 from wlh.storage.snapshots import COLUMNS, project_canonical
 
 DELIVERY_QUALITY_CONTRACT = "wlh.delivery_quality.v1"
-RULES_PATH = Path(__file__).with_name("delivery_quality_rules.yaml")
 _REPO_SOURCES_DIR = Path(__file__).resolve().parents[3] / "sources"
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -55,12 +55,6 @@ def _normalize_title_token(value: str) -> str:
     norm = unicodedata.normalize("NFKC", value).casefold()
     norm = re.sub(r"^[\s.,;:!?\"'()\[\]{}<>\-_/|\\]+|[\s.,;:!?\"'()\[\]{}<>\-_/|\\]+$", "", norm)
     return re.sub(r"\s+", " ", norm).strip()
-
-
-@lru_cache(maxsize=1)
-def _raw_rule_registry() -> dict[str, Any]:
-    raw: Any = yaml.safe_load(RULES_PATH.read_text(encoding="utf-8"))
-    return cast(dict[str, Any], raw) if isinstance(raw, dict) else {}
 
 
 @lru_cache(maxsize=256)
@@ -160,7 +154,7 @@ def _build_rule_pack_cached(
     resolved_jur: str | None,
     extra_invalid: tuple[str, ...],
 ) -> DeliveryQualityRulePack:
-    registry = _raw_rule_registry()
+    registry = DELIVERY_QUALITY_RULES
     common_sec = cast(Mapping[str, Any], registry.get("common") or {})
     languages_sec = cast(Mapping[str, Any], registry.get("languages") or {})
     jurisdictions_sec = cast(Mapping[str, Any], registry.get("jurisdictions") or {})

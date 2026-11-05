@@ -220,9 +220,11 @@ class HtmlParser(WebDocumentBuilder, Base):
         kind = detect_real_format(data, "html" if acquisition["mime_type"] == "text/html" else "")
         url: str = str(acquisition["actual_url"] or acquisition["request_url"] or "")
         docs = _doc_rules(self.config)
+        parsed_main = parse_html(data, acquisition.get("charset")) if kind == "html" else None
         has_lv_rules = bool(docs.get("label_value_rules"))
         if kind == "html" and has_lv_rules and not self.details:
-            tree_check, _, _ = parse_html(data, acquisition.get("charset"))
+            assert parsed_main is not None
+            tree_check, _, _ = parsed_main
             if tree_check.xpath(
                 '//*[contains(@class,"doc-number")]|//td[contains(.,"Số ký hiệu")]'
                 '|//*[contains(@class,"name") and contains(.,"Số, ký hiệu")]'
@@ -237,7 +239,8 @@ class HtmlParser(WebDocumentBuilder, Base):
         max_depth = _max_depth(self.config)
         entry_urls = _entry_urls(self.config)
         if kind == "html":
-            tree, _, _ = parse_html(data, acquisition["charset"])
+            assert parsed_main is not None
+            tree, _, _ = parsed_main
             qualification = docs.get("detail_xpath")
             if detail and qualification:
                 detail = bool(tree.xpath(qualification))
@@ -407,7 +410,7 @@ class HtmlParser(WebDocumentBuilder, Base):
                 isinstance(self.config.get("cleaners"), Mapping)
                 and self.config["cleaners"].get("require_complete_text")
             ):
-                img_tree, _, _ = parse_html(data, acquisition["charset"])
+                img_tree = tree
                 content_xpath = docs.get("content_xpath")
                 region_nodes = (
                     img_tree.xpath(content_xpath)

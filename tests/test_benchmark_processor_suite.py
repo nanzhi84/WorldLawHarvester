@@ -55,7 +55,9 @@ def run_wlh_cli(
     if env:
         merged_env.update(env)
     cmd = [sys.executable, "-m", "wlh", *args]
-    return subprocess.run(cmd, capture_output=True, text=True, check=False, env=merged_env)
+    return subprocess.run(
+        cmd, capture_output=True, text=True, check=False, env=merged_env, timeout=60
+    )
 
 
 class TestBenchmarkPillars:
@@ -460,7 +462,7 @@ class TestBenchmarkCliSubcommands:
             "--output-dir",
             str(out_dir),
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=60)
         assert proc.returncode == 0
         assert "Smoke Test: PASSED" in proc.stdout
         assert "Dual-blind batch annotation completed successfully" in proc.stdout
@@ -863,9 +865,10 @@ class TestBenchmarkStratifiedSplits:
             split="test",
         )
         assert rep_ext_test.total_samples == 1
-        assert rep_ext_test.sample_results[0].sample_id in {"content_dd-501_01", "content_dd-501_02"}
+        assert rep_ext_test.sample_results[0].sample_id in {
+            "content_dd-501_01",
+            "content_dd-501_02",
+        }
         assert rep_ext_test.sample_results[0].split == "test"
         assert rep_ext_test.split_scores["test"]["sample_count"] == 1
         assert "dev" not in rep_ext_test.split_scores
-
-

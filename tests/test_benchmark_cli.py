@@ -327,6 +327,29 @@ class TestBenchmarkCliOfflineIsolation:
         )
         assert (out_dir / "benchmark_report.json").is_file()
 
+    def test_run_subcommand_with_workers_option_generates_identical_report_and_exits_zero(
+        self, tmp_path: Path
+    ) -> None:
+        """Running benchmark with --workers 2 generates a valid report and exits zero."""
+        gt_file = _write_benchmark_ground_truth_fixture(tmp_path / "fixture")
+        out_dir = tmp_path / "reports_workers"
+        proc = run_wlh_cli(
+            [
+                "benchmark",
+                "run",
+                "--input",
+                str(gt_file),
+                "--ground-truth",
+                str(gt_file),
+                "--output-dir",
+                str(out_dir),
+                "--workers",
+                "2",
+            ]
+        )
+        assert proc.returncode == 0
+        assert (out_dir / "benchmark_report.json").is_file()
+
 
 # ==============================================================================
 # Domain 4: Edge Cases, Error Handling & Exit Codes

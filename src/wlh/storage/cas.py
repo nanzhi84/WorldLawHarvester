@@ -126,6 +126,8 @@ class Objects:
 
     def put(self, body: bytes) -> str:
         key = digest(body)
+        if (self.bucket, key) in _VERIFIED_CACHE:
+            return key
         try:
             self.client.put_object(
                 Bucket=self.bucket,

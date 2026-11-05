@@ -29,6 +29,7 @@ def _run_subprocess(args: list[str], cwd: Path = ROOT_DIR) -> subprocess.Complet
         capture_output=True,
         text=True,
         check=False,
+        timeout=60,
     )
 
 

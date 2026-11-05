@@ -618,9 +618,7 @@ def assign_stratified_splits(
         src_id = str(rec.get("source_id") or "")
         by_source.setdefault(src_id, []).append(rec)
 
-    single_content_sources: list[
-        tuple[str, list[Mapping[str, Any]], list[Mapping[str, Any]]]
-    ] = []
+    single_content_sources: list[tuple[str, list[Mapping[str, Any]], list[Mapping[str, Any]]]] = []
     multi_sources_with_list: list[tuple[str, list[Mapping[str, Any]]]] = []
 
     for src_id in sorted(by_source.keys()):
@@ -635,8 +633,7 @@ def assign_stratified_splits(
         if n_c >= 2:
             k_dev = max(1, min(n_c - 1, round(n_c * dev_ratio)))
             dev_indices = {
-                round(i * (n_c - 1) / (k_dev - 1)) if k_dev > 1 else 0
-                for i in range(k_dev)
+                round(i * (n_c - 1) / (k_dev - 1)) if k_dev > 1 else 0 for i in range(k_dev)
             }
             while len(dev_indices) < k_dev:
                 for idx in range(n_c):
@@ -658,9 +655,7 @@ def assign_stratified_splits(
         k_l_dev = round(n_l * dev_ratio)
         for idx, item in enumerate(l_flat):
             rid = str(item.get("id") or item.get("sample_id") or "")
-            is_dev = math.floor((idx + 1) * k_l_dev / n_l) > math.floor(
-                idx * k_l_dev / n_l
-            )
+            is_dev = math.floor((idx + 1) * k_l_dev / n_l) > math.floor(idx * k_l_dev / n_l)
             splits[rid] = "dev" if is_dev else "test"
 
     for idx, (_src_id, c_items, l_items) in enumerate(single_content_sources):

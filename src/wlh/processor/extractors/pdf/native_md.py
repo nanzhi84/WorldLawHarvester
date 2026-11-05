@@ -48,9 +48,11 @@ class Line:
         return self.box[3] - self.box[1]
 
 
-def _vertical_rules(page: Any) -> list[tuple[float, float, float]]:
+def _vertical_rules(
+    page: Any, *, drawings: list[Any] | None = None
+) -> list[tuple[float, float, float]]:
     rules: list[tuple[float, float, float]] = []
-    for drawing in page.get_drawings():
+    for drawing in page.get_drawings() if drawings is None else drawings:
         for item in drawing.get("items", []):
             kind = item[0]
             if kind == "re":
@@ -75,8 +77,10 @@ def _has_vertical_rule_between(
     return any(x0 - 1 <= rx <= x1 + 1 and ry0 - 2 <= mid <= ry1 + 2 for rx, ry0, ry1 in rules)
 
 
-def native_lines(page: Any, tables: list[Any] | None = None) -> list[Line]:
-    rules = _vertical_rules(page)
+def native_lines(
+    page: Any, tables: list[Any] | None = None, *, drawings: list[Any] | None = None
+) -> list[Line]:
+    rules = _vertical_rules(page, drawings=drawings)
     for tbl in tables or []:
         for row in tbl.rows:
             for cell_box in row.cells:
@@ -542,11 +546,13 @@ def _leader_table(lines: list[Line]) -> tuple[set[int], str] | None:
     return _table(rows)
 
 
-def _detect_composite_boxes(page: Any) -> list[tuple[float, float, float, float]]:
+def _detect_composite_boxes(
+    page: Any, *, drawings: list[Any] | None = None
+) -> list[tuple[float, float, float, float]]:
     """Detect rectangular frames drawn with 4 thin filled border rectangles ('f')."""
     horiz_edges: list[tuple[float, float, float, float]] = []
     vert_edges: list[tuple[float, float, float, float]] = []
-    for d in page.get_drawings():
+    for d in page.get_drawings() if drawings is None else drawings:
         rect = d.get("rect")
         if not rect:
             continue
@@ -588,7 +594,11 @@ def _detect_composite_boxes(page: Any) -> list[tuple[float, float, float, float]
 
 
 def _check_box_order(
-    page: Any, lines: list[Line], strict_tables: list[Any] | None = None
+    page: Any,
+    lines: list[Line],
+    strict_tables: list[Any] | None = None,
+    *,
+    drawings: list[Any] | None = None,
 ) -> list[Line]:
     prose = [
         line
@@ -600,14 +610,14 @@ def _check_box_order(
     height = median(line.height for line in prose)
     current = list(lines)
     candidate_boxes: list[tuple[float, float, float, float]] = []
-    for drawing in page.get_drawings():
+    for drawing in page.get_drawings() if drawings is None else drawings:
         if "s" not in drawing["type"]:
             continue
         for item in drawing["items"]:
             if item[0] == "re":
                 r = tuple(item[1])
                 candidate_boxes.append((float(r[0]), float(r[1]), float(r[2]), float(r[3])))
-    composite_boxes = _detect_composite_boxes(page)
+    composite_boxes = _detect_composite_boxes(page, drawings=drawings)
     candidate_boxes.extend(composite_boxes)
     for box in candidate_boxes:
         if box[2] - box[0] < page.rect.width * 0.6 or box[3] - box[1] < height * 3:
@@ -765,8 +775,10 @@ def _join_vertical_columns(lines: list[Line], *, min_ratio: float = 0.25) -> lis
     return [Line(idx, ln.box, ln.text) for idx, ln in enumerate(combined)]
 
 
-def page_markdown(page: Any, text: str) -> str:
-    raw_page_text = _CTRL_RE.sub(" ", str(page.get_text("text")))
+def page_markdown(page: Any, text: str | None = None) -> str:
+    text = text if text is not None else str(page.get_text("text"))
+    raw_page_text = _CTRL_RE.sub(" ", text)
+    drawings = page.get_drawings()
     clean_text = decode_pua_text(_CTRL_RE.sub(" ", text))
     is_kanpo_page = "\ue05a" not in raw_page_text and (
         decode_pua_text(raw_page_text) != raw_page_text
@@ -778,13 +790,18 @@ def page_markdown(page: Any, text: str) -> str:
     )
     strict_tables = (
         list(find_tables(page, "lines_strict"))
-        if (not is_kanpo_page and len(page.get_drawings()) >= 4)
+        if (not is_kanpo_page and len(drawings) >= 4)
         else []
     )
     lines = (
-        _check_box_order(page, native_lines(page, strict_tables), strict_tables)
+        _check_box_order(
+            page,
+            native_lines(page, strict_tables, drawings=drawings),
+            strict_tables,
+            drawings=drawings,
+        )
         if not is_kanpo_page
-        else native_lines(page, [])
+        else native_lines(page, [], drawings=drawings)
     )
     if sum(bool(_VERT_CJK_CHAR.fullmatch(ln.text.strip())) for ln in lines) >= 80:
         strict_tables = []

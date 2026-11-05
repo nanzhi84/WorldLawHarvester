@@ -62,7 +62,10 @@ def safe_url(url: str) -> str:
         # Redact only sensitive values for diagnostics; public_url rejects these URLs.
         query = "&".join(
             segment.partition("=")[0] + "=REDACTED"
-            if SENSITIVE.search(unquote_plus(segment.partition("=")[0]))
+            if (
+                SENSITIVE.search(k := unquote_plus(segment.partition("=")[0]))
+                and not k.lower().startswith(("x-amz-", "x-goog-", "x-oss-"))
+            )
             else segment
             for segment in parts.query.split("&")
         )
@@ -77,7 +80,8 @@ def public_url(url: str) -> str:
         parts.username
         or parts.password
         or any(
-            SENSITIVE.search(unquote_plus(segment.partition("=")[0]))
+            SENSITIVE.search(k := unquote_plus(segment.partition("=")[0]))
+            and not k.lower().startswith(("x-amz-", "x-goog-", "x-oss-"))
             for segment in parts.query.split("&")
         )
     ):
@@ -153,7 +157,12 @@ def paths_for(config: Mapping[str, Any], host: str | None, path: str) -> bool:
     )
     prefixes: list[str] = [str(p) for p in raw_prefixes]
     norm = posixpath.normpath(unquote(path))
-    return any(norm == p.rstrip("/") or norm.startswith(p.rstrip("/") + "/") for p in prefixes)
+    return any(
+        norm == p.rstrip("/")
+        or norm.startswith(p.rstrip("/") + "/")
+        or norm.startswith(p.rstrip("/") + ".")
+        for p in prefixes
+    )
 
 
 def guard(config: Mapping[str, Any], url: str, *, policy: bool = False) -> str:

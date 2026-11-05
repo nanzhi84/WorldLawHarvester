@@ -710,10 +710,9 @@ class XmlParser(RecordAdapter):
             )
         if cache_key[0] is not None:
             cache_dict: dict[Any, Any] = getattr(self, "_records_cache", {})
-            if sum(len(str(record.get("text") or "")) for record in result) <= 1000000:
-                while len(cache_dict) >= 16:
-                    del cache_dict[next(iter(cache_dict))]
-                cache_dict[cache_key] = (result, self.truncated)
+            while len(cache_dict) >= 8:
+                del cache_dict[next(iter(cache_dict))]
+            cache_dict[cache_key] = (result, self.truncated)
             setattr(self, "_records_cache", cache_dict)
         return result
 

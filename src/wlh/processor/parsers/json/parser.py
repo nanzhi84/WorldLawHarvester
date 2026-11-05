@@ -210,6 +210,9 @@ class JsonParser(RecordAdapter):
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
+        self._records_cache: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
+        self._records_truncated: dict[tuple[Any, Any], str | None] = {}
+        self._json_cache: dict[Any, Any] = {}
         self.options: dict[str, Any] = _parser_options(config)
         entries = _entry_urls(config)
         self.base: str = entries[0].rstrip("/") if entries else ""
@@ -360,9 +363,17 @@ class JsonParser(RecordAdapter):
                 )
         return {"requests": [], "targets": targets, "state": state}
 
-    def load_json(self, ctx: Any, acquisition: Mapping[str, Any]) -> Any:
+    def load_json(self, ctx: Any, acquisition: Mapping[str, Any] | None = None) -> Any:
+        data = ctx.read(acquisition) if acquisition is not None else ctx
+        key = digest(data)
+        if key in self._json_cache:
+            return self._json_cache[key]
         try:
-            return json.loads(ctx.read(acquisition))
+            value = json.loads(data)
+            if len(self._json_cache) >= 8:
+                del self._json_cache[next(iter(self._json_cache))]
+            self._json_cache[key] = value
+            return value
         except ValueError:
             raise WlhError("api_response_not_json") from None
 
@@ -782,6 +793,24 @@ class JsonParser(RecordAdapter):
         ]
 
     def records(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
+        cache_key = (
+            acquisition.get("archive_ref"),
+            acquisition.get("actual_url") or acquisition.get("request_url"),
+        )
+        if cache_key[0] is not None and cache_key in self._records_cache:
+            self.truncated = self._records_truncated[cache_key] or self.truncated
+            return self._records_cache[cache_key]
+        result = self._read_records(data, acquisition)
+        if cache_key[0] is not None:
+            if len(self._records_cache) >= 8:
+                oldest = next(iter(self._records_cache))
+                del self._records_cache[oldest]
+                del self._records_truncated[oldest]
+            self._records_cache[cache_key] = result
+            self._records_truncated[cache_key] = self.truncated
+        return result
+
+    def _read_records(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
         official = japan_records(data, acquisition, self.config)
         if official is not None:
             return official

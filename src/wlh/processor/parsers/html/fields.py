@@ -250,10 +250,13 @@ def extract_detail_fields(
     label_value_rules: Sequence[Mapping[str, Any]] = (),
     infer_effective: bool = True,
     enrich_title: bool = True,
+    parsed_html: tuple[Any, str, str] | None = None,
 ) -> tuple[dict[str, Any], str | None, str | None]:
     values: dict[str, Any] = {}
     if kind == "html":
-        tree, _, encoding = parse_html(data, acquisition.get("charset"))
+        tree, _, encoding = (
+            parsed_html if parsed_html is not None else parse_html(data, acquisition.get("charset"))
+        )
         wlh_trunc = tree.xpath("//*[@data-wlh-truncated]/@data-wlh-truncated")
         if wlh_trunc:
             raise WlhError(str(wlh_trunc[0]))

@@ -263,17 +263,12 @@ class TestArchitectureContract:
                         )
 
         dq_path = SRC_WLH / "cleaners" / "delivery_quality.py"
-        dq_rules_yaml = SRC_WLH / "cleaners" / "delivery_quality_rules.yaml"
-        assert dq_rules_yaml.is_file(), (
-            "Declarative rule pack src/wlh/cleaners/delivery_quality_rules.yaml must exist"
-        )
         from typing import cast
 
-        import yaml
-
+        from wlh.cleaners.delivery_quality_rules import DELIVERY_QUALITY_RULES
         from wlh.config import load_file
 
-        raw_rules: Any = yaml.safe_load(dq_rules_yaml.read_text(encoding="utf-8"))
+        raw_rules: Any = DELIVERY_QUALITY_RULES
         assert isinstance(raw_rules, Mapping)
         rules_map = cast(Mapping[str, Any], raw_rules)
         defined_langs: set[str] = set(
@@ -287,12 +282,12 @@ class TestArchitectureContract:
             if src_cfg.storage.metadata.language:
                 base_l = src_cfg.storage.metadata.language.split("-")[0].lower()
                 assert base_l in defined_langs, (
-                    f"{src_yaml.name} language {base_l!r} missing from delivery_quality_rules.yaml"
+                    f"{src_yaml.name} language {base_l!r} missing from DELIVERY_QUALITY_RULES"
                 )
             if src_cfg.storage.metadata.jurisdiction:
                 jur_u = src_cfg.storage.metadata.jurisdiction.upper()
                 assert jur_u in defined_jurs, (
-                    f"{src_yaml.name} jurisdiction {jur_u!r} missing from delivery_quality_rules.yaml"
+                    f"{src_yaml.name} jurisdiction {jur_u!r} missing from DELIVERY_QUALITY_RULES"
                 )
 
         dq_tree = ast.parse(dq_path.read_text(encoding="utf-8"), filename=str(dq_path))
@@ -319,14 +314,14 @@ class TestArchitectureContract:
                     if isinstance(target, ast.Name):
                         assert target.id not in forbidden_dq_globals, (
                             f"Language/agency-specific rule constant '{target.id}' must not be "
-                            f"hardcoded in {dq_path}:{node.lineno}; move to delivery_quality_rules.yaml"
+                            f"hardcoded in {dq_path}:{node.lineno}; move to DELIVERY_QUALITY_RULES"
                         )
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 lit_lower = node.value.lower()
                 for bad_lit in forbidden_dq_literals:
                     assert bad_lit not in lit_lower, (
                         f"Language/jurisdiction literal {bad_lit!r} hardcoded in "
-                        f"{dq_path}:{node.lineno}; must be loaded from delivery_quality_rules.yaml"
+                        f"{dq_path}:{node.lineno}; must be loaded from DELIVERY_QUALITY_RULES"
                     )
 
         forbidden_extractor_html_tokens = (

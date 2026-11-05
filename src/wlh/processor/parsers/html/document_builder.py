@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 from urllib.parse import unquote
 
 import lxml.etree as _etree  # type: ignore[import-untyped]
+import lxml.html as _html  # type: ignore[import-untyped]
 
 from wlh.cleaners.text_cleaner import apply_text_cleaners, blocked, clean_title
 from wlh.core import WlhError, canonical, digest, public_url
@@ -227,10 +229,16 @@ class WebDocumentBuilder:
         kind: str,
         acquisition: Mapping[str, Any],
         image_loader: Callable[[str], bytes | None] | None = None,
+        *,
+        parsed_html: tuple[Any, str, str] | None = None,
     ) -> tuple[str, dict[str, Any] | None, list[str]]:
         strip_pats = _strip_text_regexes(self.config)
         if kind == "html":
-            tree, _, _ = parse_html(data, acquisition["charset"])
+            tree, _, _ = (
+                parsed_html
+                if parsed_html is not None
+                else parse_html(data, acquisition.get("charset"))
+            )
             return (
                 self.html_markdown(tree, acquisition, image_loader=image_loader),
                 None,
@@ -274,6 +282,8 @@ class WebDocumentBuilder:
         tree: Any,
         acquisition: Mapping[str, Any],
         image_loader: Callable[[str], bytes | None] | None = None,
+        *,
+        title: str | None = None,
     ) -> str:
         wlh_trunc = tree.xpath("//*[@data-wlh-truncated]/@data-wlh-truncated")
         if wlh_trunc:
@@ -311,6 +321,7 @@ class WebDocumentBuilder:
         req_complete = bool(
             docs.get("require_complete_text") or cleaners_map.get("require_complete_text")
         )
+        nodes = [copy.deepcopy(node) for node in nodes]
         for node in nodes:
             clean_site_dom(
                 node,
@@ -326,14 +337,22 @@ class WebDocumentBuilder:
                     ocr_languages=ocr_langs,
                     quirks=quirks,
                 )
+        # Blocker rules may match markup; this serialization is never parsed again.
         fragment = "".join(etree.tostring(n, encoding="unicode", method="html") for n in nodes)
         if blocked(fragment.encode("utf-8"), self.config):
             raise WlhError("target_content_blocked")
+        # Preserve the existing wrapper and multi-region ordering without parsing again.
+        root = cast(Any, _html).Element("html")
+        body = root.makeelement("body")
+        root.append(body)
+        body.extend(nodes)
         md = html_to_markdown(
-            "<html><body>" + fragment + "</body></html>",
+            root,
             base,
             content_xpath="/html/body" if rule else None,
             quirks=quirks,
+            already_cleaned=True,
+            title=title,
         )
         strip_pats = _strip_text_regexes(self.config)
         return apply_text_cleaners(md, strip_pats) if strip_pats else md
@@ -345,13 +364,19 @@ class WebDocumentBuilder:
         acquisition: Mapping[str, Any],
         url: str,
         text: str | None = None,
+        *,
+        parsed_html: tuple[Any, str, str] | None = None,
     ) -> tuple[dict[str, Any], str | None, str | None]:
         """Declared field rules on the archived detail input."""
         title_pats = _title_strip_regexes(self.config)
         if _reconcile_range_enabled(self.config):
             if kind != "html":
                 raise WlhError("court_detail_not_html")
-            tree, _, encoding = parse_html(data, acquisition.get("charset"))
+            tree, _, encoding = (
+                parsed_html
+                if parsed_html is not None
+                else parse_html(data, acquisition.get("charset"))
+            )
             fields = _dl_fields(tree)
             number = fields.get("事件番号")
             if not number:
@@ -412,6 +437,7 @@ class WebDocumentBuilder:
             label_value_rules=lv_seq,
             infer_effective=infer_eff,
             enrich_title=enrich_t,
+            parsed_html=parsed_html,
         )
         if title and title_pats:
             title = clean_title(title, title_pats)
@@ -442,7 +468,10 @@ class WebDocumentBuilder:
         kind = detect_real_format(data, "html" if acquisition["mime_type"] == "text/html" else "")
         meta = _metadata_cfg(self.config)
         url: str = str(acquisition["actual_url"] or acquisition["request_url"] or "")
-        values, title, encoding = self.detail_values(data, kind, acquisition, url)
+        parsed_main = parse_html(data, acquisition.get("charset")) if kind == "html" else None
+        values, title, encoding = self.detail_values(
+            data, kind, acquisition, url, parsed_html=parsed_main
+        )
         if (
             kind in TEXT_KINDS
             and not (kind == "html" and docs.get("content_xpath"))
@@ -524,7 +553,12 @@ class WebDocumentBuilder:
             source_url: str | None = None,
         ) -> None:
             markdown, result, used = self.deliverable_text(
-                ctx, data, kind, item_acquisition, image_loader=load_image
+                ctx,
+                data,
+                kind,
+                item_acquisition,
+                image_loader=load_image,
+                parsed_html=parsed_main if input_index == 0 else None,
             )
             parsers.update(used)
             report = (result or {}).get("quality") or ctx.text_quality(markdown)
@@ -637,7 +671,12 @@ class WebDocumentBuilder:
             add(data, kind, acquisition, 0, "primary", None)
             if kind in BINARY_KINDS and deliverables:
                 values, title, encoding = self.detail_values(
-                    data, kind, acquisition, url, deliverables[0]["markdown"]
+                    data,
+                    kind,
+                    acquisition,
+                    url,
+                    deliverables[0]["markdown"],
+                    parsed_html=parsed_main,
                 )
         else:
             candidate_inputs[0]["role"] = "context"
@@ -676,7 +715,7 @@ class WebDocumentBuilder:
             raise WlhError("document_deliverables_required")
         if not use_body and deliverables and not _reconcile_range_enabled(self.config):
             att_vals, _, _ = self.detail_values(
-                data, kind, acquisition, url, deliverables[0]["markdown"]
+                data, kind, acquisition, url, deliverables[0]["markdown"], parsed_html=parsed_main
             )
             for k, v in att_vals.items():
                 if not values.get(k) and v:

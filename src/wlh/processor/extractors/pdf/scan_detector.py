@@ -11,6 +11,7 @@ import re
 import time
 import unicodedata
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, cast
 
@@ -129,12 +130,12 @@ def _xref_has_ink(document: Any, xref: int) -> bool:
         return True
 
 
-def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
+def analyze(path: str | Path | Any) -> tuple[dict[str, Any], list[str]]:
     raw_pages: list[dict[str, Any]] = []
     texts: list[str] = []
     try:
-        with fitz.open(path) as document:
-            if document.needs_pass or not len(document):
+        with fitz.open(path) if isinstance(path, (str, Path)) else nullcontext(path) as document:
+            if getattr(document, "is_closed", False) or document.needs_pass or not len(document):
                 raise WlhError("pdf_invalid_or_encrypted")
             for number in range(1, len(document) + 1):
                 page = document[number - 1]
@@ -148,21 +149,53 @@ def analyze(path: str | Path) -> tuple[dict[str, Any], list[str]]:
                         and ("号)" in raw_text or "号）" in raw_text)
                     )
                 )
-                pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5), colorspace=fitz.csGRAY)
-                text, unreadable_body = _inspect_native_encoding(page, decoded_raw, pix)
-                native = len(text.strip())
-                samples = bytes(pix.samples)
-                ink = samples.translate(_INK_LUT).count(1) / len(samples)
                 rect = page.rect
                 page_area = max(rect.width * rect.height, 1.0)
+                image_rects = [
+                    (int(img[0]), page.get_image_rects(int(img[0])))
+                    for img in page.get_images(full=True)
+                ]
+                coverage = [
+                    r.width * r.height / page_area
+                    for _, rects in image_rects
+                    for r in rects
+                    if r.width > 1.5 and r.height > 1.5
+                ]
+                non_space = [c for c in decoded_raw if not c.isspace()]
+                has_cc = any(unicodedata.category(c) == "Cc" for c in non_space)
+                heavy_pua = sum(unicodedata.category(c) == "Co" for c in non_space) > 0.05 * len(
+                    non_space
+                )
+                needs_raster = (
+                    len(non_space) < NORMAL_PAGE_TEXT_CHARS
+                    or has_cc
+                    or heavy_pua
+                    or any(c >= 0.95 for c in coverage)
+                    or sum(c >= 0.1 for c in coverage) >= 2
+                    or sum(coverage) >= 0.25
+                )
+                pix = (
+                    page.get_pixmap(
+                        matrix=fitz.Matrix(ANALYSIS_SCALE, ANALYSIS_SCALE), colorspace=fitz.csGRAY
+                    )
+                    if needs_raster
+                    else None
+                )
+                text, unreadable_body = _inspect_native_encoding(page, decoded_raw, pix)
+                native = len(text.strip())
+                samples = bytes(pix.samples) if pix is not None else b""
+                ink = samples.translate(_INK_LUT).count(1) / len(samples) if samples else 0.0
                 placed_rects: list[Any] = []
                 overlay_xrefs: list[int] = []
-                for img in page.get_images(full=True):
-                    xref = int(img[0])
+                for xref, rects in image_rects:
                     if not _xref_has_ink(document, xref):
                         continue
-                    for r in page.get_image_rects(xref):
-                        if r.width <= 1.5 or r.height <= 1.5 or not _rect_has_ink(pix, r, rect):
+                    for r in rects:
+                        if (
+                            r.width <= 1.5
+                            or r.height <= 1.5
+                            or (pix is not None and not _rect_has_ink(pix, r, rect))
+                        ):
                             continue
                         cov = (r.width * r.height) / page_area
                         if (
@@ -267,35 +300,46 @@ def extract_pdf(
     *,
     invalid_body_patterns: Sequence[str] = (),
 ) -> tuple[str, dict[str, Any], dict[str, Any], list[str]]:
-    analysis, native = analyze(path)
-    scans = analysis["suspected_scan_pages"]
-    if any(page["embedded_images"] and not page["suspected_scan"] for page in analysis["pages"]):
-        raise WlhError("pdf_images_unverified")
-    if any(
-        unicodedata.category(char) == "Cc" and not char.isspace()
-        for text in native
-        for char in text
-    ):
-        raise WlhError("pdf_native_text_unreadable")
-    texts: dict[int, str] = {}
-    recovered = False
-    for i, text in enumerate(native, 1):
-        texts[i], changed = normalize_detected_tcvn3(text) if profile == "vi" else (text, False)
-        recovered |= changed
-    info: dict[str, Any] = {"kind": "pdf", "analysis": analysis, "method": "native", "ocr": None}
-    parsers: list[str] = ["pdf", "quality"]
-    service_blocks: list[dict[str, Any]] = []
-    if recovered:
-        parsers.append("tcvn3")
-    scan_set = set(scans)
-    native_rendered: dict[int, str] = {}
-    overlay_by_page = {
-        int(p["page"]): list(p.get("overlay_xrefs") or [])
-        for p in analysis["pages"]
-        if p.get("overlay_xrefs")
-    }
-    if len(scan_set) < len(native):
-        with fitz.open(path) as document:
+    try:
+        document = fitz.open(path)
+    except Exception:
+        raise WlhError("pdf_invalid_or_encrypted") from None
+    with document:
+        analysis, native = analyze(document)
+        scans = analysis["suspected_scan_pages"]
+        if any(
+            page["embedded_images"] and not page["suspected_scan"] for page in analysis["pages"]
+        ):
+            raise WlhError("pdf_images_unverified")
+        if any(
+            unicodedata.category(char) == "Cc" and not char.isspace()
+            for text in native
+            for char in text
+        ):
+            raise WlhError("pdf_native_text_unreadable")
+        texts: dict[int, str] = {}
+        recovered = False
+        for i, text in enumerate(native, 1):
+            texts[i], changed = normalize_detected_tcvn3(text) if profile == "vi" else (text, False)
+            recovered |= changed
+        info: dict[str, Any] = {
+            "kind": "pdf",
+            "analysis": analysis,
+            "method": "native",
+            "ocr": None,
+        }
+        parsers: list[str] = ["pdf", "quality"]
+        service_blocks: list[dict[str, Any]] = []
+        if recovered:
+            parsers.append("tcvn3")
+        scan_set = set(scans)
+        native_rendered: dict[int, str] = {}
+        overlay_by_page = {
+            int(p["page"]): list(p.get("overlay_xrefs") or [])
+            for p in analysis["pages"]
+            if p.get("overlay_xrefs")
+        }
+        if len(scan_set) < len(native):
             ocr_langs = str(ocr.get("languages") or "jpn_vert+jpn")
             active_overlays = set(sorted(overlay_by_page)[:20])
             ov_pngs_by_page: dict[int, list[bytes]] = {}

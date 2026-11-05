@@ -945,3 +945,52 @@ class TestBenchmarkCommandLineInterface:
         ]
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
         assert proc.returncode != 0
+
+
+class TestBenchmarkParallelEvaluationAndCaching:
+    """Black-box verification of parallel worker evaluation determinism and processor cache reset."""
+
+    def test_parallel_worker_evaluation_matches_single_worker_results_and_cache_reset_succeeds(
+        self, tmp_path: Path
+    ) -> None:
+        """Evaluating with multiple workers produces identical ordered sample results and summary scores as a single worker."""
+        from typing import cast
+
+        from wlh.benchmark import evaluator
+
+        gt_path = _write_benchmark_ground_truth_fixture(tmp_path / "fixture")
+        assert hasattr(evaluator, "clear_processor_cache")
+        clear_fn: Any = getattr(evaluator, "clear_processor_cache")
+        clear_fn()
+
+        eval_fn: Any = evaluate_benchmark_dataset
+        out_single: Any = eval_fn(gt_path, gt_path, workers=1)
+        out_parallel: Any = eval_fn(gt_path, gt_path, workers=4)
+
+        if isinstance(out_single, tuple):
+            pair_single = cast(
+                tuple[list[SampleEvaluationResult], BenchmarkSummaryReport], out_single
+            )
+            res_single = pair_single[0]
+            rep_single = pair_single[1]
+        else:
+            rep_single = cast(BenchmarkSummaryReport, out_single)
+            res_single = rep_single.sample_results
+
+        if isinstance(out_parallel, tuple):
+            pair_parallel = cast(
+                tuple[list[SampleEvaluationResult], BenchmarkSummaryReport], out_parallel
+            )
+            res_parallel = pair_parallel[0]
+            rep_parallel = pair_parallel[1]
+        else:
+            rep_parallel = cast(BenchmarkSummaryReport, out_parallel)
+            res_parallel = rep_parallel.sample_results
+
+        assert [r.sample_id for r in res_parallel] == [r.sample_id for r in res_single]
+        score_single = float(getattr(rep_single, "overall_score", rep_single.average_overall_score))
+        score_parallel = float(
+            getattr(rep_parallel, "overall_score", rep_parallel.average_overall_score)
+        )
+        assert score_parallel == score_single
+        assert rep_parallel.total_samples == rep_single.total_samples

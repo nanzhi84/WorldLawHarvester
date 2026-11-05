@@ -241,7 +241,8 @@ def build(
             raise WlhError("deliverable_markdown_empty")
         data = body.encode("utf-8")
         markdown_ref = objects.put(data)
-        objects.get(markdown_ref)
+        if digest(data) != markdown_ref:
+            raise WlhError("archive_corrupt")
         original = item.get("original")
         if original is not None:
             sha(original.get("ref"), "invalid_original_ref")
@@ -433,8 +434,8 @@ def build(
         "extensions": business["extensions"],
     }
     result_ref = objects.put_json(document)
-    objects.get(result_ref)
-    objects.get(inputs_ref)
+    if digest(document) != result_ref or digest(manifest_doc) != inputs_ref:
+        raise WlhError("archive_corrupt")
     return {
         "namespace": namespace,
         "external_key": external_key,

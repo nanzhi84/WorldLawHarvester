@@ -267,21 +267,19 @@ def _compact_cache_item(item: Mapping[str, Any]) -> dict[str, Any]:
     raw_atts = norm.get("attachments")
     has_atts = isinstance(raw_atts, list) and len(cast(list[Any], raw_atts)) > 0
     for k, v in norm.items():
-        if k in {"raw_payload", "markdown"}:
-            continue
-        if has_atts and k in {"attachment_url", "original_file", "original_media_type"}:
-            continue
-        if k == "original_media_type" and isinstance(v, str) and v.lower().startswith("text/html"):
-            continue
-        if k == "quality_route" and v == "accept":
+        if k in {
+            "raw_payload",
+            "markdown",
+            "attachment_url",
+            "original_file",
+            "original_media_type",
+            "quality_route",
+        }:
             continue
         if k == "attachments" and has_atts:
             compact_atts: list[dict[str, str]] = []
             for a in cast(list[dict[str, Any]], raw_atts)[:2]:
-                ca: dict[str, str] = {"url": str(a.get("url") or "")}
-                if a.get("name"):
-                    ca["name"] = str(a["name"])
-                compact_atts.append(ca)
+                compact_atts.append({"url": str(a.get("url") or "")})
             out["attachments"] = compact_atts
             continue
         if k == "sampling_strata" and isinstance(v, list):
@@ -293,7 +291,7 @@ def _compact_cache_item(item: Mapping[str, Any]) -> dict[str, Any]:
             if non_derivable:
                 out["sampling_strata"] = non_derivable
             continue
-        if v is None or v == [] or v == "":
+        if v is None or v == [] or v == "" or v in ("—", "-"):
             continue
         out[k] = v
     return out
@@ -658,7 +656,11 @@ def render_source_verification_html(
                 has_att_link = True
                 att_n = (att_entry.get("name") or "").strip()
                 esc_att = std_html.escape(att_u, quote=True)
-                label = std_html.escape(att_n or original_file or "附件")
+                fn = att_u.rsplit("/", 1)[-1].split("?")[0]
+                label_cand = att_n or original_file or fn
+                label = std_html.escape(
+                    label_cand[:28] + "…" if len(label_cand) > 30 else (label_cand or "附件")
+                )
                 left_parts.append(f' <a class="attachment-link" href="{esc_att}">{label}</a>')
 
             if not has_att_link:
@@ -688,7 +690,8 @@ def render_source_verification_html(
                 )
                 right_pre_html = '<pre class="markdown-box"><code>⏳</code></pre>'
             else:
-                meta_block = std_html.escape(title)
+                title_short = title[:35] + "…" if len(title) > 37 else title
+                meta_block = std_html.escape(title_short)
                 right_pre_html = "<pre><code>⏳</code></pre>"
 
             right_parts: list[str] = [
@@ -725,21 +728,21 @@ def render_source_verification_html(
                 esc_entry = std_html.escape(raw_urls[0], quote=True)
                 entry_link_html = f'<a class="meta-link" href="{esc_entry}" target="_blank" rel="noopener">官方入口 ↗</a>'
 
-        rows_html = "\n".join(row_blocks)
+        rows_html = "".join(row_blocks)
         main_blocks.append(
-            f'<section id="{std_html.escape(source_id)}" class="source-section{active_cls}">\n'
+            f'<section id="{std_html.escape(source_id)}" class="source-section{active_cls}">'
             f'<div class="section-header"><div class="section-title-wrap">'
             f"{breadcrumb_html}"
             f'<h2><span class="source-id">{std_html.escape(source_id)}</span> {std_html.escape(source_name)}</h2>'
             f'</div><div class="header-actions">{entry_link_html}'
-            f'<span class="status-badge {badge_class}">{badge_label_text} ({len(normalized_items)})</span></div></div>\n'
+            f'<span class="status-badge {badge_class}">{badge_label_text} ({len(normalized_items)})</span></div></div>'
             f'<table class="comparison-table"><thead><tr>'
             f"<th>请求 Payload / 附件</th><th>解析 Markdown</th>"
-            f"</tr></thead><tbody>\n{rows_html}\n</tbody></table></section>"
+            f"</tr></thead><tbody>{rows_html}</tbody></table></section>"
         )
 
-    toc_html = "\n        ".join(toc_blocks)
-    sections_html = "\n\n      ".join(main_blocks)
+    toc_html = "".join(toc_blocks)
+    sections_html = "".join(main_blocks)
     cache_json = json.dumps(cache_map, ensure_ascii=False, separators=(",", ":")).replace(
         "</", "<\\/"
     )
