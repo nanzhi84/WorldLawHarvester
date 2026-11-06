@@ -6,439 +6,17 @@ import json
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Mapping, cast
+from typing import Any, Mapping, cast
 
-from wlh.benchmark.metrics import (
-    evaluate_accuracy,
-    evaluate_cleanliness,
-    evaluate_content_fidelity,
-    evaluate_list_discovery,
-    evaluate_record_split,
-)
 from wlh.benchmark.models import (
-    AccuracyResult,
     BenchmarkReport,
     BenchmarkSummaryReport,
-    CleanlinessResult,
-    ContentFidelityResult,
     SampleEvaluationResult,
 )
-
-_PROCESSOR_CACHE: dict[tuple[str, str], tuple[dict[str, Any], Any]] = {}
-
-
-def clear_processor_cache() -> None:
-    """Invalidate source configurations and parsers after configuration changes."""
-    _PROCESSOR_CACHE.clear()
-
-
-def _extract_prediction_dict(raw: Mapping[str, Any]) -> dict[str, Any]:
-    """Extract standard prediction fields from a raw candidate or extraction dictionary."""
-    base: dict[str, Any]
-    curr = raw.get("current_extracted")
-    ext = raw.get("extracted")
-    res = raw.get("result")
-    if isinstance(curr, dict):
-        base = dict(cast(dict[str, Any], curr))
-    elif isinstance(ext, dict):
-        base = dict(cast(dict[str, Any], ext))
-    elif isinstance(res, dict):
-        base = dict(cast(dict[str, Any], res))
-    else:
-        base = dict(cast(dict[str, Any], raw))
-
-    # Normalize markdown field naming
-    if "markdown" not in base:
-        md_val = base.get("body_markdown") or base.get("body") or base.get("content") or ""
-        base["markdown"] = str(md_val)
-    return base
-
-
-def extract_with_processor(
-    task: Mapping[str, Any], *, sources_dir: Path = Path("sources")
-) -> dict[str, Any]:
-    """Run offline processor pipeline on a ProcessorBenchmarkTask."""
-    source_id = str(task.get("source_id", ""))
-    task_type = str(task.get("task_type", "content_page"))
-    request_url = str(task.get("request_url", ""))
-    raw_payload = str(task.get("raw_payload", ""))
-    mime_type = str(task.get("mime_type", "text/html"))
-
-    sources_dir = Path(sources_dir)
-    yaml_path = sources_dir / f"{source_id}.yaml"
-    if not yaml_path.is_file():
-        if task_type == "list_page":
-            return {"target_urls": []}
-        return {
-            "records": [{"title": None, "doc_number": None, "markdown": "", "attachment_urls": []}]
-        }
-
-    try:
-        import yaml
-
-        from wlh.processor.parsers import load, normalize_parser_config
-
-        cache_key = (str(sources_dir.resolve()), source_id)
-        if cache_key not in _PROCESSOR_CACHE:
-            with yaml_path.open("r", encoding="utf-8") as f:
-                cfg = yaml.load(f, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
-            norm_cfg = normalize_parser_config(cfg)
-            parser = load(norm_cfg["adapter"])(norm_cfg)
-            _PROCESSOR_CACHE[cache_key] = (norm_cfg, parser)
-        norm_cfg, parser = _PROCESSOR_CACHE[cache_key]
-        # Per-sample discovery state must not leak through the cached parser.
-        if hasattr(parser, "detail_url"):
-            parser.detail_url = None
-        if hasattr(parser, "truncated"):
-            parser.truncated = None
-
-        from wlh.core import digest
-
-        payload_bytes = raw_payload.encode("utf-8")
-
-        class _OfflineCtx:
-            class _Runtime:
-                mode = "collect"
-                config = norm_cfg
-
-            runtime = _Runtime()
-            config = norm_cfg
-
-            @staticmethod
-            def read(_acq: Any) -> bytes:
-                return payload_bytes
-
-            @staticmethod
-            def follow_links(_t: Any) -> bool:
-                return True
-
-            @staticmethod
-            def text_quality(markdown: str) -> dict[str, Any]:
-                from wlh.cleaners.extraction_quality import text_check
-
-                lang = str(norm_cfg.get("metadata", {}).get("language") or "")
-                return text_check(markdown, "vi" if lang.startswith("vi") else "generic")
-
-            @staticmethod
-            def find_archived_image(_url: str) -> bytes | None:
-                return None
-
-        ctx = _OfflineCtx()
-        parse_task = {
-            "depth": 0 if task_type == "list_page" else 1,
-            "payload": {"url": request_url, "role": "page"},
-        }
-        acquisition = {
-            "id": f"acq-{source_id}",
-            "outcome": "ok",
-            "actual_url": request_url,
-            "request_url": request_url,
-            "mime_type": mime_type,
-            "charset": "utf-8",
-            "archive_ref": digest(payload_bytes),
-            "state": "archived",
-        }
-
-        parsed = parser.parse(ctx, parse_task, acquisition)
-
-        parsed_dict: dict[str, Any] = (
-            cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
-        )
-
-        if task_type == "list_page":
-            requests_list: list[dict[str, Any]] = (
-                cast(list[dict[str, Any]], parsed_dict.get("requests"))
-                if isinstance(parsed_dict.get("requests"), list)
-                else []
-            )
-            discovered_urls = [str(r["url"]) for r in requests_list if "url" in r]
-            return {"target_urls": discovered_urls}
-        else:
-            records: list[dict[str, Any]] = []
-            targets: list[dict[str, Any]] = (
-                cast(list[dict[str, Any]], parsed_dict.get("targets"))
-                if isinstance(parsed_dict.get("targets"), list)
-                else []
-            )
-            for target in targets:
-                inputs_list: list[dict[str, Any]] = (
-                    cast(list[dict[str, Any]], target.get("inputs"))
-                    if isinstance(target.get("inputs"), list)
-                    else []
-                )
-                for inp in inputs_list:
-                    inp.setdefault("acquisition", acquisition)
-                try:
-                    built: Any = parser.build(ctx, target, inputs_list)
-                    docs: list[object] = cast(
-                        list[object], built if isinstance(built, list) else [built]
-                    )
-                    for d_raw in docs:
-                        if not isinstance(d_raw, dict):
-                            continue
-                        d: dict[str, Any] = cast(dict[str, Any], d_raw)
-                        meta_dict: dict[str, Any] = cast(dict[str, Any], d.get("metadata") or {})
-                        dates_dict: dict[str, Any] = cast(dict[str, Any], d.get("dates") or {})
-                        delivs: list[object] = cast(list[object], d.get("deliverables") or [])
-                        md = ""
-                        for dev_raw in delivs:
-                            if isinstance(dev_raw, dict):
-                                dev: dict[str, Any] = cast(dict[str, Any], dev_raw)
-                                if dev.get("markdown"):
-                                    md = str(dev["markdown"])
-                                    break
-                        if not md:
-                            md_raw = d.get("markdown") or meta_dict.get("markdown") or ""
-                            md = str(md_raw)
-
-                        title: str | None = (
-                            str(d["title"])
-                            if d.get("title") is not None
-                            else (
-                                str(meta_dict["title"])
-                                if meta_dict.get("title") is not None
-                                else None
-                            )
-                        )
-                        doc_num: str | None = (
-                            str(meta_dict["doc_number"])
-                            if meta_dict.get("doc_number") is not None
-                            else (
-                                str(meta_dict["document_number"])
-                                if meta_dict.get("document_number") is not None
-                                else None
-                            )
-                        )
-                        pub: str | None = (
-                            str(dates_dict["published_at"])
-                            if dates_dict.get("published_at") is not None
-                            else (
-                                str(meta_dict["published_at"])
-                                if meta_dict.get("published_at") is not None
-                                else None
-                            )
-                        )
-                        eff: str | None = (
-                            str(dates_dict["effective_at"])
-                            if dates_dict.get("effective_at") is not None
-                            else (
-                                str(meta_dict["effective_at"])
-                                if meta_dict.get("effective_at") is not None
-                                else None
-                            )
-                        )
-                        iss: str | None = (
-                            str(meta_dict["issuer"])
-                            if meta_dict.get("issuer") is not None
-                            else None
-                        )
-                        cfg_meta = cast(dict[str, Any], norm_cfg.get("metadata", {}))
-                        doc_t: str = str(
-                            meta_dict.get("doc_type") or cfg_meta.get("document_type", "其他")
-                        )
-                        inp_candidates: list[object] = [
-                            *cast(list[object], d.get("inputs") or []),
-                            *inputs_list,
-                        ]
-                        att_urls: list[str] = []
-                        for item_raw in inp_candidates:
-                            if isinstance(item_raw, dict):
-                                item_dict: dict[str, Any] = cast(dict[str, Any], item_raw)
-                                if item_dict.get("role") == "attachment":
-                                    req_raw = item_dict.get("request") or item_dict.get("locator")
-                                    if isinstance(req_raw, dict):
-                                        req_dict: dict[str, Any] = cast(dict[str, Any], req_raw)
-                                        url_val = req_dict.get("url")
-                                        if url_val and str(url_val) not in att_urls:
-                                            att_urls.append(str(url_val))
-                        records.append(
-                            {
-                                "title": title,
-                                "doc_number": doc_num,
-                                "published_at": pub,
-                                "effective_at": eff,
-                                "issuer": iss,
-                                "doc_type": doc_t,
-                                "markdown": md,
-                                "attachment_urls": att_urls,
-                            }
-                        )
-                except Exception:
-                    pass
-            if not records:
-                records = [
-                    {
-                        "title": None,
-                        "doc_number": None,
-                        "published_at": None,
-                        "effective_at": None,
-                        "issuer": None,
-                        "doc_type": "其他",
-                        "markdown": "",
-                        "attachment_urls": [],
-                    }
-                ]
-            return {"records": records}
-    except Exception:
-        if task_type == "list_page":
-            return {"target_urls": []}
-        return {
-            "records": [{"title": None, "doc_number": None, "markdown": "", "attachment_urls": []}]
-        }
-
-
-def evaluate_sample(
-    prediction: Mapping[str, Any],
-    ground_truth: Mapping[str, Any] | None = None,
-    sample_id: str = "",
-    source_id: str = "",
-    jurisdiction: str = "",
-    task_type: Literal["list_page", "content_page"] | str = "",
-) -> SampleEvaluationResult:
-    """Evaluate a single document sample using the unified single-track scoring formula."""
-    sid = sample_id or str(prediction.get("id") or "")
-    src_id = source_id or str(prediction.get("source_id") or "")
-    jur = jurisdiction or str(prediction.get("jurisdiction") or "")
-
-    # Detect task_type
-    t_type: Literal["list_page", "content_page"]
-    if task_type in ["list_page", "content_page"]:
-        t_type = cast(Literal["list_page", "content_page"], task_type)
-    elif "target_urls" in prediction or (
-        isinstance(ground_truth, Mapping) and "target_urls" in ground_truth
-    ):
-        t_type = "list_page"
-    else:
-        t_type = "content_page"
-
-    # Branch 1: list_page evaluation (Pillar 1: Discovery)
-    if t_type == "list_page":
-        pred_u_raw = prediction.get("target_urls")
-        pred_urls: list[str] = (
-            [str(u) for u in cast(list[object], pred_u_raw)] if isinstance(pred_u_raw, list) else []
-        )
-        gt_u_raw = ground_truth.get("target_urls") if isinstance(ground_truth, Mapping) else None
-        gt_urls: list[str] = (
-            [str(u) for u in cast(list[object], gt_u_raw)] if isinstance(gt_u_raw, list) else []
-        )
-        discovery = evaluate_list_discovery(pred_urls, gt_urls)
-        overall_score = round(discovery.target_url_f1, 2)
-
-        return SampleEvaluationResult(
-            sample_id=sid,
-            task_type="list_page",
-            source_id=src_id,
-            jurisdiction=jur,
-            discovery=discovery,
-            overall_score=overall_score,
-        )
-
-    # Branch 2: content_page evaluation
-    raw_pred_recs = prediction.get("records")
-    if isinstance(raw_pred_recs, list) and raw_pred_recs:
-        pred_records = [
-            _extract_prediction_dict(cast(Mapping[str, Any], r))
-            for r in cast(list[object], raw_pred_recs)
-            if isinstance(r, Mapping)
-        ]
-    else:
-        pred_records = [_extract_prediction_dict(prediction)]
-
-    # If ground_truth is None: cleanliness-only evaluation
-    if ground_truth is None:
-        p_rec = pred_records[0]
-        md = str(p_rec.get("markdown") or "")
-        title = str(p_rec.get("title") or "")
-        cleanliness = evaluate_cleanliness(md, title=title, metadata=p_rec)
-        return SampleEvaluationResult(
-            sample_id=sid,
-            task_type="content_page",
-            source_id=src_id,
-            jurisdiction=jur,
-            cleanliness=cleanliness,
-            accuracy=None,
-            overall_score=cleanliness.score,
-        )
-
-    # Extract ground truth records list
-    gt_recs_raw = ground_truth.get("records")
-    gt_records: list[dict[str, Any]] = []
-    if isinstance(gt_recs_raw, list) and gt_recs_raw:
-        for r in cast(list[object], gt_recs_raw):
-            if isinstance(r, Mapping):
-                gt_records.append(dict(cast(Mapping[str, Any], r)))
-    if not gt_records:
-        gt_records = [dict(ground_truth)]
-
-    record_split, matched_pairs = evaluate_record_split(pred_records, gt_records)
-
-    if not matched_pairs:
-        p_rec = pred_records[0]
-        cleanliness = evaluate_cleanliness(
-            str(p_rec.get("markdown") or ""), title=str(p_rec.get("title") or "")
-        )
-        acc = evaluate_accuracy(p_rec, gt_records[0])
-        fid = evaluate_content_fidelity(
-            str(p_rec.get("markdown") or ""), str(gt_records[0].get("markdown") or "")
-        )
-        return SampleEvaluationResult(
-            sample_id=sid,
-            task_type="content_page",
-            source_id=src_id,
-            jurisdiction=jur,
-            record_split=record_split,
-            accuracy=acc,
-            content_fidelity=fid,
-            cleanliness=cleanliness,
-            overall_score=0.0,
-        )
-
-    record_scores: list[float] = []
-    acc_scores: list[AccuracyResult] = []
-    fid_scores: list[ContentFidelityResult] = []
-    clean_scores: list[CleanlinessResult] = []
-
-    for p_idx, g_idx in matched_pairs:
-        p_rec = pred_records[p_idx]
-        g_rec: dict[str, Any] = gt_records[g_idx]
-
-        clean_meta = dict(p_rec)
-        clean_meta["ground_truth"] = g_rec
-
-        acc = evaluate_accuracy(p_rec, g_rec)
-        fid = evaluate_content_fidelity(
-            str(p_rec.get("markdown") or ""), str(g_rec.get("markdown") or "")
-        )
-        clean = evaluate_cleanliness(
-            str(p_rec.get("markdown") or ""),
-            title=str(p_rec.get("title") or ""),
-            metadata=clean_meta,
-        )
-
-        rec_score = 0.50 * acc.score + 0.25 * fid.content_f1 + 0.25 * clean.score
-        record_scores.append(rec_score)
-        acc_scores.append(acc)
-        fid_scores.append(fid)
-        clean_scores.append(clean)
-
-    avg_rec_score = sum(record_scores) / len(record_scores)
-    overall_score = round((record_split.record_split_f1 / 100.0) * avg_rec_score, 2)
-
-    rep_acc = acc_scores[0]
-    rep_fid = fid_scores[0]
-    rep_clean = clean_scores[0]
-
-    return SampleEvaluationResult(
-        sample_id=sid,
-        task_type="content_page",
-        source_id=src_id,
-        jurisdiction=jur,
-        record_split=record_split,
-        accuracy=rep_acc,
-        content_fidelity=rep_fid,
-        cleanliness=rep_clean,
-        overall_score=overall_score,
-    )
+from wlh.benchmark.processor import clear_processor_cache as clear_processor_cache
+from wlh.benchmark.processor import extract_with_processor as extract_with_processor
+from wlh.benchmark.scoring import evaluate_sample as evaluate_sample
+from wlh.benchmark.scoring import extract_prediction_dict
 
 
 def load_records(path_or_records: Any) -> list[dict[str, Any]]:
@@ -474,9 +52,6 @@ def load_records(path_or_records: Any) -> list[dict[str, Any]]:
                 res_records.append(dict(cast(dict[str, Any], r_item)))
         return res_records
     raise TypeError(f"Unsupported dataset input type: {type(path_or_records)}")
-
-
-_load_records = load_records
 
 
 def _summarize_split_group(group: list[SampleEvaluationResult]) -> dict[str, Any]:
@@ -569,9 +144,9 @@ def _evaluate_work_item(
     if res.task_type == "content_page" and gt_map_val is not None:
         raw_p_recs = pred_map.get("records")
         if isinstance(raw_p_recs, list) and raw_p_recs and isinstance(raw_p_recs[0], Mapping):
-            p_rec_dict = _extract_prediction_dict(cast(Mapping[str, Any], raw_p_recs[0]))
+            p_rec_dict = extract_prediction_dict(cast(Mapping[str, Any], raw_p_recs[0]))
         else:
-            p_rec_dict = _extract_prediction_dict(pred_map)
+            p_rec_dict = extract_prediction_dict(pred_map)
         raw_g_recs = gt_map_val.get("records")
         if isinstance(raw_g_recs, list) and raw_g_recs and isinstance(raw_g_recs[0], Mapping):
             g_rec_dict = dict(cast(Mapping[str, Any], raw_g_recs[0]))
@@ -588,9 +163,9 @@ def evaluate_benchmark_dataset(
     *,
     split: str = "all",
     workers: int = 1,
+    ledger_path: Path | str | None = None,
 ) -> BenchmarkSummaryReport:
     """Evaluate an entire dataset (or a stratified dev/test split) and compute aggregate metrics."""
-    from wlh.benchmark.sampler import assign_stratified_splits
 
     if workers < 1:
         raise ValueError("workers must be >= 1")
@@ -600,12 +175,12 @@ def evaluate_benchmark_dataset(
             f"Unsupported benchmark split '{split}'; expected 'all', 'dev', or 'test'."
         )
 
-    records = _load_records(dataset_path_or_records)
+    records = load_records(dataset_path_or_records)
 
     gt_map: dict[str, dict[str, Any]] = {}
     gt_outer_map: dict[str, dict[str, Any]] = {}
     if ground_truth_path_or_records is not None:
-        gt_records = _load_records(ground_truth_path_or_records)
+        gt_records = load_records(ground_truth_path_or_records)
         for item in gt_records:
             gid = str(item.get("id") or item.get("sample_id") or "")
             if gid:
@@ -633,7 +208,22 @@ def evaluate_benchmark_dataset(
                 enriched_records.append(item)
         records = enriched_records
 
-    split_map = assign_stratified_splits(records)
+    if ledger_path is not None:
+        from wlh.benchmark.dataset import frozen_splits
+
+        gt_path = (
+            Path(ground_truth_path_or_records)
+            if isinstance(ground_truth_path_or_records, (str, Path))
+            else None
+        )
+        split_map = frozen_splits(Path(ledger_path), records, gt_path)
+    elif normalized_split != "all" and any(r.get("split") not in {"dev", "test"} for r in records):
+        raise ValueError("split_evaluation_requires_frozen_ledger")
+    else:
+        split_map = {
+            str(r.get("id") or r.get("sample_id")): str(r.get("split") or "unassigned")
+            for r in records
+        }
 
     if normalized_split in ("dev", "test"):
         records = [

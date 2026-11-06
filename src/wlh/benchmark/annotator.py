@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib
 import json
 import os
 import subprocess
@@ -20,18 +19,15 @@ from pathlib import Path
 from typing import Any
 
 from wlh.benchmark.annotation_schema import ContentPageGroundTruth, ListPageGroundTruth
+from wlh.benchmark.budget import DEFAULT_CONTEXT, DEFAULT_OUTPUT, NATIVE_CONTEXT, budget_config
+from wlh.benchmark.quality import validate_ground_truth_integrity
 from wlh.benchmark.tokenization import (
     MODELS,
     REVISIONS,
     TokenizerPair,
-    payload_tokens,
-    prompt_hash,
-    prompt_tokens,
-    required_output_tokens,
 )
 
-POLICY = "whole-sample-tokenizers-v2"
-MAX_CONTEXT, MAX_OUTPUT = 24576, 8192
+POLICY = "whole-sample-grounded-v4"
 
 
 def digest(text: str) -> str:
@@ -45,7 +41,7 @@ def read_rows(path: Path) -> list[dict[str, Any]]:
         if isinstance(payload, dict) and isinstance(payload.get("items"), list):
             return [row for row in payload["items"] if isinstance(row, dict)]
     rows: list[dict[str, Any]] = []
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in enumerate(text.split("\n"), 1):
         if line.strip():
             try:
                 row = json.loads(line)
@@ -72,7 +68,7 @@ def load_tasks(path: Path) -> list[dict[str, Any]]:
             raise ValueError(f"payload_hash_mismatch:{tid}")
         if task.get("task_type") not in ("list_page", "content_page"):
             raise ValueError(f"invalid_task_type:{tid}")
-        if task.get("mime_type") not in ("text/html", "application/json", "application/xml"):
+        if task.get("mime_type") not in {"text/html", "application/json", "application/xml"}:
             raise ValueError(f"invalid_mime_type:{tid}")
         if not all(
             isinstance(task.get(k), str) and task[k].strip()
@@ -113,6 +109,12 @@ def select_tasks(tasks: list[dict[str, Any]], args: argparse.Namespace) -> list[
     selected = [t for t, decision in zip(tasks, decisions, strict=True) if decision["selected"]]
     report = {
         "policy": POLICY,
+        "budget": budget_config(args.context_tokens, args.max_output_tokens, args.safety_tokens),
+        "runtime": {
+            "cpu_offload_gb": args.cpu_offload_gb,
+            "kv_cache_dtype": args.kv_cache_dtype,
+            "batch_size": args.batch_size,
+        },
         "status": "preselected_pending_model_completion",
         "tokenizers": pair.metadata,
         "total_tasks": len(tasks),
@@ -143,6 +145,9 @@ def validate_result(
     args: argparse.Namespace,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     reasons: list[str] = []
+    budget = budget_config(args.context_tokens, args.max_output_tokens, args.safety_tokens)
+    if "budget" in result and result["budget"] != budget:
+        reasons.append("incompatible_completion_budget")
     if result.get("payload_sha256") != task["payload_sha256"]:
         reasons.append("missing_or_mismatched_payload_hash")
     if result.get("finish_reason") != "stop":
@@ -185,6 +190,17 @@ def validate_result(
             schema.model_validate(ground_truth)
         except ValueError:
             reasons.append("incomplete_or_invalid_json_schema")
+    if ground_truth is not None:
+        valid, reason = validate_ground_truth_integrity(
+            ground_truth,
+            task["task_type"],
+            task["raw_payload"],
+            task["request_url"],
+            mime_type=task["mime_type"],
+            jurisdiction=task["jurisdiction"],
+        )
+        if not valid:
+            reasons.append(reason)
     if reasons:
         return None, reasons
     assert isinstance(text, str)
@@ -193,7 +209,9 @@ def validate_result(
     }
     receipt.update(
         policy=POLICY,
+        budget=budget,
         output_sha256=digest(text),
+        text=text,
         context_tokens=args.context_tokens,
         max_output_tokens=args.max_output_tokens,
         safety_tokens=args.safety_tokens,
@@ -220,7 +238,7 @@ def validate_receipts(tasks: list[dict[str, Any]], args: argparse.Namespace) -> 
         if row is not None:
             accepted.append(row)
         else:
-            rejected.append({"id": tid, "reasons": reasons})
+            rejected.append({"id": tid, "reasons": reasons, "completion": result})
     rejected.extend({"id": tid, "reasons": ["missing_completion"]} for tid in by_id.keys() - seen)
     write_json(args.output_dir / "accepted.jsonl", accepted, jsonl=True)
     write_json(args.output_dir / "rejected.jsonl", rejected, jsonl=True)
@@ -234,122 +252,27 @@ def existing_annotations(
     existing, by_id = {}, {t["id"]: t for t in tasks}
     for row in read_rows(path) if path.exists() else []:
         tid, receipt = row.get("id"), row.get("completion", {})
-        if tid not in by_id or tid in existing or receipt.get("policy") != POLICY:
+        if (
+            tid not in by_id
+            or tid in existing
+            or receipt.get("policy") != POLICY
+            or receipt.get("budget")
+            != budget_config(args.context_tokens, args.max_output_tokens, args.safety_tokens)
+        ):
             raise ValueError("unverified_or_stale_annotations:use_a_new_output_directory")
-        result = dict(receipt, text=json.dumps(row.get("ground_truth"), ensure_ascii=False))
+        result = dict(receipt)
         checked, _ = validate_result(result, by_id[tid], args)
         if (
             checked is None
+            or row.get("ground_truth") != checked["ground_truth"]
             or row.get("model") != MODELS[args.annotator]
             or receipt.get("tokenizer_revision") != REVISIONS[args.annotator]
+            or receipt.get("output_sha256") != checked["completion"]["output_sha256"]
             or receipt.get("ground_truth_sha256") != checked["completion"]["ground_truth_sha256"]
         ):
             raise ValueError("unverified_or_stale_annotations:use_a_new_output_directory")
         existing[tid] = row
     return existing
-
-
-def run_model(tasks: list[dict[str, Any]], args: argparse.Namespace) -> int:
-    path = args.output_dir / f"annotator_{args.annotator.lower()}.jsonl"
-    existing = existing_annotations(path, tasks, args)
-    pending = sorted(
-        (t for t in tasks if t["id"] not in existing), key=lambda t: len(t["raw_payload"])
-    )
-    if not pending:
-        return 0
-    # GPU-only dependency: CPU selection and receipt replay do not require vLLM.
-    vllm = importlib.import_module("vllm")
-    LLM, SamplingParams = vllm.LLM, vllm.SamplingParams
-
-    llm = LLM(
-        model=MODELS[args.annotator],
-        revision=REVISIONS[args.annotator],
-        tokenizer_revision=REVISIONS[args.annotator],
-        dtype="bfloat16",
-        max_model_len=args.context_tokens,
-        max_num_seqs=args.batch_size,
-        gpu_memory_utilization=0.93,
-        enable_prefix_caching=True,
-        enable_chunked_prefill=True,
-        trust_remote_code=True,
-    )
-    tokenizer, failures = llm.get_tokenizer(), 0
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    with (
-        path.open("a", encoding="utf-8") as out,
-        (args.output_dir / f"rejected_{args.annotator}.jsonl").open(
-            "a", encoding="utf-8"
-        ) as rejected,
-    ):
-        for start in range(0, len(pending), args.batch_size):
-            batch, prompts = [], []
-            for task in pending[start : start + args.batch_size]:
-                tokens = prompt_tokens(tokenizer, task)
-                raw_tokens = payload_tokens(tokenizer, task)
-                if (
-                    required_output_tokens(task["task_type"], len(raw_tokens))
-                    > args.max_output_tokens
-                ):
-                    rejected.write(
-                        json.dumps({"id": task["id"], "reasons": ["actual_output_budget_exceeded"]})
-                        + "\n"
-                    )
-                    failures += 1
-                    continue
-                if len(tokens) + args.max_output_tokens + args.safety_tokens > args.context_tokens:
-                    rejected.write(
-                        json.dumps(
-                            {"id": task["id"], "reasons": ["actual_context_budget_exceeded"]}
-                        )
-                        + "\n"
-                    )
-                    failures += 1
-                    continue
-                batch.append(task)
-                prompts.append({"prompt_token_ids": tokens})
-            outputs = (
-                llm.generate(
-                    prompts,
-                    SamplingParams(temperature=0.0, max_tokens=args.max_output_tokens),
-                    use_tqdm=False,
-                )
-                if prompts
-                else []
-            )
-            for task, prompt, output in zip(batch, prompts, outputs, strict=True):
-                generated = output.outputs[0]
-                actual_prompt_ids = list(output.prompt_token_ids or [])
-                result = {
-                    "id": task["id"],
-                    "payload_sha256": task["payload_sha256"],
-                    "prompt_tokens": len(actual_prompt_ids),
-                    "output_tokens": len(generated.token_ids),
-                    "finish_reason": generated.finish_reason,
-                    "text": generated.text,
-                }
-                row, reasons = validate_result(result, task, args)
-                if actual_prompt_ids != prompt["prompt_token_ids"] or not output.finished:
-                    row, reasons = None, ["prompt_changed_or_generation_incomplete"]
-                if row is None:
-                    rejected.write(json.dumps({"id": task["id"], "reasons": reasons}) + "\n")
-                    failures += 1
-                else:
-                    row["model"] = MODELS[args.annotator]
-                    row["completion"].update(
-                        tokenizer_revision=REVISIONS[args.annotator],
-                        prompt_sha256=prompt_hash(prompt["prompt_token_ids"]),
-                    )
-                    serialized = json.dumps(row, ensure_ascii=False)
-                    out.write(serialized + "\n")
-                    out.flush()
-                    os.fsync(out.fileno())
-                    print(f"STREAM_JSONL:Annotator_{args.annotator}:{serialized}", flush=True)
-            rejected.flush()
-            print(
-                f"[Annotator_{args.annotator}] Visited {min(start + args.batch_size, len(pending))}/{len(pending)}; rejected {failures}",
-                flush=True,
-            )
-    return int(bool(failures))
 
 
 def pair_verified_annotations(selected: list[dict[str, Any]], args: argparse.Namespace) -> int:
@@ -399,25 +322,30 @@ def main() -> int:
     modes.add_argument("--annotator", choices=MODELS)
     parser.add_argument("--selected-bundle", type=Path)
     parser.add_argument("--selection-report", type=Path)
-    parser.add_argument("--context-tokens", type=int, default=MAX_CONTEXT)
-    parser.add_argument("--max-output-tokens", type=int, default=MAX_OUTPUT)
+    parser.add_argument("--context-tokens", type=int, default=DEFAULT_CONTEXT)
+    parser.add_argument("--max-output-tokens", type=int, default=DEFAULT_OUTPUT)
     parser.add_argument("--safety-tokens", type=int, default=1024)
-    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--kv-cache-dtype", choices=("auto", "fp8"), default="auto")
+    parser.add_argument("--cpu-offload-gb", type=float, default=0.0)
     parser.add_argument(
         "--local-files-only",
         action="store_true",
         help="Use cached tokenizer assets without network",
     )
     args = parser.parse_args()
+    if not 0 <= args.cpu_offload_gb <= 32:
+        parser.error("invalid_cpu_offload_gb:expected_finite_0_to_32")
     if not (
-        0 < args.max_output_tokens <= MAX_OUTPUT
-        and 0 < args.context_tokens <= MAX_CONTEXT
+        0 < args.max_output_tokens < args.context_tokens
+        and 0 < args.context_tokens <= NATIVE_CONTEXT
+        and args.max_output_tokens + args.safety_tokens < args.context_tokens
         and 0 <= args.safety_tokens < args.context_tokens
         and 0 < args.batch_size <= 64
     ):
         parser.error("invalid_budget_or_batch_size")
     args.output_dir = args.output_dir or Path(
-        "work/benchmark-dry-run" if args.dry_run else "data/benchmark/complete_annotations"
+        "work/benchmark-dry-run" if args.dry_run else "work/benchmark/annotations"
     )
     args.selected_bundle = args.selected_bundle or args.output_dir / "selected_bundle.jsonl"
     args.selection_report = args.selection_report or args.output_dir / "selection.json"
@@ -427,6 +355,8 @@ def main() -> int:
     if args.pair_only:
         return pair_verified_annotations(tasks, args)
     if args.annotator:
+        from wlh.benchmark.inference import run_model
+
         return run_model(tasks, args)
     if len({p.resolve() for p in (args.input, args.selected_bundle, args.selection_report)}) != 3:
         raise ValueError("input_and_output_paths_must_differ")
@@ -463,7 +393,14 @@ def main() -> int:
             "--output-dir",
             str(args.output_dir),
         ]
-        for key in ("context_tokens", "max_output_tokens", "safety_tokens", "batch_size"):
+        for key in (
+            "context_tokens",
+            "max_output_tokens",
+            "safety_tokens",
+            "batch_size",
+            "kv_cache_dtype",
+            "cpu_offload_gb",
+        ):
             command.extend(["--" + key.replace("_", "-"), str(getattr(args, key))])
         status = subprocess.run(command, check=False).returncode
         if status not in (0, 1):

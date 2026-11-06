@@ -82,7 +82,7 @@ def render_benchmark_markdown_report(report: BenchmarkSummaryReport) -> str:
         lines.extend(
             [
                 "",
-                "### 1.1 Stratified Split Breakdown (Dev 60% vs Test 40%)",
+                "### 1.1 Dataset Split Breakdown",
                 "",
                 "| Split | Sample Count | Overall Score | List Discovery F1 | Record Split F1 | Accuracy | Content Fidelity | Cleanliness |",
                 "| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",

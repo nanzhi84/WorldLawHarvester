@@ -3,6 +3,8 @@ work/
 artifacts/
 tests/fixtures/*
 !tests/fixtures/benchmark/
+data/*
+!data/benchmark/
 experiments/**/.kanpo_ocr_cache.json
 .agents/teamwork/
 

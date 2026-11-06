@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from wlh.benchmark.evaluator import evaluate_benchmark_dataset
 from wlh.benchmark.reporter import write_benchmark_reports
@@ -38,7 +38,7 @@ def configure_benchmark_parser(parser: argparse.ArgumentParser) -> None:
         "--split",
         choices=["all", "dev", "test"],
         default="all",
-        help="Dataset split to evaluate: all (default), dev (60%%), or test (40%%)",
+        help="Dataset split to evaluate: all (default), or frozen dev/test membership",
     )
 
     parser.add_argument(
@@ -46,6 +46,10 @@ def configure_benchmark_parser(parser: argparse.ArgumentParser) -> None:
     )
 
     subparsers = parser.add_subparsers(dest="subcommand")
+
+    from wlh.benchmark.dataset import register_commands
+
+    register_commands(subparsers)
 
     # run subcommand
     run_parser = subparsers.add_parser(
@@ -79,6 +83,8 @@ def configure_benchmark_parser(parser: argparse.ArgumentParser) -> None:
     run_parser.add_argument(
         "--workers", type=int, default=1, help="Number of parallel evaluation workers (default: 1)."
     )
+
+    run_parser.add_argument("--ledger", type=Path, help="Frozen dataset ledger")
 
     # sample subcommand
     sample_parser = subparsers.add_parser(
@@ -177,8 +183,8 @@ def configure_benchmark_parser(parser: argparse.ArgumentParser) -> None:
     arbitrate_parser.add_argument(
         "--benchmark-output",
         type=Path,
-        default=Path("data/benchmark/ground_truth_benchmark.jsonl"),
-        help="Path to output ground_truth_benchmark.jsonl",
+        default=Path("work/benchmark/resolved.jsonl"),
+        help="Path to staged resolutions; publish using review and freeze",
     )
     arbitrate_parser.add_argument(
         "--export-disputes",
@@ -232,6 +238,8 @@ def run_benchmark_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         if not candidate_gt.is_file():
             raise FileNotFoundError(f"Ground truth file not found: {candidate_gt}")
         gt_path = candidate_gt
+    elif getattr(args, "ledger", None):
+        gt_path = Path(args.ledger).parent / "ground_truth_benchmark.jsonl"
     elif DEFAULT_GROUND_TRUTH_PATH.is_file():
         gt_path = DEFAULT_GROUND_TRUTH_PATH
 
@@ -241,6 +249,7 @@ def run_benchmark_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     report = evaluate_benchmark_dataset(
         input_path,
         ground_truth_path_or_records=gt_path,
+        ledger_path=getattr(args, "ledger", None),
         split=split_arg,
         workers=workers,
     )
@@ -319,8 +328,6 @@ def run_benchmark_arbitrate(args: argparse.Namespace) -> dict[str, Any]:
     from wlh.benchmark.arbitrator import (
         export_disputes,
         merge_resolutions,
-        run_arbitration,
-        write_benchmark_dataset,
     )
 
     a_p = Path(getattr(args, "annotator_a", None) or "data/benchmark/annotations/annotator_a.jsonl")
@@ -343,9 +350,7 @@ def run_benchmark_arbitrate(args: argparse.Namespace) -> dict[str, Any]:
         }
 
     merge_res = getattr(args, "merge_resolutions", None)
-    bench_out = Path(
-        getattr(args, "benchmark_output", None) or "data/benchmark/ground_truth_benchmark.jsonl"
-    )
+    bench_out = Path(getattr(args, "benchmark_output", None) or "work/benchmark/resolved.jsonl")
     if merge_res:
         merged = merge_resolutions(
             annotator_a_path=a_p,
@@ -360,39 +365,9 @@ def run_benchmark_arbitrate(args: argparse.Namespace) -> dict[str, Any]:
             "output_path": str(bench_out),
         }
 
-    cand_p = Path(getattr(args, "candidates", None) or "data/benchmark/raw_candidates.jsonl")
-    log_out = Path(
-        getattr(args, "log_output", None) or "artifacts/benchmark/cross_verification_log.json"
+    raise ValueError(
+        "explicit_resolution_required:use_--export-disputes_or_--merge-resolutions_then_review_and_freeze"
     )
-
-    verif_log, bench_recs = run_arbitration(
-        candidates_path=cand_p,
-        annotator_a_path=a_p,
-        annotator_b_path=b_p,
-    )
-    write_benchmark_dataset(
-        verification_log=verif_log,
-        benchmark_records=bench_recs,
-        log_path=log_out,
-        benchmark_path=bench_out,
-    )
-    raw_summary = verif_log.get("arbitration_summary") or verif_log.get("summary")
-    arb_summary: dict[str, Any] = (
-        cast(dict[str, Any], raw_summary) if isinstance(raw_summary, dict) else {}
-    )
-    return {
-        "status": "success",
-        "command": "benchmark.arbitrate",
-        "total_records": len(bench_recs),
-        "consensus_count": arb_summary.get(
-            "consensus_items_count", arb_summary.get("consensus_count", 0)
-        ),
-        "dispute_count": arb_summary.get(
-            "arbitrated_items_count", arb_summary.get("dispute_count", 0)
-        ),
-        "log_output": str(log_out),
-        "benchmark_output": str(bench_out),
-    }
 
 
 def run_benchmark_cli(args: argparse.Namespace) -> dict[str, Any]:
@@ -404,6 +379,10 @@ def run_benchmark_cli(args: argparse.Namespace) -> dict[str, Any]:
         return run_benchmark_sample(args)
     if subcmd in ("export-bundle", "export_bundle"):
         return run_benchmark_export_bundle(args)
+    if subcmd in {"rebuild", "freeze"}:
+        from wlh.benchmark.dataset import freeze, rebuild
+
+        return rebuild(args) if subcmd == "rebuild" else freeze(args)
     if subcmd == "preflight":
         return run_benchmark_preflight(args)
     if subcmd == "arbitrate":

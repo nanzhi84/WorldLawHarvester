@@ -783,3 +783,123 @@ storage:
             srv.shutdown()
             srv_thread.join(timeout=2.0)
             srv.server_close()
+
+
+class TestCollectionConcurrency:
+    def test_worker_executes_four_enqueued_sources_concurrently_until_complete(
+        self, initialized_db: dict[str, str], tmp_path: Path
+    ) -> None:
+        """`worker(once=True)` executes 4 enqueued source runs concurrently through a 4-party HTTP barrier until all 4 complete."""
+        from wlh.scheduler.queue import worker
+        from wlh.scheduler.runs import prepare_run, receipt
+
+        barrier = threading.Barrier(4, timeout=15.0)
+        barrier_broken: list[BaseException] = []
+        barrier_lock = threading.Lock()
+        entry_paths = {f"/s{i}/doc.html" for i in range(1, 5)}
+
+        class _FourSourceHandler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+            def do_GET(self) -> None:
+                if self.path == "/robots.txt":
+                    body = b"User-agent: *\nAllow: /\n"
+                    ctype = "text/plain; charset=utf-8"
+                elif self.path in entry_paths:
+                    try:
+                        barrier.wait()
+                    except BaseException as exc:
+                        with barrier_lock:
+                            barrier_broken.append(exc)
+                        self.send_response(500)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return
+                    body = (
+                        "<html><head><title>Law</title></head><body>"
+                        '<div class="law-body"><h1>Tax Law Title</h1>'
+                        "<p>Article 1 Valid legal text content that is long enough to pass quality checks cleanly for archival delivery.</p>"
+                        "</div></body></html>"
+                    ).encode("utf-8")
+                    ctype = "text/html; charset=utf-8"
+                else:
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), _FourSourceHandler)
+        srv.daemon_threads = True
+        port = srv.server_address[1]
+        srv_thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        srv_thread.start()
+
+        run_ids: list[str] = []
+        try:
+            for idx in range(1, 5):
+                src_id = f"dd-97{idx}"
+                yaml_path = tmp_path / f"{src_id}.yaml"
+                yaml_path.write_text(
+                    f"""
+id: {src_id}
+scheduler:
+  scope: "Four-source concurrent worker barrier test {src_id}"
+  entry_urls:
+    - "http://127.0.0.1:{port}/s{idx}/doc.html"
+  allowed_hosts:
+    - "127.0.0.1"
+  allowed_path_prefixes:
+    - "/s{idx}/"
+  budget:
+    requests: 10
+    documents: 5
+    seconds: 30
+    response_bytes: 1048576
+fetcher:
+  mode: http
+  delay: 0.0
+processor:
+  parser:
+    type: html
+    documents:
+      detail_url_patterns:
+        - "^http://127\\\\.0\\\\.0\\\\.1:{port}/s{idx}/doc\\\\.html$"
+      detail_body: always
+      content_xpath: '//div[@class="law-body"]'
+      fields:
+        title:
+          xpath: '//h1'
+cleaners: {{}}
+storage:
+  archive_approved: true
+  metadata:
+    source_name: "Concurrent Worker Source {idx}"
+    document_type: "法律法规"
+    language: "en"
+    jurisdiction: "INTL"
+""".strip(),
+                    encoding="utf-8",
+                )
+                run_ids.append(prepare_run(yaml_path, "collect", enqueue=True))
+
+            worker(once=True)
+
+            assert not barrier_broken, (
+                f"Expected 4-party barrier to succeed concurrently without breaking, got: {barrier_broken}"
+            )
+            for run_id in run_ids:
+                rec = receipt(run_id)
+                assert rec["status"] == "complete", f"Expected run {run_id} complete, got: {rec}"
+        finally:
+            srv.shutdown()
+            srv_thread.join(timeout=2.0)
+            srv.server_close()

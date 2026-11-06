@@ -355,7 +355,7 @@ class WebDocumentBuilder:
             title=title,
         )
         strip_pats = _strip_text_regexes(self.config)
-        return apply_text_cleaners(md, strip_pats) if strip_pats else md
+        return apply_text_cleaners(md, strip_pats)
 
     def detail_values(
         self,

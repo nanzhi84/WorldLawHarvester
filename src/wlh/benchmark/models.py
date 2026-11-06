@@ -55,10 +55,12 @@ class ProcessorBenchmarkTask(BaseModel):
     request_url: str = Field(
         min_length=1, description="该响应对应的公网请求 URL（用于相对路径补全）"
     )
-    mime_type: Literal["text/html", "application/json", "application/xml"] = Field(
-        description="原始载荷媒介类型（已剔除 PDF/Word/XLS 等二进制文件）"
-    )
-    raw_payload: str = Field(min_length=1, description="100% 原始未截断的 HTML/JSON/XML 文本内容")
+    mime_type: Literal[
+        "text/html",
+        "application/json",
+        "application/xml",
+    ] = Field(description="原始文本载荷媒介类型")
+    raw_payload: str = Field(min_length=1, description="完整原始 HTML、JSON 或 XML 文本")
     payload_sha256: str = Field(
         pattern=r"^[0-9a-fA-F]{64}$", description="raw_payload 的 SHA-256 摘要"
     )

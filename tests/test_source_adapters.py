@@ -383,6 +383,27 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
                         )
 
                     primary_rows = [r for r in rows if r["role"] == "primary"] or rows
+                    for r in primary_rows:
+                        md_text = objs.get(r["markdown_hash"]).decode("utf-8", errors="replace")
+                        for forbidden_footer in (
+                            "【下载】",
+                            "[纠错或建议](http://hd.chinatax.gov.cn/fuwu/jiucuo.html)",
+                            "附件下载：\n\n相关文章：",
+                            "相关文章：",
+                            "点击“阅读原文”快速投稿~",
+                            "**点击“阅读原文”快速投稿~**",
+                        ):
+                            assert forbidden_footer not in md_text, (
+                                f"Unexpected boilerplate {forbidden_footer!r} in {source_id} markdown"
+                            )
+                        if source_id in ("dd-595", "dd-596"):
+                            for forbidden_mof_footer in ("附件下载：", "相关文章："):
+                                assert forbidden_mof_footer not in md_text, (
+                                    f"Unexpected boilerplate {forbidden_mof_footer!r} in {source_id} markdown"
+                                )
+                        assert "纠错或建议" not in {
+                            line.strip() for line in md_text.splitlines()
+                        }, f"Unexpected standalone '纠错或建议' line in {source_id} markdown"
                     if "primary_markdown_contains_any" in expectations:
                         any_tokens = [str(t) for t in expectations["primary_markdown_contains_any"]]
                         for r in primary_rows:
@@ -543,3 +564,91 @@ class TestAdaptedSourceConfigReplayAndZeroTargetGuard:
         assert fields_606["issuer"]["value"] == "中国注册税务师协会"
         for req_field in ("title", "document_number", "published_at"):
             assert req_field in fields_606, f"Missing required field {req_field} in dd-606.yaml"
+
+    def test_dd594_dd602_dd603_dd606_full_discovery_and_archive_contracts(self) -> None:
+        """Production configs `dd-594`, `dd-602`, `dd-603`, and `dd-606` satisfy full discovery, pagination, and attachment scope contracts."""
+        from wlh.processor.parsers import normalize_parser_config
+        from wlh.processor.parsers.html.parser import HtmlParser
+
+        repo_root = Path(__file__).resolve().parents[1]
+
+        def _load_cfg_and_parser(source_id: str) -> tuple[dict[str, Any], HtmlParser]:
+            yaml_path = repo_root / "sources" / f"{source_id}.yaml"
+            assert yaml_path.is_file(), f"Missing sources/{source_id}.yaml"
+            cfg: dict[str, Any] = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+            parser = HtmlParser(normalize_parser_config(cfg))
+            return cfg, parser
+
+        cfg_594, parser_594 = _load_cfg_and_parser("dd-594")
+        assert (
+            parser_594.is_detail(
+                "https://www.chinatax.gov.cn/chinatax/n810341/n810770/c1153294/content.html"
+            )
+            is True
+        )
+        assert (
+            parser_594.is_detail(
+                "https://www.chinatax.gov.cn/chinatax/n810770/2019-07/31/5171677/files/0448c5ac13d342879144ca59f4cdca80.pdf"
+            )
+            is True
+        )
+        assert cfg_594["processor"]["parser"]["documents"].get("binary_title_from_link") is True
+
+        cfg_602, parser_602 = _load_cfg_and_parser("dd-602")
+        assert parser_602.is_detail("https://www.irs.gov/pub/irs-pdf/n931.pdf") is True
+        assert parser_602.is_detail("https://www.irs.gov/pub/irs-pdf/n1444aes.pdf") is True
+        assert parser_602.is_detail("https://www.irs.gov/pub/irs-pdf/f1040.pdf") is True
+        assert (
+            parser_602.in_scope("https://www.irs.gov/forms-instructions-and-publications?page=2")
+            is True
+        )
+        assert int(cfg_602["scheduler"]["max_depth"]) >= 2
+        assert int(cfg_602["processor"]["parser"].get("options", {}).get("max_pages", 1)) >= 150
+        assert (
+            cfg_602["processor"]["parser"]["documents"].get("next_page_xpath") == '//a[@rel="next"]'
+        )
+
+        cfg_603, parser_603 = _load_cfg_and_parser("dd-603")
+        assert (
+            parser_603.is_detail(
+                "https://www.chinatax.gov.cn/chinatax/n810219/c102025/c5253027/content.html"
+            )
+            is True
+        )
+        assert (
+            parser_603.is_detail(
+                "https://www.chinatax.gov.cn/chinatax/n810219/n810724/c5242901/content.html"
+            )
+            is True
+        )
+        assert (
+            parser_603.is_detail(
+                "https://www.chinatax.gov.cn/chinatax/n810219/n810780/c5181234/content.html"
+            )
+            is True
+        )
+        assert (
+            parser_603.in_scope(
+                "https://www.chinatax.gov.cn/chinatax/manuscriptList/c102025?_channelName=%E7%A8%8E%E6%A1%88%E9%80%9A%E6%8A%A5&_isAgg=0&_pageSize=20&_template=index"
+            )
+            is True
+        )
+        assert (
+            parser_603.resolve_link(
+                "https://www.chinatax.gov.cn/chinatax/n810219/c102025/common_listwyc.html",
+                "serach_channel('c102025','税案通报','0',20,'index')",
+            )
+            == "https://www.chinatax.gov.cn/chinatax/manuscriptList/c102025?_channelName=%E7%A8%8E%E6%A1%88%E9%80%9A%E6%8A%A5&_isAgg=0&_pageSize=20&_template=index"
+        )
+        assert int(cfg_603["scheduler"]["max_depth"]) >= 2
+        assert int(cfg_603["scheduler"]["budget"]["requests"]) >= 2500
+        assert int(cfg_603["scheduler"]["budget"]["documents"]) >= 1500
+        assert int(cfg_603["processor"]["parser"].get("options", {}).get("max_pages", 1)) >= 60
+
+        _cfg_606, parser_606 = _load_cfg_and_parser("dd-606")
+        assert (
+            parser_606.in_scope(
+                "https://newcctaacms.oss-cn-beijing.aliyuncs.com/fujian/1-1%E9%99%84%E4%BB%B61.docx"
+            )
+            is True
+        )

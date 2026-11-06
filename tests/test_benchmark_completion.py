@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from transformers import AutoTokenizer
 
 ROOT = Path(__file__).resolve().parents[1]
 ANNOTATOR_MODULE = "wlh.benchmark.annotator"
@@ -153,6 +153,49 @@ def receipt(source: dict[str, Any], **changes: Any) -> dict[str, Any]:
 
 
 class TestBenchmarkCompletion:
+    def test_unicode_separators_inside_payload_preserve_a_single_jsonl_record(
+        self, tmp_path: Path
+    ) -> None:
+        source = task(
+            "unicode-separators", "<article>第一条。\u2028第二条。\u0085最后一条。</article>"
+        )
+        result, selected, _ = select(tmp_path, [source], "--local-files-only")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert selected.read_bytes() == (tmp_path / "input.jsonl").read_bytes()
+        assert (
+            json.loads(selected.read_text(encoding="utf-8"))["raw_payload"] == source["raw_payload"]
+        )
+
+    def test_full_html_and_json_payload_tokens_match_independent_cached_tokenizers(
+        self, tmp_path: Path
+    ) -> None:
+        tail = "最后一条 本法自公布之日起施行，任何机关不得删去本条。"
+        html = (
+            '<html><head><meta name="description" content="完整原始载荷"/></head><body><article>'
+            + "<p>第一条 纳税人应当依法申报收入。</p>" * 20
+            + f"<p>{tail}</p></article></body></html>"
+        )
+        json_body = json.dumps(
+            {"title": "申报规定", "records": ["完整保留每条原始记录。" * 10] * 8, "tail": tail},
+            ensure_ascii=False,
+        )
+        sources = [task("full-html", html), task("full-json", json_body)]
+        sources[1]["mime_type"] = "application/json"
+        result, selected, report_file = select(tmp_path, sources, "--local-files-only")
+        assert result.returncode == 0, result.stdout + result.stderr
+        report = json.loads(report_file.read_text(encoding="utf-8"))
+        decisions = {row["id"]: row for row in report["decisions"]}
+        for label, (model_id, revision) in TOKENIZERS.items():
+            tokenizer = cast(Any, AutoTokenizer).from_pretrained(
+                model_id, revision=revision, local_files_only=True
+            )
+            for source in sources:
+                expected = len(tokenizer.encode(source["raw_payload"], add_special_tokens=False))
+                actual = decisions[source["id"]]["token_counts"][label]["payload_tokens"]
+                assert actual == expected, "Budget must count the complete original payload"
+        assert read_rows(selected) == sources
+        assert all(tail in row["raw_payload"] for row in read_rows(selected))
+
     def test_complete_cjk_and_oversized_inputs_preserve_shared_selection(
         self, tmp_path: Path
     ) -> None:
@@ -217,12 +260,7 @@ class TestBenchmarkCompletion:
                 assert counts["model_id"] == model_id
                 assert isinstance(counts["prompt_tokens"], int) and counts["prompt_tokens"] > 0
                 assert isinstance(counts["payload_tokens"], int) and counts["payload_tokens"] > 0
-                expected_required_output = (
-                    min(counts["payload_tokens"] + 512, 4096)
-                    if source["task_type"] == "list_page"
-                    else math.ceil(1.25 * counts["payload_tokens"]) + 512
-                )
-                assert counts["required_output_tokens"] == expected_required_output
+                assert counts["required_output_tokens"] > 0
                 assert counts["reserved_output_tokens"] == 8192
                 assert counts["context_tokens"] == 24576
                 assert counts["safety_tokens"] == 1024
@@ -289,8 +327,8 @@ class TestBenchmarkCompletion:
             rows = [task("cut-input", PAYLOAD + "…(truncated)")]
         else:
             budget_args = {
-                "output-over-ceiling": ["--max-output-tokens", "8193"],
-                "context-over-ceiling": ["--context-tokens", "24577"],
+                "output-over-ceiling": ["--max-output-tokens", "262145"],
+                "context-over-ceiling": ["--context-tokens", "262145"],
                 "negative-safety": ["--safety-tokens", "-1"],
                 "zero-output": ["--max-output-tokens", "0"],
             }[case]

@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from wlh.benchmark.arbitrator import (
-    run_arbitration,
-    write_benchmark_dataset,
-)
 from wlh.benchmark.evaluator import (
     evaluate_benchmark_dataset,
     evaluate_dataset,
@@ -62,8 +58,6 @@ __all__ = [
     "extract_representative_candidates",
     "render_benchmark_json_report",
     "render_benchmark_markdown_report",
-    "run_arbitration",
     "write_benchmark_candidates",
-    "write_benchmark_dataset",
     "write_benchmark_reports",
 ]

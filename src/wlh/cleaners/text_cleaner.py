@@ -32,16 +32,31 @@ UI_ACTION_LABELS = (
     "back",
     "トップに戻る",
     "【打印】",
+    "【下载】",
     "【返回】",
     "【关闭】",
+    "【纠错或建议】",
     "[打印]",
+    "[下载]",
     "[返回]",
     "[关闭]",
+    "[纠错或建议]",
     "打印本页",
     "关闭窗口",
+    "纠错或建议",
     "打印",
     "返回",
     "关闭",
+)
+
+DEFAULT_STRIP_TEXT_REGEXES = (
+    r"(?m)^[ \t]*【下载】[ \t]*$",
+    r"(?m)^[ \t]*\[(?:纠错或建议|网站纠错)\]\([^)\n]+\)[ \t]*$",
+    r"(?m)^[ \t]*纠错或建议[ \t]*$",
+    r"(?m)^[ \t]*相关文章[：:][ \t]*(?:\n+(?:[ \t]*[-*]?[ \t]*\[[^\n]+\]\([^)\n]+\)[ \t]*\n?)+)?\s*$",
+    r"(?m)^[ \t]*相关文章[：:][ \t]*$",
+    r"(?m)^[ \t]*附件下载[：:][ \t]*\s*$",
+    r"(?m)^[ \t]*(?:\*\*)?点击[“\"']?阅读原文[”\"']?[^\n]*(?:\*\*)?[ \t]*$",
 )
 
 BLOCKERS = (
@@ -66,7 +81,7 @@ def normalized(value: str) -> str:
 
 def apply_text_cleaners(text: str, strip_regexes: Sequence[str] = ()) -> str:
     cleaned = text
-    for pattern in strip_regexes:
+    for pattern in (*DEFAULT_STRIP_TEXT_REGEXES, *strip_regexes):
         cleaned = re.sub(pattern, "", cleaned)
     return normalized(cleaned)
 

@@ -1,315 +1,347 @@
-#!/usr/bin/env python3
-"""Local driver for executing dual-blind batch annotation on Colab G4 with parallel dual-instance streaming."""
+"""Run isolated, whole-input A/B annotation on Colab; recover receipts and release GPUs."""
 
 from __future__ import annotations
 
 import argparse
-import base64
-import gzip
-import os
+import hashlib
+import json
+import re
 import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from wlh.benchmark.annotator import write_json
+from wlh.benchmark.budget import DEFAULT_CONTEXT, DEFAULT_OUTPUT
+
+_CREDENTIAL_QUERY = re.compile(
+    r"([?&](?:colab-runtime-proxy-token|access_token|refresh_token|id_token|token|"
+    r"X-Goog-Signature|X-Amz-Signature|X-Amz-Security-Token)=)[^\s&<>\"')]+",
+    re.IGNORECASE,
+)
+_TRANSIENT_TRANSPORT = re.compile(
+    r"SSLEOFError|SSLError|UNEXPECTED_EOF|ConnectionError|ConnectionResetError|"
+    r"RemoteDisconnected|ConnectTimeout|ReadTimeout|TimeoutError|"
+    r"IncompleteRead|ChunkedEncodingError|Response ended prematurely|"
+    r"Connection (?:aborted|reset|refused)|Temporary failure in name resolution",
+    re.IGNORECASE,
+)
+_RETRYABLE_COMMANDS = {"sessions", "status", "log", "ls", "upload", "download", "stop"}
+
+
+def _safe_diagnostic(value: str | bytes | None) -> str:
+    text = value.decode(errors="replace") if isinstance(value, bytes) else value or ""
+    # Requests may wrap an access-bearing relative URL across lines. Remove the
+    # entire URL block before individual values, retaining the transport cause.
+    text = re.sub(
+        r"(\burl:\s*)(.*?)(?=\s*\(Caused by|\n\n|\Z)",
+        lambda match: (
+            match[1] + "[ACCESS_URL_REDACTED]" if _CREDENTIAL_QUERY.search(match[2]) else match[0]
+        ),
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(
+        r"https?://\S+",
+        lambda match: (
+            "[ACCESS_URL_REDACTED]"
+            if "colab" in match[0].lower() or _CREDENTIAL_QUERY.search(match[0])
+            else match[0]
+        ),
+        text,
+        flags=re.IGNORECASE,
+    )
+    return _CREDENTIAL_QUERY.sub(r"\1[REDACTED]", text)
+
 
 def run_cmd(
-    cmd: list[str], check: bool = True, max_retries: int = 3
+    command: list[str], *, timeout: int = 300, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    print(f"[Driver] Running: {' '.join(cmd)}", flush=True)
-    res = subprocess.CompletedProcess(cmd, 1, "", "")
-    for attempt in range(1, max_retries + 1):
-        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if res.returncode == 0:
-            return res
-        err_msg = res.stderr.strip() or res.stdout.strip()
-        print(
-            f"[Driver] Command attempt {attempt}/{max_retries} failed: {err_msg[:200]}", flush=True
-        )
-        if attempt < max_retries:
-            time.sleep(3)
-    if check:
-        raise subprocess.CalledProcessError(
-            res.returncode, cmd, output=res.stdout, stderr=res.stderr
-        )
-    return res
-
-
-def session_work_dir(session_name: str) -> Path:
-    d = Path("work") / session_name
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def ensure_colab_session(session_name: str) -> None:
-    res = run_cmd(["colab", "sessions"], check=False)
-    if session_name not in res.stdout and session_name not in res.stderr:
-        print(f"[{session_name}] Creating Colab session with G4 GPU (RTX PRO 6000)...", flush=True)
-        run_cmd(["colab", "new", "-s", session_name, "--gpu", "G4"])
-    else:
-        print(f"[{session_name}] Colab session already active.", flush=True)
-    print(f"[{session_name}] Ensuring vllm and pydantic are installed on Colab...", flush=True)
-    wdir = session_work_dir(session_name)
-    pip_py = """import subprocess, sys
-try:
-    import vllm, pydantic
-    print("vllm and pydantic already installed.")
-except ImportError:
-    print("Installing vllm and pydantic via pip...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "vllm", "pydantic"], check=True)
-    print("Installed vllm and pydantic successfully!")
-"""
-    ensure_file = wdir / "ensure_deps.py"
-    ensure_file.write_text(pip_py, encoding="utf-8")
-    run_cmd(["colab", "exec", "-s", session_name, "-f", str(ensure_file), "--timeout", "600"])
-
-
-def upload_file_chunked(session_name: str, local_path: Path, remote_path: str) -> None:
-    """Robust chunked upload of gzipped files to Colab using session-isolated temp files."""
-    wdir = session_work_dir(session_name)
-    with local_path.open("rb") as f:
-        data = f.read()
-    gz_data = gzip.compress(data)
-    chunk_size = 512 * 1024
-    total_chunks = (len(gz_data) + chunk_size - 1) // chunk_size
-
-    clear_py = f"""import os
-d = os.path.dirname('{remote_path}')
-if d:
-    os.makedirs(d, exist_ok=True)
-with open('{remote_path}.gz', 'wb') as f: pass
-"""
-    clear_file = wdir / "clear_tmp.py"
-    clear_file.write_text(clear_py, encoding="utf-8")
-    run_cmd(["colab", "exec", "-s", session_name, "-f", str(clear_file)])
-
-    print(
-        f"[{session_name}] Uploading {local_path} ({len(data)} bytes -> {len(gz_data)} gz bytes in {total_chunks} chunks)...",
-        flush=True,
+    # Repeating allocation or execution can start duplicate paid work. Only
+    # idempotent transport operations receive bounded retries (1 s, then 2 s).
+    attempts = (
+        3
+        if len(command) > 1
+        and Path(command[0]).name == "colab"
+        and command[1] in _RETRYABLE_COMMANDS
+        else 1
     )
-    chunk_file = wdir / "upload_tmp_chunk.py"
-    for i in range(total_chunks):
-        chunk = gz_data[i * chunk_size : (i + 1) * chunk_size]
-        b64 = base64.b64encode(chunk).decode("ascii")
-        py_code = f"""import base64
-with open('{remote_path}.gz', 'ab') as f:
-    f.write(base64.b64decode('''{b64}'''))
-"""
-        chunk_file.write_text(py_code, encoding="utf-8")
-        run_cmd(["colab", "exec", "-s", session_name, "-f", str(chunk_file), "--timeout", "120"])
-        time.sleep(0.5)
-
-    decomp_py = f"""import gzip, shutil
-with gzip.open('{remote_path}.gz', 'rb') as f_in:
-    with open('{remote_path}', 'wb') as f_out:
-        shutil.copyfileobj(f_in, f_out)
-print('Deployed {remote_path} successfully!')
-"""
-    decomp_file = wdir / "decomp_tmp.py"
-    decomp_file.write_text(decomp_py, encoding="utf-8")
-    run_cmd(["colab", "exec", "-s", session_name, "-f", str(decomp_file), "--timeout", "60"])
-
-
-def upload_bundle_and_script(session_name: str, annotator: str | None = None) -> None:
-    bundle_src = Path("data/benchmark/processor_complete_bundle.jsonl")
-    if not bundle_src.is_file():
-        raise FileNotFoundError(f"Missing bundle: {bundle_src}")
-
-    upload_file_chunked(session_name, bundle_src, "processor_batch_bundle.jsonl")
-
-    # Deploy only the inference package; the host benchmark facade imports unrelated
-    # evaluation dependencies. Empty package initializers keep the GPU runtime minimal.
-    package_init = session_work_dir(session_name) / "__init__.py"
-    package_init.write_text("", encoding="utf-8")
-    for package in ("wlh", "wlh/benchmark"):
-        upload_file_chunked(session_name, package_init, f"{package}/__init__.py")
-    for name in ("annotator.py", "tokenization.py", "annotation_schema.py"):
-        upload_file_chunked(session_name, Path(__file__).parent / name, f"wlh/benchmark/{name}")
-
-    tags = [annotator.lower()] if annotator in ("A", "B") else ["a", "b"]
-    for tag in tags:
-        name = f"annotator_{tag}.jsonl"
-        local = Path("data/benchmark/complete_annotations") / name
-        if local.is_file() and local.stat().st_size > 0:
-            upload_file_chunked(session_name, local, f"complete_annotations/{name}")
-
-    print(f"[{session_name}] Bundle and scripts deployed successfully!", flush=True)
-
-
-def run_single_annotator_on_session(
-    annotator: str,
-    session_name: str,
-    out_path: Path | None = None,
-) -> int:
-    """Run a single annotator ('A' or 'B') on its dedicated Colab G4 session."""
-    wdir = session_work_dir(session_name)
-    local_ann_dir = Path("data/benchmark/complete_annotations")
-    local_ann_dir.mkdir(parents=True, exist_ok=True)
-    target_out = out_path or (local_ann_dir / f"annotator_{annotator.lower()}.jsonl")
-
-    try:
-        ensure_colab_session(session_name)
-        upload_bundle_and_script(session_name, annotator=annotator)
-
-        runner_py = f"""import subprocess, sys
-cmd = [
-    sys.executable,
-    '-m', 'wlh.benchmark.annotator',
-    '--annotator', '{annotator}',
-    '--input', 'processor_batch_bundle.jsonl',
-    '--output-dir', 'complete_annotations',
-    '--batch-size', '32',
-]
-proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-if proc.stdout:
-    for line in iter(proc.stdout.readline, ''):
-        print(line, end='', flush=True)
-proc.wait()
-sys.exit(proc.returncode)
-"""
-        stream_file = wdir / "run_stream.py"
-        stream_file.write_text(runner_py, encoding="utf-8")
-
-        print(
-            f"[{session_name}] Launching Annotator {annotator} batch inference stream...",
-            flush=True,
-        )
-        cmd = ["colab", "exec", "-s", session_name, "-f", str(stream_file), "--timeout", "7200"]
-        proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
-        )
-
-        prefix = f"STREAM_JSONL:Annotator_{annotator}:"
-        count = 0
-        with target_out.open("a", encoding="utf-8") as fp:
-            try:
-                if proc.stdout:
-                    for line in iter(proc.stdout.readline, ""):
-                        if line.startswith(prefix):
-                            raw_json = line[len(prefix) :].strip()
-                            fp.write(raw_json + "\n")
-                            fp.flush()
-                            os.fsync(fp.fileno())
-                            count += 1
-                        elif len(line) < 500:
-                            print(f"[{session_name}] {line}", end="", flush=True)
-                proc.wait()
-            finally:
-                for name in (f"rejected_{annotator}.jsonl", f"annotator_{annotator.lower()}.jsonl"):
-                    dl_py = f"""import base64, gzip, os
-p = '/content/complete_annotations/{name}'
-if os.path.isfile(p):
-    with open(p, 'rb') as f:
-        gz = gzip.compress(f.read())
-    print('B64_GZ_START:' + base64.b64encode(gz).decode('ascii') + ':B64_GZ_END')
-"""
-                    dl_file = wdir / "dl_tmp.py"
-                    dl_file.write_text(dl_py, encoding="utf-8")
-                    dl_res = run_cmd(
-                        [
-                            "colab",
-                            "exec",
-                            "-s",
-                            session_name,
-                            "-f",
-                            str(dl_file),
-                            "--timeout",
-                            "180",
-                        ],
-                        check=False,
-                        max_retries=2,
-                    )
-                    if "B64_GZ_START:" in dl_res.stdout and ":B64_GZ_END" in dl_res.stdout:
-                        b64_part = (
-                            dl_res.stdout.split("B64_GZ_START:", 1)[1]
-                            .split(":B64_GZ_END", 1)[0]
-                            .strip()
-                        )
-                        raw_bytes = gzip.decompress(base64.b64decode(b64_part))
-                        dest = (
-                            target_out if name.startswith("annotator_") else (local_ann_dir / name)
-                        )
-                        dest.write_bytes(raw_bytes)
-                        print(
-                            f"[{session_name}] Downloaded {dest.name} ({len(raw_bytes)} bytes)",
-                            flush=True,
-                        )
-
-        print(
-            f"[{session_name}] Annotator {annotator} stream finished. Streamed {count} items.",
-            flush=True,
-        )
-        if proc.returncode not in (0, 1):
-            raise RuntimeError(
-                f"[{session_name}] Colab execution failed with returncode {proc.returncode}"
+    safe_command = [_safe_diagnostic(argument) for argument in command]
+    result: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(attempts):
+        try:
+            result = subprocess.run(
+                command, capture_output=True, text=True, timeout=timeout, check=False
             )
-        return count
+        except subprocess.TimeoutExpired as exc:
+            if attempt + 1 < attempts:
+                time.sleep(attempt + 1)
+                continue
+            raise subprocess.TimeoutExpired(
+                safe_command,
+                exc.timeout,
+                output=_safe_diagnostic(exc.output),
+                stderr=_safe_diagnostic(exc.stderr),
+            ) from None
+        result.args = safe_command
+        result.stdout = _safe_diagnostic(result.stdout)
+        result.stderr = _safe_diagnostic(result.stderr)
+        if (
+            result.returncode
+            and attempt + 1 < attempts
+            and _TRANSIENT_TRANSPORT.search(result.stdout + result.stderr)
+        ):
+            time.sleep(attempt + 1)
+            continue
+        break
+    assert result is not None
+    if check and result.returncode:
+        raise RuntimeError(
+            f"{safe_command[:2]} failed ({result.returncode}): "
+            f"{result.stderr[-1500:] or result.stdout[-1500:]}"
+        )
+    return result
+
+
+def remote(session: str, directory: Path, name: str, code: str, timeout: int = 300) -> str:
+    path = directory / f"{name}.py"
+    path.write_text(code, encoding="utf-8")
+    result = run_cmd(
+        ["colab", "exec", "-s", session, "-f", str(path), "--timeout", str(timeout)],
+        timeout=timeout + 90,
+    )
+    (directory / f"{name}.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    return result.stdout
+
+
+def upload(session: str, local: Path, destination: str) -> None:
+    run_cmd(["colab", "upload", "-s", session, str(local), "content/" + destination], timeout=600)
+
+
+def run_session(
+    tag: str, session: str, bundle: Path, output: Path, options: list[str]
+) -> dict[str, object]:
+    work = output / f"runtime_{tag.lower()}"
+    work.mkdir(parents=True, exist_ok=True)
+    recovered: dict[str, str] = {}
+    try:
+        print(f"[{tag}] Allocating {session}", flush=True)
+        run_cmd(["colab", "new", "-s", session, "--gpu", "G4"], timeout=300)
+        remote(
+            session,
+            work,
+            "setup",
+            """import subprocess, sys, pathlib, importlib.metadata, json
+subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', 'vllm', 'pydantic', 'markdown-it-py>=4.2,<5'], check=True)
+for directory in ['wlh/benchmark', 'annotations']:
+    pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
+for name in ['wlh/__init__.py', 'wlh/benchmark/__init__.py']:
+    pathlib.Path(name).write_text('')
+print(json.dumps({name: importlib.metadata.version(name) for name in ['vllm', 'pydantic', 'torch', 'transformers', 'tokenizers']}))
+subprocess.run(['nvidia-smi'], check=True)
+""",
+            900,
+        )
+        files = {"selected.jsonl": bundle}
+        for name in (
+            "annotator.py",
+            "inference.py",
+            "budget.py",
+            "tokenization.py",
+            "annotation_schema.py",
+            "quality.py",
+            "date_evidence.py",
+            "markdown_evidence.py",
+            "source_evidence.py",
+        ):
+            files[f"wlh/benchmark/{name}"] = Path(__file__).parent / name
+        # Resume only this run's results; annotator validates original receipts before reuse.
+        previous = output / f"annotator_{tag.lower()}.jsonl"
+        if previous.is_file():
+            files[f"annotations/{previous.name}"] = previous
+        for destination, local in files.items():
+            upload(session, local, destination)
+        hashes = {
+            name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in files.items()
+        }
+        remote(
+            session,
+            work,
+            "verify_upload",
+            f"""import hashlib, pathlib
+expected = {hashes!r}
+for name, expected_hash in expected.items():
+    assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest() == expected_hash, name
+print('All upload hashes verified')
+""",
+        )
+        runner = work / "run.py"
+        runner.write_text(
+            f"""import subprocess, sys, pathlib, json, hashlib
+for name in ['annotator_{tag.lower()}.jsonl', 'rejected_{tag}.jsonl']:
+    pathlib.Path('annotations', name).touch(exist_ok=True)
+command = [sys.executable, '-m', 'wlh.benchmark.annotator', '--annotator', {tag!r}, '--input', 'selected.jsonl', '--output-dir', 'annotations', ] + {options!r}
+with open('annotations/inference_{tag}.log', 'w') as log:
+    result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
+manifest = {{'exit_code': result.returncode, 'files': {{p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('annotations').iterdir() if p.is_file()}}}}
+pathlib.Path('annotations/manifest_{tag}.json').write_text(json.dumps(manifest))
+print(json.dumps(manifest))
+""",
+            encoding="utf-8",
+        )
+        print(f"[{tag}] Running full-input inference", flush=True)
+        result = run_cmd(
+            ["colab", "exec", "-s", session, "-f", str(runner), "--timeout", "7200"],
+            timeout=7290,
+            check=False,
+        )
+        (work / "execution.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+        # Download before reporting a model failure; rejection receipts are valuable evidence.
+        manifest_path = output / f"manifest_{tag}.json"
+        run_cmd(
+            [
+                "colab",
+                "download",
+                "-s",
+                session,
+                f"content/annotations/manifest_{tag}.json",
+                str(manifest_path),
+            ],
+            timeout=300,
+        )
+        manifest = json.loads(manifest_path.read_text())
+        for name, expected_hash in manifest["files"].items():
+            if Path(name).name != name:
+                raise ValueError("unsafe_remote_filename")
+            destination = output / name
+            run_cmd(
+                [
+                    "colab",
+                    "download",
+                    "-s",
+                    session,
+                    f"content/annotations/{name}",
+                    str(destination),
+                ],
+                timeout=600,
+            )
+            actual = hashlib.sha256(destination.read_bytes()).hexdigest()
+            if actual != expected_hash:
+                raise ValueError(f"download_hash_mismatch:{name}")
+            recovered[name] = actual
+        if result.returncode or manifest["exit_code"] not in (0, 1):
+            raise RuntimeError(f"{tag}: inference failed; inspect {work} and recovered logs")
+        return {"annotator": tag, "exit_code": manifest["exit_code"], "files": recovered}
     finally:
-        print(f"[{session_name}] Releasing Colab session to conserve compute units...", flush=True)
-        run_cmd(["colab", "stop", "-s", session_name], check=False)
+        print(f"[{tag}] Releasing {session}", flush=True)
+        release = run_cmd(["colab", "stop", "-s", session], check=False, timeout=180)
+        (work / "release.log").write_text(release.stdout + release.stderr, encoding="utf-8")
+        if release.returncode:
+            print(f"[{tag}] RELEASE FAILED: {session}; manual cleanup required", flush=True)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--selection-report", type=Path)
+    parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--annotator", choices=("A", "B", "AB"), default="AB")
-    parser.add_argument("--session", type=str, default=None)
-    parser.add_argument("--out-file", type=Path, default=None)
-    parser.add_argument("--skip-preselect", action="store_true")
+    parser.add_argument("--session", default="wlh-benchmark-v3")
+    parser.add_argument("--context-tokens", type=int, default=DEFAULT_CONTEXT)
+    parser.add_argument("--max-output-tokens", type=int, default=DEFAULT_OUTPUT)
+    parser.add_argument("--safety-tokens", type=int, default=1024)
+    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--kv-cache-dtype", choices=("auto", "fp8"), default="auto")
+    parser.add_argument("--cpu-offload-gb", type=float, default=0.0)
     args = parser.parse_args()
-
-    Path("work").mkdir(exist_ok=True)
-    if not args.skip_preselect:
-        input_bundle = (
-            "data/benchmark/processor_batch_bundle.jsonl"
-            if Path("data/benchmark/processor_batch_bundle.jsonl").is_file()
-            else "data/benchmark/annotation_pipeline.json"
-        )
-        # CPU-only admission must succeed before allocating any paid GPU resources.
-        run_cmd(
+    if not 0 <= args.cpu_offload_gb <= 32:
+        parser.error("invalid_cpu_offload_gb:expected_finite_0_to_32")
+    options: list[str] = []
+    for key in (
+        "context_tokens",
+        "max_output_tokens",
+        "safety_tokens",
+        "batch_size",
+        "kv_cache_dtype",
+        "cpu_offload_gb",
+    ):
+        options.extend(["--" + key.replace("_", "-"), str(getattr(args, key))])
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    selected = args.output_dir / "selected.jsonl"
+    selection = args.selection_report or args.output_dir / "selection.json"
+    if len({p.resolve() for p in (args.input, selected, selection)}) != 3:
+        parser.error("input_and_output_paths_must_differ")
+    command = [
+        sys.executable,
+        "-m",
+        "wlh.benchmark.annotator",
+        "--select-only",
+        "--local-files-only",
+        "--input",
+        str(args.input),
+        "--selected-bundle",
+        str(selected),
+        "--selection-report",
+        str(selection),
+    ]
+    result = run_cmd(command + options, timeout=900, check=False)
+    if not selection.exists():
+        raise RuntimeError(result.stderr or result.stdout)
+    report = json.loads(selection.read_text())
+    report["input_sha256"] = hashlib.sha256(args.input.read_bytes()).hexdigest()
+    write_json(selection, report)
+    print(
+        json.dumps({k: report[k] for k in ("total_tasks", "selected_tasks", "excluded_tasks")}),
+        flush=True,
+    )
+    if result.returncode or args.prepare_only:
+        return result.returncode
+    tags = list("AB") if args.annotator == "AB" else [args.annotator]
+    with ThreadPoolExecutor(max_workers=len(tags)) as pool:
+        futures = [
+            pool.submit(
+                run_session,
+                tag,
+                f"{args.session}-{tag.lower()}",
+                selected,
+                args.output_dir,
+                options,
+            )
+            for tag in tags
+        ]
+        receipts = [future.result() for future in futures]
+    write_json(
+        args.output_dir / "run.json",
+        {
+            "input_sha256": report["input_sha256"],
+            "budget": report["budget"],
+            "runtime": report["runtime"],
+            "options": options,
+            "receipts": receipts,
+        },
+    )
+    if len(tags) == 2:
+        paired = run_cmd(
             [
                 sys.executable,
                 "-m",
                 "wlh.benchmark.annotator",
-                "--select-only",
-                "--local-files-only",
+                "--pair-only",
                 "--input",
-                input_bundle,
-                "--selected-bundle",
-                "data/benchmark/processor_complete_bundle.jsonl",
-                "--selection-report",
-                "artifacts/benchmark-completion/selection.json",
-            ],
-            max_retries=1,
+                str(selected),
+                "--output-dir",
+                str(args.output_dir),
+            ]
+            + options,
+            timeout=300,
+            check=False,
         )
-
-    if args.annotator in ("A", "B"):
-        sess = args.session or f"wlh-bench-{args.annotator.lower()}"
-        run_single_annotator_on_session(args.annotator, sess, out_path=args.out_file)
-        return 0
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        fut_a = pool.submit(run_single_annotator_on_session, "A", "wlh-bench-a")
-        fut_b = pool.submit(run_single_annotator_on_session, "B", "wlh-bench-b")
-        fut_a.result()
-        fut_b.result()
-
-    run_cmd(
-        [
-            sys.executable,
-            "-m",
-            "wlh.benchmark.annotator",
-            "--pair-only",
-            "--input",
-            "data/benchmark/processor_complete_bundle.jsonl",
-            "--output-dir",
-            "data/benchmark/complete_annotations",
-        ],
-        check=False,
-        max_retries=1,
-    )
-    return 0
+        (args.output_dir / "pair.log").write_text(paired.stdout + paired.stderr, encoding="utf-8")
+        return paired.returncode
+    return int(any(row["exit_code"] != 0 for row in receipts))
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

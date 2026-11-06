@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import Any, cast
-from urllib.parse import parse_qs, unquote, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlsplit, urlunsplit
 
 from wlh.cleaners.dates import (
     era_date,
@@ -41,10 +41,24 @@ def clean_url(base: str, href: str | None) -> str | None:
         return None
     cleaned: str = href.strip()
     if cleaned.lower().startswith("javascript:") or re.match(r"^[A-Za-z_][\w.]*\s*\(", cleaned):
-        js_match: re.Match[str] | None = re.search(r"""['"]((?:https?://|/)[^'"]+)['"]""", cleaned)
-        if not js_match:
-            return None
-        cleaned = str(js_match.group(1) or "").strip()
+        sc_match = re.search(
+            r"""serach_channel\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]\s*,\s*['"]?([^'",\s)]+)['"]?\s*,\s*['"]?(\d+)['"]?\s*,\s*['"]([^'"]*)['"]\s*\)""",
+            cleaned,
+        )
+        if sc_match:
+            ch_code, ch_name, is_agg, page_size, tpl = sc_match.groups()
+            cleaned = (
+                f"/chinatax/manuscriptList/{ch_code}"
+                f"?_channelName={quote(ch_name)}&_isAgg={is_agg or '0'}"
+                f"&_pageSize={page_size or '10'}&_template={tpl or 'index'}"
+            )
+        else:
+            js_match: re.Match[str] | None = re.search(
+                r"""['"]((?:https?://|/)[^'"]+)['"]""", cleaned
+            )
+            if not js_match:
+                return None
+            cleaned = str(js_match.group(1) or "").strip()
     if not cleaned or cleaned.lower().startswith(("javascript:", "mailto:", "tel:", "data:", "#")):
         return None
     try:

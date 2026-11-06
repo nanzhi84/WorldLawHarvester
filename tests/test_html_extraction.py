@@ -312,6 +312,223 @@ class TestHtmlToMarkdownConversion:
             == "2025-03-22"
         )
 
+    def test_html_and_text_cleaners_with_download_and_error_correction_footer_strip_trailing_boilerplate(
+        self,
+    ) -> None:
+        """HTML and text cleaners strip trailing `【下载】` and `纠错或建议` / `[纠错或建议](...jiucuo.html)` action footers across generic builders and `dd-504` / `dd-592` configs."""
+        from pathlib import Path
+
+        import yaml
+
+        from wlh.cleaners.text_cleaner import apply_text_cleaners
+        from wlh.processor.extractors.html.dom_tree import parse_html
+        from wlh.processor.parsers.html.document_builder import WebDocumentBuilder
+
+        cleaned_text = apply_text_cleaners(
+            "正文第一条。\n\n【下载】\n\n[纠错或建议](http://hd.chinatax.gov.cn/fuwu/jiucuo.html)\n"
+        )
+        assert "正文第一条。" in cleaned_text
+        for forbidden in ("【下载】", "纠错或建议", "jiucuo.html"):
+            assert forbidden not in cleaned_text, (
+                f"Expected {forbidden!r} to be stripped by apply_text_cleaners:\n{cleaned_text}"
+            )
+
+        snippet_html = (
+            '<div class="article">'
+            '<div class="arc_cont"><p>各省、自治区、直辖市税务局：现将有关事项通知如下。</p></div>'
+            '<div class="bot-btns-box">'
+            '<div class="print"><a href="javascript:void(0)" id="actdy">【打印】</a></div>'
+            '<div class="xxgk-download-box"><a href="" class="xxgk-download-btn" id="zwxz">【下载】</a></div>'
+            "</div>"
+            '<div class="jcjy"><a href="http://hd.chinatax.gov.cn/fuwu/jiucuo.html" target="_blank">纠错或建议</a></div>'
+            "</div>"
+        )
+        generic_builder = WebDocumentBuilder(
+            {
+                "processor": {
+                    "parser": {
+                        "type": "html",
+                        "documents": {
+                            "content_xpath": "//div[@class='article']",
+                        },
+                    }
+                }
+            }
+        )
+        snippet_url = "https://fgk.chinatax.gov.cn/zcfgk/c100012/c5242764/content.html"
+        tree, _, _ = parse_html(snippet_html.encode("utf-8"), "utf-8")
+        snippet_md = generic_builder.html_markdown(
+            tree,
+            {
+                "actual_url": snippet_url,
+                "request_url": snippet_url,
+                "charset": "utf-8",
+            },
+        )
+        assert "各省、自治区、直辖市税务局：现将有关事项通知如下。" in snippet_md
+        for forbidden in ("【打印】", "【下载】", "纠错或建议", "jiucuo.html"):
+            assert forbidden not in snippet_md, (
+                f"Unexpected footer noise {forbidden!r} in generic HTML Markdown:\n{snippet_md}"
+            )
+
+        repo_root = Path(__file__).resolve().parents[1]
+        source_fixtures = {
+            "dd-504": [
+                repo_root / "tests" / "fixtures" / "dd-504" / "02-content.html",
+                repo_root / "tests" / "fixtures" / "dd-504" / "05-content.html",
+            ],
+            "dd-592": [
+                repo_root / "tests" / "fixtures" / "dd-592" / "03-content.html",
+                repo_root / "tests" / "fixtures" / "dd-592" / "04-content.html",
+            ],
+        }
+        for source_id, fixture_paths in source_fixtures.items():
+            cfg_path = repo_root / "sources" / f"{source_id}.yaml"
+            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+            docs_cfg = cfg["processor"]["parser"]["documents"]
+            assert docs_cfg.get("exclude_content_xpath"), (
+                f"Expected exclude_content_xpath in {source_id}.yaml"
+            )
+            assert cfg.get("cleaners", {}).get("strip_text_regexes"), (
+                f"Expected cleaners.strip_text_regexes in {source_id}.yaml"
+            )
+            prod_builder = WebDocumentBuilder(cfg)
+            for fixture_path in fixture_paths:
+                raw_html = fixture_path.read_text(encoding="utf-8")
+                live_like_html = raw_html.replace(
+                    'href="#unselected" target="_blank">纠错或建议</a>',
+                    'href="http://hd.chinatax.gov.cn/fuwu/jiucuo.html" target="_blank">纠错或建议</a>',
+                )
+                for variant_html in (raw_html, live_like_html):
+                    f_tree, _, _ = parse_html(variant_html.encode("utf-8"), "utf-8")
+                    f_md = prod_builder.html_markdown(
+                        f_tree,
+                        {
+                            "actual_url": snippet_url,
+                            "request_url": snippet_url,
+                            "charset": "utf-8",
+                        },
+                    )
+                    for forbidden in ("【下载】", "纠错或建议", "jiucuo.html"):
+                        assert forbidden not in f_md, (
+                            f"Unexpected {forbidden!r} in {source_id} ({fixture_path.name}):\n{f_md}"
+                        )
+
+    def test_html_and_text_cleaners_with_attachment_and_related_articles_footer_strip_trailing_boilerplate(
+        self,
+    ) -> None:
+        """HTML and text cleaners strip trailing `附件下载：` and `相关文章：` footer blocks across `apply_text_cleaners` and `dd-595` / `dd-596` configs while preserving main document text."""
+        from pathlib import Path
+
+        import yaml
+
+        from wlh.cleaners.text_cleaner import apply_text_cleaners
+        from wlh.processor.extractors.html.dom_tree import parse_html
+        from wlh.processor.parsers.html.document_builder import WebDocumentBuilder
+
+        for sample_text in (
+            "正文第一条。\n\n附件下载：\n\n相关文章：\n",
+            "正文第一条。\n\n附件下载：\n\n相关文章：\n\n- [某政策解读](https://szs.mof.gov.cn/zhengcejiedu/202409/t20240903_3943047.htm)\n",
+            "正文第一条。\n\n**点击“阅读原文”快速投稿~**\n",
+            "正文第一条。\n\n**点击“阅读原文”快速订刊~**\n",
+        ):
+            cleaned_text = apply_text_cleaners(sample_text)
+            assert "正文第一条。" in cleaned_text
+            for forbidden in (
+                "附件下载：",
+                "相关文章：",
+                "点击“阅读原文”快速投稿~",
+                "点击“阅读原文”快速订刊~",
+            ):
+                assert forbidden not in cleaned_text, (
+                    f"Expected {forbidden!r} to be stripped by apply_text_cleaners:\n{cleaned_text}"
+                )
+
+        repo_root = Path(__file__).resolve().parents[1]
+        source_fixtures = {
+            "dd-595": [
+                (
+                    repo_root / "tests" / "fixtures" / "dd-595" / "51-t20260131_3983036.htm.html",
+                    "https://szs.mof.gov.cn/zhengcefabu/202601/t20260131_3983036.htm",
+                    "小规模纳税人发生应税交易",
+                ),
+                (
+                    repo_root / "tests" / "fixtures" / "dd-595" / "52-t20230827_3904226.htm.html",
+                    "https://szs.mof.gov.cn/zhengcefabu/202308/t20230827_3904226.htm",
+                    "证券交易印花税实施减半征收",
+                ),
+            ],
+            "dd-596": [
+                (
+                    repo_root / "tests" / "fixtures" / "dd-596" / "12-t20080815_63368.htm.html",
+                    "https://szs.mof.gov.cn/zhengcejiedu/200808/t20080815_63368.htm",
+                    "上半年税收收入增长的总体情况",
+                ),
+                (
+                    repo_root / "tests" / "fixtures" / "dd-596" / "13-t20250827_3970905.htm.html",
+                    "https://szs.mof.gov.cn/zhengcejiedu/202508/t20250827_3970905.htm",
+                    "吉林省自2025年9月1日起",
+                ),
+            ],
+        }
+        for source_id, fixtures in source_fixtures.items():
+            cfg_path = repo_root / "sources" / f"{source_id}.yaml"
+            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+            docs_cfg = cfg["processor"]["parser"]["documents"]
+            assert docs_cfg.get("exclude_content_xpath"), (
+                f"Expected exclude_content_xpath in {source_id}.yaml"
+            )
+            assert cfg.get("cleaners", {}).get("strip_text_regexes"), (
+                f"Expected cleaners.strip_text_regexes in {source_id}.yaml"
+            )
+            prod_builder = WebDocumentBuilder(cfg)
+            for fixture_path, page_url, expected_body_phrase in fixtures:
+                raw_html = fixture_path.read_text(encoding="utf-8")
+                f_tree, _, _ = parse_html(raw_html.encode("utf-8"), "utf-8")
+                f_md = prod_builder.html_markdown(
+                    f_tree,
+                    {
+                        "actual_url": page_url,
+                        "request_url": page_url,
+                        "charset": "utf-8",
+                    },
+                )
+                assert expected_body_phrase in f_md, (
+                    f"Expected main body phrase {expected_body_phrase!r} in {source_id} ({fixture_path.name}):\n{f_md}"
+                )
+                for forbidden in ("附件下载：", "相关文章："):
+                    assert forbidden not in f_md, (
+                        f"Unexpected {forbidden!r} in {source_id} ({fixture_path.name}):\n{f_md}"
+                    )
+
+        dd605_cfg = yaml.safe_load(
+            (repo_root / "sources" / "dd-605.yaml").read_text(encoding="utf-8")
+        )
+        assert dd605_cfg.get("cleaners", {}).get("strip_text_regexes"), (
+            "Expected cleaners.strip_text_regexes in dd-605.yaml"
+        )
+        dd605_builder = WebDocumentBuilder(dd605_cfg)
+        dd605_fixture = (
+            repo_root / "tests" / "fixtures" / "dd-605" / "03-bVW3yqOBRMnoXFcO_K5Ejg.html"
+        )
+        dd605_url = "https://mp.weixin.qq.com/s/bVW3yqOBRMnoXFcO_K5Ejg"
+        dd605_tree, _, _ = parse_html(
+            dd605_fixture.read_text(encoding="utf-8").encode("utf-8"), "utf-8"
+        )
+        dd605_md = dd605_builder.html_markdown(
+            dd605_tree,
+            {
+                "actual_url": dd605_url,
+                "request_url": dd605_url,
+                "charset": "utf-8",
+            },
+        )
+        assert "对人工智能使用行为课税" in dd605_md
+        for forbidden_wx in ("**点击“阅读原文”快速投稿~**", "点击“阅读原文”快速投稿~"):
+            assert forbidden_wx not in dd605_md, (
+                f"Unexpected {forbidden_wx!r} in dd-605 ({dd605_fixture.name}):\n{dd605_md}"
+            )
+
 
 class TestUnscopedHtmlFallbackExtraction:
     def test_unscoped_article_page_with_chrome_sidebars_comments_and_related_links_extracts_clean_main_body(

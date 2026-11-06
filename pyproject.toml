@@ -12,6 +12,7 @@ dependencies = [
   "boto3>=1.36",
   "charset-normalizer>=3.3",
   "lxml>=5",
+  "markdown-it-py>=4.2,<5",
   "openpyxl>=3.1",
   "pillow>=11",
   "playwright>=1.50",
