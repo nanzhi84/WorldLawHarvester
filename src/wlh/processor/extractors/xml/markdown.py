@@ -10,6 +10,12 @@ import lxml.etree as _etree  # type: ignore[import-untyped]
 
 from wlh.cleaners.text_cleaner import compact, normalized
 from wlh.core import WlhError
+from wlh.processor.extractors.base import (
+    EngineAdapter,
+    ExtractionInput,
+    ExtractionOptions,
+    QuirkHookRunner,
+)
 from wlh.processor.extractors.html.html_to_md import html_to_markdown, text_to_markdown
 from wlh.processor.extractors.html.tables_and_lists import literal_text
 from wlh.processor.extractors.xml.inline import INLINE_TAGS, inline_content
@@ -414,6 +420,23 @@ def gazette_html_to_markdown(
     return "# " + title + "\n\n" + body_md if title else body_md
 
 
+class XmlDialectEngine(EngineAdapter):
+    """Legal / gazette XML dialects (GPO, Legal XML, ``<dokument>``) to Markdown."""
+
+    kind = "xml"
+    engine_name = "xml_dialect"
+    parser_tag = "markdown"
+
+    def extract(
+        self, inp: ExtractionInput, opts: ExtractionOptions, hooks: QuirkHookRunner
+    ) -> tuple[str, dict[str, Any]]:
+        try:
+            text = inp.data.decode("utf-8-sig")
+        except UnicodeError:
+            raise WlhError("zip_text_encoding_invalid") from None
+        return xml_to_markdown(text.encode("utf-8")), {}
+
+
 __all__ = [
     "CONTAINER_TAGS",
     "HEADINGS",
@@ -421,6 +444,7 @@ __all__ = [
     "PARAGRAPH_TAGS",
     "SKIP",
     "SKIP_TAGS",
+    "XmlDialectEngine",
     "dokument_xml_to_markdown",
     "egov_law_xml_to_markdown",
     "gazette_html_to_markdown",

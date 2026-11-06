@@ -17,6 +17,9 @@ import pytest
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ROOT = ROOT_DIR
+_WORKTREE_SRC = str(ROOT_DIR / "src")
+if sys.path[:1] != [_WORKTREE_SRC]:
+    sys.path.insert(0, _WORKTREE_SRC)
 
 
 def _is_valid_fixtures_dir(path: Path) -> bool:
@@ -259,11 +262,35 @@ _PYRAMID_MARKERS_BY_FILE: dict[str, str] = {
     "test_runbook_sample_store.py": "contract",
     "test_source_document_qualification.py": "contract",
     "test_benchmark.py": "contract",
+    "test_benchmark_arbitration.py": "contract",
+    "test_benchmark_budget.py": "contract",
+    "test_benchmark_calendar.py": "contract",
+    "test_benchmark_colab.py": "contract",
+    "test_benchmark_colab_transport.py": "contract",
     "test_benchmark_completion.py": "contract",
+    "test_benchmark_dataset.py": "contract",
+    "test_benchmark_date_evidence.py": "contract",
+    "test_benchmark_dynamic_tables.py": "contract",
+    "test_benchmark_first_publication.py": "contract",
+    "test_benchmark_grounding.py": "contract",
+    "test_benchmark_inline_dates.py": "contract",
+    "test_benchmark_json_links.py": "contract",
+    "test_benchmark_lists.py": "contract",
+    "test_benchmark_markdown_evidence.py": "contract",
+    "test_benchmark_native_fidelity.py": "contract",
+    "test_benchmark_native_metadata.py": "contract",
+    "test_benchmark_navigation_evidence.py": "contract",
     "test_benchmark_processor_suite.py": "contract",
+    "test_benchmark_provenance.py": "contract",
+    "test_benchmark_publication_metadata.py": "contract",
+    "test_benchmark_receipts.py": "contract",
+    "test_benchmark_runtime.py": "contract",
+    "test_benchmark_structured_evidence.py": "contract",
+    "test_benchmark_url_evidence.py": "contract",
     "test_document_extraction.py": "extractor",
     "test_html_extraction.py": "extractor",
     "test_office_extraction.py": "extractor",
+    "test_extractor_gateway.py": "extractor",
     "test_delivery_quality.py": "extractor",
     "test_document_titles.py": "replay",
     "test_legal_document_layout.py": "replay",

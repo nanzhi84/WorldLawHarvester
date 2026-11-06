@@ -1,4 +1,4 @@
-"""Stage 3b Format Extractors (PDF, Word/Office, OCR, HTML->Markdown, XML->Markdown, and Quirks)."""
+"""Stage 3b gateway: magic sniffing, engine registry, Office/PDF/OCR/HTML/XML engines, quirks."""
 
 from __future__ import annotations
 
@@ -6,6 +6,15 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from wlh.processor.extractors.archive import unpack_zip
+    from wlh.processor.extractors.base import (
+        EngineAdapter,
+        ExtractionInput,
+        ExtractionOptions,
+        ExtractionOutput,
+        QuirkHook,
+        QuirkHookRunner,
+    )
     from wlh.processor.extractors.html import (
         MARKDOWN_CONTRACT,
         clean_html_tree,
@@ -15,22 +24,24 @@ if TYPE_CHECKING:
         require_textual_images,
         text_to_markdown,
     )
+    from wlh.processor.extractors.magic import detect_real_format
     from wlh.processor.extractors.ocr import br_ocr, tesseract_image_bytes, tesseract_pages
-    from wlh.processor.extractors.pdf import PDF_CONTRACT, analyze, extract_pdf, page_markdown
-    from wlh.processor.extractors.quirks import QUIRKS
-    from wlh.processor.extractors.router import run_extraction
-    from wlh.processor.extractors.slots import PDFSlots
-    from wlh.processor.extractors.word import (
+    from wlh.processor.extractors.office import (
         OFFICE_CONTRACT,
         OFFICE_KINDS,
-        detect_real_format,
+        extract_doc,
         extract_docx,
         extract_excel,
         extract_office,
-        libreoffice_identity,
-        salvage_zip_prefix,
-        unpack_zip,
+        extract_rtf,
+        extract_xls,
+        extract_xlsx,
     )
+    from wlh.processor.extractors.pdf import PDF_CONTRACT, analyze, extract_pdf, page_markdown
+    from wlh.processor.extractors.quirks import QUIRK_HOOKS, QUIRKS, salvage_zip_prefix
+    from wlh.processor.extractors.registry import ExtractorRegistry, default_registry
+    from wlh.processor.extractors.router import run_extraction
+    from wlh.processor.extractors.slots import PDFSlots
     from wlh.processor.extractors.xml import (
         INLINE_TAGS,
         TABLE_TAGS,
@@ -47,6 +58,16 @@ if TYPE_CHECKING:
     )
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
+    "EngineAdapter": ("wlh.processor.extractors.base", "EngineAdapter"),
+    "ExtractionInput": ("wlh.processor.extractors.base", "ExtractionInput"),
+    "ExtractionOptions": ("wlh.processor.extractors.base", "ExtractionOptions"),
+    "ExtractionOutput": ("wlh.processor.extractors.base", "ExtractionOutput"),
+    "QuirkHook": ("wlh.processor.extractors.base", "QuirkHook"),
+    "QuirkHookRunner": ("wlh.processor.extractors.base", "QuirkHookRunner"),
+    "ExtractorRegistry": ("wlh.processor.extractors.registry", "ExtractorRegistry"),
+    "default_registry": ("wlh.processor.extractors.registry", "default_registry"),
+    "detect_real_format": ("wlh.processor.extractors.magic", "detect_real_format"),
+    "unpack_zip": ("wlh.processor.extractors.archive", "unpack_zip"),
     "MARKDOWN_CONTRACT": ("wlh.processor.extractors.html", "MARKDOWN_CONTRACT"),
     "clean_html_tree": ("wlh.processor.extractors.html", "clean_html_tree"),
     "document_tree": ("wlh.processor.extractors.html", "document_tree"),
@@ -62,17 +83,19 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "extract_pdf": ("wlh.processor.extractors.pdf", "extract_pdf"),
     "page_markdown": ("wlh.processor.extractors.pdf", "page_markdown"),
     "QUIRKS": ("wlh.processor.extractors.quirks", "QUIRKS"),
+    "QUIRK_HOOKS": ("wlh.processor.extractors.quirks", "QUIRK_HOOKS"),
+    "salvage_zip_prefix": ("wlh.processor.extractors.quirks", "salvage_zip_prefix"),
     "run_extraction": ("wlh.processor.extractors.router", "run_extraction"),
     "PDFSlots": ("wlh.processor.extractors.slots", "PDFSlots"),
-    "OFFICE_CONTRACT": ("wlh.processor.extractors.word", "OFFICE_CONTRACT"),
-    "OFFICE_KINDS": ("wlh.processor.extractors.word", "OFFICE_KINDS"),
-    "detect_real_format": ("wlh.processor.extractors.word", "detect_real_format"),
-    "extract_docx": ("wlh.processor.extractors.word", "extract_docx"),
-    "extract_excel": ("wlh.processor.extractors.word", "extract_excel"),
-    "extract_office": ("wlh.processor.extractors.word", "extract_office"),
-    "libreoffice_identity": ("wlh.processor.extractors.word", "libreoffice_identity"),
-    "salvage_zip_prefix": ("wlh.processor.extractors.word", "salvage_zip_prefix"),
-    "unpack_zip": ("wlh.processor.extractors.word", "unpack_zip"),
+    "OFFICE_CONTRACT": ("wlh.processor.extractors.office", "OFFICE_CONTRACT"),
+    "OFFICE_KINDS": ("wlh.processor.extractors.office", "OFFICE_KINDS"),
+    "extract_doc": ("wlh.processor.extractors.office", "extract_doc"),
+    "extract_docx": ("wlh.processor.extractors.office", "extract_docx"),
+    "extract_excel": ("wlh.processor.extractors.office", "extract_excel"),
+    "extract_office": ("wlh.processor.extractors.office", "extract_office"),
+    "extract_rtf": ("wlh.processor.extractors.office", "extract_rtf"),
+    "extract_xls": ("wlh.processor.extractors.office", "extract_xls"),
+    "extract_xlsx": ("wlh.processor.extractors.office", "extract_xlsx"),
     "INLINE_TAGS": ("wlh.processor.extractors.xml", "INLINE_TAGS"),
     "TABLE_TAGS": ("wlh.processor.extractors.xml", "TABLE_TAGS"),
     "dokument_xml_to_markdown": ("wlh.processor.extractors.xml", "dokument_xml_to_markdown"),
@@ -110,24 +133,36 @@ __all__ = [
     "PDFSlots",
     "PDF_CONTRACT",
     "QUIRKS",
+    "QUIRK_HOOKS",
     "TABLE_TAGS",
+    "EngineAdapter",
+    "ExtractionInput",
+    "ExtractionOptions",
+    "ExtractionOutput",
+    "ExtractorRegistry",
+    "QuirkHook",
+    "QuirkHookRunner",
     "analyze",
     "br_ocr",
     "clean_html_tree",
+    "default_registry",
     "detect_real_format",
     "document_tree",
     "dokument_xml_to_markdown",
     "egov_law_xml_to_markdown",
+    "extract_doc",
     "extract_docx",
     "extract_excel",
     "extract_office",
     "extract_pdf",
+    "extract_rtf",
+    "extract_xls",
+    "extract_xlsx",
     "gazette_html_to_markdown",
     "gpo_xml_to_markdown",
     "html_to_markdown",
     "inline_content",
     "json_to_markdown",
-    "libreoffice_identity",
     "page_markdown",
     "require_textual_images",
     "run_extraction",

@@ -122,10 +122,6 @@ def normalize_parser_config(config: Mapping[str, Any]) -> dict[str, Any]:
     out_parser_dict = _as_dict(out.get("parser"))
     extractor_spec.setdefault("quirks", _as_list(out.get("quirks")))
     extractor_spec.setdefault(
-        "libreoffice_timeout_seconds",
-        out_parser_dict.get("libreoffice_timeout_seconds", 120),
-    )
-    extractor_spec.setdefault(
         "office_text_policy", out_parser_dict.get("office_text_policy", "prefer")
     )
     ocr_cfg: dict[str, Any] = (
@@ -242,7 +238,6 @@ def normalize_parser_config(config: Mapping[str, Any]) -> dict[str, Any]:
     out["budget"] = budget_cfg
     out["parser"] = {
         "office_text_policy": extractor_spec["office_text_policy"],
-        "libreoffice_timeout_seconds": extractor_spec["libreoffice_timeout_seconds"],
         "quality_accept_routes": cleaners["quality_accept_routes"],
     }
     out["transforms"] = _as_list(parser_spec.get("transforms"))

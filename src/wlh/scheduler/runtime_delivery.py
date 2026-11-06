@@ -7,8 +7,8 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 from wlh.core import WlhError, digest
+from wlh.processor.extractors.magic import detect_real_format
 from wlh.processor.extractors.router import run_extraction
-from wlh.processor.extractors.word.office import detect_real_format
 from wlh.processor.parsers import RawRecord
 from wlh.scheduler.context import adapter_error
 from wlh.scheduler.run_state import STOPPING

@@ -22,6 +22,12 @@ import pymupdf as _fitz  # type: ignore[import-untyped]
 from wlh.cleaners.extraction_quality import block_text, json_value, quality_check
 from wlh.cleaners.text_cleaner import normalized
 from wlh.core import WlhError
+from wlh.processor.extractors.base import (
+    EngineAdapter,
+    ExtractionInput,
+    ExtractionOptions,
+    QuirkHookRunner,
+)
 from wlh.processor.extractors.html.html_to_md import text_to_markdown
 from wlh.processor.extractors.ocr.br_ocr import br_ocr
 from wlh.processor.extractors.ocr.tesseract import (
@@ -471,3 +477,67 @@ def extract_pdf(
         invalid_body_patterns=invalid_body_patterns,
     )
     return markdown, info, report, parsers
+
+
+OCR_ACCEPT_ROUTES = frozenset({"accept", "accept_ocr", "accept_with_warning"})
+
+
+def ocr_image_pages(
+    images: Sequence[bytes], ocr: Mapping[str, Any], profile: str
+) -> tuple[str, dict[str, Any]]:
+    """Embedded page images (one per page) as an in-memory PDF through local scan OCR."""
+    import tempfile
+
+    if not images:
+        raise WlhError("ocr_images_missing")
+    if not ocr:
+        from wlh.config import OCRConfig
+
+        ocr = OCRConfig().model_dump()
+    pdf_doc = fitz.open()
+    try:
+        for image in images:
+            page = pdf_doc.new_page(width=595, height=842)
+            page.insert_image(fitz.Rect(18, 18, 577, 824), stream=image)
+        data = bytes(pdf_doc.tobytes())
+    finally:
+        pdf_doc.close()
+    with tempfile.TemporaryDirectory(prefix="wlh-image-pdf-") as folder:
+        pdf_path = Path(folder) / "input.pdf"
+        pdf_path.write_bytes(data)
+        markdown, info, quality, _ = extract_pdf(pdf_path, ocr, profile)
+    if quality["recommended_route"] not in OCR_ACCEPT_ROUTES:
+        raise WlhError("quality_check_failed")
+    return markdown, info
+
+
+class PyMuPdfHybridEngine(EngineAdapter):
+    """Native page text + per-page scan OCR (br-ocr / Vision / Tesseract) with quality gate."""
+
+    kind = "pdf"
+    engine_name = "pymupdf_hybrid"
+    parser_tag = "pdf"
+    # PUA decoding and profile-gated TCVN3 recovery run per page inside the engine.
+    native_stages = frozenset({"text_span", "post_markdown"})
+
+    def extract(
+        self, inp: ExtractionInput, opts: ExtractionOptions, hooks: QuirkHookRunner
+    ) -> tuple[str, dict[str, Any]]:
+        import tempfile
+
+        def run(path: Path) -> tuple[str, dict[str, Any]]:
+            markdown, info, report, parsers = extract_pdf(
+                path,
+                opts.ocr,
+                opts.profile,
+                inp.ocr_cache,
+                invalid_body_patterns=opts.invalid_body_patterns,
+            )
+            return markdown, {**info, "_quality": report, "_parsers": parsers}
+
+        if inp.path is not None:
+            return run(inp.path)
+        with tempfile.TemporaryDirectory(prefix="wlh-pdf-") as folder:
+            path = Path(folder) / "input.pdf"
+            path.write_bytes(inp.data)
+            return run(path)

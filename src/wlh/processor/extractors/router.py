@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from wlh.core import WlhError
+from wlh.processor.extractors.magic import detect_real_format
 from wlh.processor.extractors.slots import PDFSlots
 from wlh.storage.cas import work_directory
 
@@ -38,7 +39,6 @@ def _worker_env() -> dict[str, str]:
             "SSL_CERT_FILE",
             "TESSDATA_PREFIX",
             "WLH_TESSERACT",
-            "WLH_SOFFICE",
             "WLH_BR_OCR_URL",
             "HOME",
         )
@@ -196,7 +196,6 @@ def _extract_job_params(
     else:
         parser_cfg = {
             "office_text_policy": ext_cfg.get("office_text_policy", "prefer"),
-            "libreoffice_timeout_seconds": ext_cfg.get("libreoffice_timeout_seconds", 120),
             "quality_accept_routes": clean_cfg.get(
                 "quality_accept_routes", ["accept", "accept_ocr"]
             ),
@@ -232,8 +231,13 @@ def run_extraction(
     active: Callable[[], None] | None = None,
     cached_ocr: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Materialized CAS bytes in, (result, member files) out. ``active`` raises to cancel."""
+    """Materialized CAS bytes in, (result, member files) out. ``active`` raises to cancel.
+
+    The magic sniffer calibrates ``kind`` first, so disguised suffixes never pick an engine.
+    """
     profile, parser_cfg, ocr_cfg, max_bytes = _extract_job_params(config)
+    detected = detect_real_format(data, kind)
+    kind = kind if detected == "unknown" else detected
     job: dict[str, Any] = {
         "kind": kind,
         "ocr_cache": cached_ocr,
@@ -242,7 +246,7 @@ def run_extraction(
         "profile": profile,
         "max_bytes": max_bytes,
     }
-    timeout: float = ocr_cfg["timeout_seconds"] + parser_cfg["libreoffice_timeout_seconds"] * 2
+    timeout = float(ocr_cfg["timeout_seconds"])
     slots = PDFSlots()
     slot = slots.acquire_blocking(active)
     folder = Path(tempfile.mkdtemp(prefix="wlh-extract-", dir=work_directory()))

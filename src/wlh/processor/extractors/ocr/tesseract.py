@@ -158,8 +158,12 @@ def detect_raster_table_cells(
     if h < 100 or w < 100:
         return None
     binary = gray_np < 200
+    # Slightly skewed scans (0.5-1.5 deg) drift ruling lines across pixel rows/columns:
+    # OR-merge 2px neighbourhoods before measuring horizontal / vertical runs.
+    h_binary = binary.copy()
+    h_binary[:-1, :] |= binary[1:, :]
     h_kernel = max(25, w // 12)
-    cs_h = np.cumsum(binary, axis=1, dtype=np.int32)
+    cs_h = np.cumsum(h_binary, axis=1, dtype=np.int32)
     h_runs = (cs_h[:, h_kernel:] - cs_h[:, :-h_kernel]) >= int(h_kernel * 0.82)
     h_mask = np.any(h_runs, axis=1)
     y_indices = np.where(h_mask)[0]
@@ -183,7 +187,8 @@ def detect_raster_table_cells(
     if (y_bot - y_top) < h * 0.06:
         return None
 
-    sub_bin = binary[y_top:y_bot, :]
+    sub_bin = binary[y_top:y_bot, :].copy()
+    sub_bin[:, :-1] |= binary[y_top:y_bot, 1:]
     sh = sub_bin.shape[0]
     v_kernel = max(20, min(sh // 2, h // 20))
     if sh <= v_kernel:
@@ -527,6 +532,12 @@ def _map_vision_languages(languages: str) -> str:
     return ",".join(vision_langs)
 
 
+def _vision_probe_first_page(numbers: Sequence[int], languages: str) -> bool:
+    """Multi-page CJK scans are probed on their first page before rendering the rest."""
+    langs = set(languages.split("+"))
+    return len(numbers) > 2 and bool(langs & {"jpn", "chi_tra"})
+
+
 def vision_pages(
     path: str | Path,
     numbers: Sequence[int],
@@ -557,45 +568,66 @@ def vision_pages(
             pixels = math.ceil(page.rect.width * scale) * math.ceil(page.rect.height * scale)
             if pixels <= 0 or pixels > cfg["max_page_pixels"]:
                 raise WlhError("pdf_ocr_pixel_limit_exceeded")
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise WlhError("pdf_ocr_timeout")
-        img_paths: list[str] = []
-        gray_maps: dict[str, tuple[int, np.ndarray]] = {}
-        for number in numbers:
-            page = document[number - 1]
-            img_p = Path(folder) / f"page-{number}.png"
-            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csGRAY)
-            pix.save(str(img_p))
-            img_paths.append(str(img_p))
-            gray_maps[str(img_p)] = (
-                number,
-                np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width).copy(),
-            )
-        try:
-            proc = subprocess.run(
-                [str(vision_bin), "accurate", langs_csv, *img_paths],
-                capture_output=True,
-                timeout=max(1.0, remaining),
-                check=True,
-            )
-            vision_out = json.loads(proc.stdout.decode("utf-8"))
-        except subprocess.TimeoutExpired:
-            raise WlhError("pdf_ocr_timeout") from None
-        except Exception:
-            raise WlhError("pdf_ocr_failed") from None
 
-        for item in vision_out:
-            pno, gray_np = gray_maps[item["path"]]
-            p_md, p_blocks = assemble_page_blocks_and_markdown(pno, item["lines"], gray_np)
+        def recognize(batch: Sequence[int]) -> list[tuple[int, str, list[dict[str, Any]]]]:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise WlhError("pdf_ocr_timeout")
+            img_paths: list[str] = []
+            gray_maps: dict[str, tuple[int, np.ndarray]] = {}
+            for number in batch:
+                page = document[number - 1]
+                img_p = Path(folder) / f"page-{number}.png"
+                pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), colorspace=fitz.csGRAY)
+                pix.save(str(img_p))
+                img_paths.append(str(img_p))
+                gray_maps[str(img_p)] = (
+                    number,
+                    np.frombuffer(pix.samples, dtype=np.uint8)
+                    .reshape(pix.height, pix.width)
+                    .copy(),
+                )
+            try:
+                proc = subprocess.run(
+                    [str(vision_bin), "accurate", langs_csv, *img_paths],
+                    capture_output=True,
+                    timeout=max(1.0, remaining),
+                    check=True,
+                )
+                vision_out = json.loads(proc.stdout.decode("utf-8"))
+            except subprocess.TimeoutExpired:
+                raise WlhError("pdf_ocr_timeout") from None
+            except Exception:
+                raise WlhError("pdf_ocr_failed") from None
+            pages: list[tuple[int, str, list[dict[str, Any]]]] = []
+            for item in vision_out:
+                pno, gray_np = gray_maps[item["path"]]
+                p_md, p_blocks = assemble_page_blocks_and_markdown(pno, item["lines"], gray_np)
+                pages.append((pno, p_md, p_blocks))
+            return pages
+
+        def unusable(pno: int, p_md: str) -> bool:
+            return bool(
+                nonblank_scans and pno in nonblank_scans and len(p_md.strip()) < 30
+            ) or _is_vertical_cjk_fragmented(p_md)
+
+        recognized: list[tuple[int, str, list[dict[str, Any]]]] = []
+        pending: Sequence[int] = numbers
+        if _vision_probe_first_page(numbers, str(cfg["languages"])):
+            recognized = recognize(numbers[:1])
+            if any(unusable(pno, p_md) for pno, p_md, _ in recognized):
+                # Vertical CJK defeats Vision: fall back before rendering the other pages.
+                raise WlhError("vertical_cjk_fragmented")
+            pending = numbers[1:]
+        recognized.extend(recognize(pending))
+
+        for pno, p_md, p_blocks in recognized:
             size += len(p_md.encode("utf-8"))
             if size > cfg["max_result_bytes"]:
                 raise WlhError("pdf_output_too_large")
             result[pno] = p_md
             all_blocks.extend(p_blocks)
-            if (nonblank_scans and pno in nonblank_scans and len(p_md.strip()) < 30) or (
-                _is_vertical_cjk_fragmented(p_md)
-            ):
+            if unusable(pno, p_md):
                 for rest in numbers:
                     if rest not in result:
                         result[rest] = ""

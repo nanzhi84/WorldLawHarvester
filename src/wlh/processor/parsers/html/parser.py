@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, unquote, urlencode, urlsplit, urlunsplit
 from wlh.core import WlhError, guard, public_url
 from wlh.processor.extractors.html.html_to_md import clean_html_tree
 from wlh.processor.extractors.html.images import inline_glyph_text
-from wlh.processor.extractors.word.office import detect_real_format
+from wlh.processor.extractors.magic import detect_real_format
 from wlh.processor.parsers import Base
 from wlh.processor.parsers.html.document_builder import (
     BINARY_KINDS,

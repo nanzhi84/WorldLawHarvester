@@ -1,4 +1,4 @@
-"""Isolated extraction process: Office/ZIP/PDF/OCR on a file materialized from CAS.
+"""Isolated extraction process: every format through the gateway on a file materialized from CAS.
 
 stdin carries a JSON job, stdout a single bounded JSON result. stderr is discarded by the
 parent because third-party tools can echo document text or local paths.
@@ -12,144 +12,53 @@ import signal
 import sys
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
-from wlh.cleaners.extraction_quality import text_check
 from wlh.core import WlhError
-
-OFFICE_KINDS = {"docx", "doc", "xlsx", "xls", "rtf", "odt"}
-
-ROUTE_ORDER = (
-    "accept",
-    "accept_ocr",
-    "accept_with_warning",
-    "vision_reparse_pages",
-    "legacy_font_encoding_recovery",
-)
+from wlh.processor.extractors.base import ExtractionInput, ExtractionOptions
 
 
-def worst(routes: Sequence[str]) -> str:
-    return max(routes, key=ROUTE_ORDER.index)
+def _strings(value: Any) -> tuple[str, ...]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return tuple(str(x) for x in cast(Sequence[Any], value) if x)
+    return ()
+
+
+def job_options(job: Mapping[str, Any]) -> ExtractionOptions:
+    """The JSON job of the parent process as typed extraction options."""
+    raw_parser = job.get("parser")
+    parser_cfg: Mapping[str, Any] = (
+        cast(Mapping[str, Any], raw_parser) if isinstance(raw_parser, Mapping) else {}
+    )
+    return ExtractionOptions(
+        profile=str(job.get("profile") or "generic"),
+        quirks=_strings(parser_cfg.get("quirks")),
+        invalid_body_patterns=_strings(parser_cfg.get("invalid_body_patterns")),
+        ocr=cast(Mapping[str, Any], job.get("ocr") or {}),
+        max_bytes=int(job.get("max_bytes") or 104_857_600),
+    )
 
 
 def extract(
     path: Path, kind: str, job: dict[str, Any], depth: int = 0
 ) -> tuple[str, dict[str, Any], dict[str, Any], list[str], list[dict[str, Any]]]:
-    parser_cfg = (
-        cast(dict[str, Any], job.get("parser")) if isinstance(job.get("parser"), dict) else {}
+    """One materialized file through the gateway (magic calibration + registry dispatch)."""
+    from wlh.processor.extractors.registry import default_registry
+
+    output = default_registry().dispatch(
+        ExtractionInput(
+            data=Path(path).read_bytes(),
+            kind=kind,
+            path=Path(path),
+            ocr_cache=job.get("ocr_cache"),
+            depth=depth,
+        ),
+        job_options(job),
     )
-    raw_pats = (
-        cast(list[Any], parser_cfg.get("invalid_body_patterns"))
-        if isinstance(parser_cfg.get("invalid_body_patterns"), list)
-        else []
-    )
-    invalid_pats: list[str] = [str(x) for x in raw_pats if x]
-    if kind in {"txt", "html", "json", "xml"}:
-        try:
-            text = path.read_text(encoding="utf-8-sig")
-        except UnicodeError:
-            raise WlhError("zip_text_encoding_invalid") from None
-        if kind == "xml":
-            from wlh.processor.extractors.xml.markdown import xml_to_markdown
-
-            markdown = xml_to_markdown(text.encode("utf-8"))
-        else:
-            from wlh.processor.extractors.html.html_to_md import (
-                html_to_markdown,
-                json_to_markdown,
-                text_to_markdown,
-            )
-
-            if kind == "html":
-                markdown = html_to_markdown(text, "")
-            elif kind == "json":
-                markdown = json_to_markdown(text)
-            else:
-                markdown = text_to_markdown(text)
-        return (
-            markdown,
-            {"kind": kind},
-            text_check(markdown, job["profile"], invalid_body_patterns=invalid_pats),
-            ["markdown", "quality"],
-            [],
-        )
-    if kind == "pdf":
-        from wlh.processor.extractors.pdf.scan_detector import extract_pdf
-
-        markdown, info, report, parsers = extract_pdf(
-            path,
-            job["ocr"],
-            job["profile"],
-            job.get("ocr_cache"),
-            invalid_body_patterns=invalid_pats,
-        )
-        return markdown, info, report, parsers, []
-    if kind in OFFICE_KINDS:
-        from wlh.processor.extractors.word.office import extract_office
-
-        markdown, info = extract_office(
-            path,
-            kind,
-            job["parser"],
-            ocr=job.get("ocr"),
-            script_hint=job.get("profile"),
-        )
-        parsers = ["office", "quality"]
-        if info.get("legacy_encoding"):
-            parsers.append("tcvn3")
-        return (
-            markdown,
-            info,
-            text_check(markdown, job["profile"], invalid_body_patterns=invalid_pats),
-            parsers,
-            [],
-        )
-    if kind == "zip":
-        from wlh.processor.extractors.word.office import unpack_zip
-
-        if depth >= 2:
-            raise WlhError("zip_nesting_limit_exceeded")
-        folder = Path(path).with_name(Path(path).name + "-members")
-        folder.mkdir()
-        raw_quirks = parser_cfg.get("quirks")
-        quirks: Sequence[str] = (
-            [str(x) for x in cast(Sequence[Any], raw_quirks) if x]
-            if isinstance(raw_quirks, Sequence) and not isinstance(raw_quirks, str) and raw_quirks
-            else ("zip_salvage",)
-        )
-        members = unpack_zip(path, folder, job["max_bytes"], quirks=quirks)
-        parts: list[str] = []
-        infos: list[dict[str, Any]] = []
-        reports: list[dict[str, Any]] = []
-        parsers = {"zip"}
-        lineage: list[dict[str, Any]] = []
-        for member in members:
-            inner = extract(member["file"], member["kind"], job, depth + 1)
-            markdown, info, report, used, nested = inner
-            title = Path(member["path"]).stem
-            parts.append("## " + title + "\n\n" + markdown.strip())
-            infos.append({"path": member["path"], **info})
-            reports.append({"path": member["path"], **report})
-            parsers.update(used)
-            lineage.append(
-                {"path": member["path"], "file": str(member["file"]), "kind": member["kind"]}
-            )
-            lineage.extend(dict(item, path=member["path"] + "!/" + item["path"]) for item in nested)
-        report = {
-            "contract": reports[0]["contract"],
-            "profile": job["profile"],
-            "recommended_route": worst([r["recommended_route"] for r in reports]),
-            "members": reports,
-            "pages": [],
-            "document_reasons": sorted({x for r in reports for x in r["document_reasons"]}),
-            "reason_count": sum(r["reason_count"] for r in reports),
-        }
-        info = {"kind": "zip", "members": infos}
-        return "\n\n".join(parts).strip() + "\n", info, report, sorted(parsers), lineage
-    raise WlhError("unsupported_document_type")
+    return output.markdown, output.info, output.quality, output.parsers, output.members
 
 
 def watch_parent(parent_pid: int) -> None:
@@ -191,11 +100,9 @@ def main() -> None:
     signal.signal(signal.SIGTERM, terminate)
     threading.Thread(target=watch_parent, args=(os.getppid(),), daemon=True).start()
     if "--daemon" in sys.argv[1:]:
-        from wlh.processor.extractors.pdf.scan_detector import (
-            extract_pdf as _warm_pdf,
-        )
+        from wlh.processor.extractors.registry import default_registry
 
-        _ = _warm_pdf
+        default_registry()  # warm every engine before the first job
         for line in sys.stdin:
             line = line.strip()
             if not line:

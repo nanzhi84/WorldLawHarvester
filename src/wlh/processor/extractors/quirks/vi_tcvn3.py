@@ -55,13 +55,14 @@ def normalize_detected_tcvn3(value: str, font_evidence: bool = False) -> tuple[s
     return "".join(lines), changed
 
 
+_RTF_FONT_ENTRY = re.compile(r"\\f\d+(?:\\[a-zA-Z]+-?\d*\s?|\{[^{}]*\})*\s*([^;{}\\]+);")
+
+
 def rtf_font_names(raw: bytes) -> list[str]:
-    text = raw.decode("latin-1", errors="ignore")
-    return [
-        item.strip()
-        for item in re.findall(r"(?:\\f\d+[^;{}]*)?([^;{}]+);", text[:20000])
-        if "font" not in item.lower()
-    ]
+    text = raw.decode("latin-1", errors="ignore")[:20000]
+    # Font table entries (``\f0\froman\fcharset0 .VnTime;``) plus bare ``name;`` runs.
+    items = _RTF_FONT_ENTRY.findall(text) + re.findall(r"(?:\\f\d+[^;{}]*)?([^;{}]+);", text)
+    return [item.strip() for item in items if "font" not in item.lower()]
 
 
 def rtf_uses_tcvn3(raw: bytes) -> tuple[bool, list[str]]:
@@ -109,6 +110,8 @@ def legal_markdown(value: str) -> str:
     return "\n\n".join(result).strip() + "\n"
 
 
+_RTF_ROW_START, _RTF_CELL_END, _RTF_ROW_END = "\x1d", "\x1f", "\x1e"
+
 RTF_DESTINATIONS = {
     "fonttbl",
     "colortbl",
@@ -138,8 +141,9 @@ RTF_CONTROL_TEXT = {
     "par": "\n",
     "line": "\n",
     "page": "\n",
-    "row": "\n",
-    "cell": "\t",
+    "trowd": _RTF_ROW_START,
+    "row": _RTF_ROW_END,
+    "cell": _RTF_CELL_END,
     "tab": "\t",
     "emdash": "—",
     "endash": "–",
@@ -218,10 +222,48 @@ def rtf_bytes_to_tcvn3_raw(raw: bytes) -> str:
     cleaned: list[str] = [
         "\ufffd" if len(c) == 1 and 0xD800 <= ord(c) <= 0xDFFF else c for c in output
     ]
-    value = compact("".join(cleaned))
+    value = compact(_restore_rtf_tables("".join(cleaned)))
     if len(value) < 8:
         raise WlhError("rtf_direct_text_unusable")
     return value + "\n"
+
+
+def _rtf_rows_text(rows: list[list[str]]) -> str:
+    """Consecutive ``\\row`` groups: >=2 rows x >=2 columns become one Markdown table."""
+    if len(rows) >= 2 and max(len(row) for row in rows) >= 2:
+        width = max(len(row) for row in rows)
+        padded = [[c.replace("|", "\\|") for c in row] + [""] * (width - len(row)) for row in rows]
+        lines = ["| " + " | ".join(padded[0]) + " |", "| " + " | ".join(["---"] * width) + " |"]
+        lines.extend("| " + " | ".join(row) + " |" for row in padded[1:])
+        return "\n\n" + "\n".join(lines) + "\n\n"
+    return "".join(" ".join(row) + "\n" for row in rows)
+
+
+def _restore_rtf_tables(text: str) -> str:
+    """Turn ``\\trowd``/``\\cell``/``\\row`` sentinels into Markdown tables or plain lines."""
+    parts: list[str] = []
+    rows: list[list[str]] = []
+    segments = text.split(_RTF_ROW_END)
+    for segment in segments[:-1]:
+        first_cell = segment.find(_RTF_CELL_END)
+        if first_cell == -1:
+            parts.append(_rtf_rows_text(rows) + segment.replace(_RTF_ROW_START, "") + "\n")
+            rows = []
+            continue
+        start = segment.rfind(_RTF_ROW_START, 0, first_cell)
+        if start == -1:
+            start = segment.rfind("\n", 0, first_cell)
+        prefix = segment[: start + 1].replace(_RTF_ROW_START, "")
+        cells = segment[start + 1 :].split(_RTF_CELL_END)
+        if not cells[-1].replace(_RTF_ROW_START, "").strip():
+            cells.pop()
+        if prefix.strip():
+            parts.append(_rtf_rows_text(rows) + prefix)
+            rows = []
+        rows.append([compact(c.replace(_RTF_ROW_START, " ").replace("\n", " ")) for c in cells])
+    parts.append(_rtf_rows_text(rows))
+    parts.append(segments[-1].replace(_RTF_ROW_START, "").replace(_RTF_CELL_END, "\t"))
+    return "".join(parts)
 
 
 def looks_like_tcvn3(value: str) -> bool:

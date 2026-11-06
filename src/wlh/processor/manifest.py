@@ -14,6 +14,7 @@ from typing import Any
 from wlh.cleaners.extraction_quality import PRIMARY_TCVN3, QUALITY_CONTRACT
 from wlh.core import WlhError, digest
 from wlh.processor.extractors.html.html_to_md import MARKDOWN_CONTRACT
+from wlh.processor.extractors.office import OFFICE_CONTRACT
 from wlh.processor.extractors.pdf.scan_detector import (
     INK_THRESHOLD,
     NORMAL_PAGE_TEXT_CHARS,
@@ -25,7 +26,6 @@ from wlh.processor.extractors.pdf.scan_detector import (
     SIGNATURE_PAGE_MIN_INK,
 )
 from wlh.processor.extractors.quirks.vi_tcvn3 import TCVN3_CONTRACT
-from wlh.processor.extractors.word.office import OFFICE_CONTRACT, libreoffice_identity
 
 MANIFEST_ALGORITHM = "wlh.parser-manifest.v4"
 FINGERPRINT_ALGORITHM = "wlh.fingerprint.v2"
@@ -153,7 +153,7 @@ def manifest(config: Mapping[str, Any]) -> dict[str, Any]:
             "python-docx": package("python-docx"),
             "openpyxl": package("openpyxl"),
             "xlrd": package("xlrd"),
-            "libreoffice": libreoffice_identity(),
+            "striprtf": package("striprtf"),
         },
         "tcvn3": {"contract": TCVN3_CONTRACT},
         "zip": {"contract": ZIP_CONTRACT},

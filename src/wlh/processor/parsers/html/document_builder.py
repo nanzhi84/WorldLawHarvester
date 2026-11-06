@@ -20,7 +20,7 @@ from wlh.processor.extractors.html.html_to_md import (
     text_to_markdown,
 )
 from wlh.processor.extractors.html.images import require_textual_images
-from wlh.processor.extractors.word.office import detect_real_format
+from wlh.processor.extractors.magic import detect_real_format
 from wlh.processor.extractors.xml.markdown import xml_to_markdown
 from wlh.processor.parsers.html.dom_cleanup import clean_site_dom
 from wlh.processor.parsers.html.fields import (

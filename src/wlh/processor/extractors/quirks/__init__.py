@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from wlh.processor.extractors.base import QuirkHook
 from wlh.processor.extractors.quirks.ja_kanpo_pua import (
     _PUA_CHAR_MAP,
     _PUA_RESIDUAL_RE,
@@ -34,8 +35,26 @@ QUIRKS: dict[str, Callable[..., Any]] = {
 }
 REGISTRY = QUIRKS
 
+# Declarative Stage Hooks (DSH): where each frozen quirk mounts in the extraction lifecycle.
+QUIRK_HOOKS: tuple[QuirkHook, ...] = (
+    QuirkHook("zip_salvage", "pre_container", frozenset({"zip"}), salvage_zip_prefix),
+    QuirkHook("zip_salvage", "archive_members", frozenset({"zip"}), filter_redundant_zip_members),
+    QuirkHook("ja_inline_glyphs", "ast_node", frozenset({"html"}), inline_glyph_text),
+    QuirkHook("ja_kanpo_pua", "text_span", frozenset({"pdf", "html"}), decode_pua_text),
+    # TCVN3 recovery only acts on glyph/font evidence, so Office output is always screened.
+    QuirkHook(
+        "vi_tcvn3",
+        "post_markdown",
+        frozenset({"doc", "docx", "rtf"}),
+        normalize_detected_tcvn3,
+        always=True,
+    ),
+    QuirkHook("vi_tcvn3", "post_markdown", frozenset({"pdf"}), normalize_detected_tcvn3),
+)
+
 __all__ = [
     "QUIRKS",
+    "QUIRK_HOOKS",
     "REGISTRY",
     "TCVN3_CONTRACT",
     "_PUA_CHAR_MAP",

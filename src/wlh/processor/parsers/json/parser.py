@@ -16,7 +16,7 @@ import lxml.etree as _etree  # type: ignore[import-untyped]
 from wlh.core import WlhError, canonical, digest, guard, public_url
 from wlh.processor.extractors.html.dom_tree import parse_html
 from wlh.processor.extractors.html.html_to_md import text_to_markdown
-from wlh.processor.extractors.word.office import detect_real_format
+from wlh.processor.extractors.magic import detect_real_format
 from wlh.processor.extractors.xml import dokument_xml_to_markdown, xml_to_markdown
 from wlh.processor.parsers.html.document_builder import WebDocumentBuilder
 from wlh.processor.parsers.html.document_builder import doc_rules as _doc_rules

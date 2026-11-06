@@ -128,19 +128,53 @@ class TestArchitectureContract:
         }
         expected_extractor_entries = {
             "__init__.py",
+            "base.py",
+            "registry.py",
+            "magic.py",
             "router.py",
             "slots.py",
             "extract_worker.py",
+            "archive",
+            "office",
             "pdf",
-            "word",
             "ocr",
             "html",
             "xml",
             "quirks",
         }
         assert extractor_entries == expected_extractor_entries, (
-            f"processor/extractors/ must contain all 5 format extractor packages (pdf, word, ocr, html, xml) + quirks: "
+            f"processor/extractors/ must contain the magic gateway, engine registry, archive/office "
+            f"single-format packages (pdf, office, ocr, html, xml) + quirks and no word/: "
             f"{extractor_entries ^ expected_extractor_entries}"
+        )
+
+        office_extractor_entries = {
+            entry.name
+            for entry in (extractors_dir / "office").iterdir()
+            if entry.name != "__pycache__" and not entry.name.startswith(".")
+        }
+        assert office_extractor_entries == {
+            "__init__.py",
+            "ooxml_zip.py",
+            "tables.py",
+            "docx.py",
+            "doc.py",
+            "xlsx.py",
+            "xls.py",
+            "rtf.py",
+        }, (
+            f"processor/extractors/office/ must hold exactly one module per Office format "
+            f"(no LibreOffice module): {office_extractor_entries}"
+        )
+
+        archive_extractor_entries = {
+            entry.name
+            for entry in (extractors_dir / "archive").iterdir()
+            if entry.name != "__pycache__" and not entry.name.startswith(".")
+        }
+        assert archive_extractor_entries == {"__init__.py", "zip_container.py"}, (
+            f"processor/extractors/archive/ must only hold the ZIP container module: "
+            f"{archive_extractor_entries}"
         )
 
         xml_extractors_dir = extractors_dir / "xml"
@@ -152,6 +186,80 @@ class TestArchitectureContract:
         assert xml_extractor_entries == {"__init__.py", "markdown.py", "tables.py", "inline.py"}, (
             f"processor/extractors/xml/ must contain XML->Markdown converter modules: {xml_extractor_entries}"
         )
+
+    def test_office_format_modules_never_reverse_import_extract_worker(self) -> None:
+        """Single-format Office modules stay leaf engines: no import of the worker entrypoint."""
+        office_dir = SRC_WLH / "processor" / "extractors" / "office"
+        forbidden = "wlh.processor.extractors.extract_worker"
+        py_files = sorted(office_dir.rglob("*.py"))
+        assert py_files, "processor/extractors/office/ must contain Python modules"
+        for py_file in py_files:
+            rel = py_file.relative_to(SRC_WLH.parent).with_suffix("")
+            package_parts = list(rel.parts[:-1])
+            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+            for node in ast.walk(tree):
+                imported: list[str] = []
+                if isinstance(node, ast.Import):
+                    imported = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    if node.level:
+                        base_parts = package_parts[: len(package_parts) - (node.level - 1)]
+                        base = ".".join(base_parts)
+                        module = f"{base}.{node.module}" if node.module else base
+                    else:
+                        module = node.module or ""
+                    imported = [module] + [f"{module}.{alias.name}" for alias in node.names]
+                for name in imported:
+                    assert name != forbidden and not name.startswith(forbidden + "."), (
+                        f"{py_file}:{getattr(node, 'lineno', 0)} must not import {forbidden}; "
+                        f"disguised formats are routed by magic.detect_real_format() before dispatch"
+                    )
+
+    def test_source_tree_has_no_office_suite_or_textutil_dependency(self) -> None:
+        """Stage 3b is LibreOffice-free: no source module references soffice/libreoffice/textutil."""
+        offenders: list[str] = []
+        for py_file in sorted(SRC_WLH.rglob("*.py")):
+            lowered = py_file.read_text(encoding="utf-8").lower()
+            for token in ("soffice", "libreoffice", "textutil"):
+                if token in lowered:
+                    offenders.append(f"{py_file.relative_to(REPO_ROOT)}: {token}")
+        assert not offenders, f"External Office suite references must be removed: {offenders}"
+
+    def test_quirk_hooks_mount_declared_stages_while_quirks_registry_stays_frozen(self) -> None:
+        """`QUIRK_HOOKS` mounts the 4 frozen quirks on their lifecycle stages; `QUIRKS` keys are unchanged."""
+        from wlh.processor.extractors import quirks
+
+        assert set(quirks.QUIRKS.keys()) == set(EXPECTED_EXTRACTOR_QUIRKS), FORBIDDEN_OPERATOR_ERROR
+
+        hook_stages = {"pre_container", "archive_members", "ast_node", "text_span", "post_markdown"}
+        mounts: dict[tuple[str, str], tuple[set[str], list[Any]]] = {}
+        for hook in quirks.QUIRK_HOOKS:
+            assert hook.stage in hook_stages, hook
+            assert isinstance(hook.target_kinds, frozenset), hook
+            assert callable(hook.handler), hook
+            kinds, handlers = mounts.setdefault((hook.name, hook.stage), (set(), []))
+            kinds.update(hook.target_kinds)
+            handlers.append(hook.handler)
+
+        assert {name for name, _ in mounts} == set(EXPECTED_EXTRACTOR_QUIRKS), (
+            FORBIDDEN_OPERATOR_ERROR
+        )
+        assert {key: kinds for key, (kinds, _) in mounts.items()} == {
+            ("zip_salvage", "pre_container"): {"zip"},
+            ("zip_salvage", "archive_members"): {"zip"},
+            ("ja_inline_glyphs", "ast_node"): {"html"},
+            ("ja_kanpo_pua", "text_span"): {"pdf", "html"},
+            ("vi_tcvn3", "post_markdown"): {"doc", "docx", "rtf", "pdf"},
+        }
+        assert mounts[("zip_salvage", "pre_container")][1] == [quirks.salvage_zip_prefix]
+        assert mounts[("zip_salvage", "archive_members")][1] == [
+            quirks.filter_redundant_zip_members
+        ]
+        assert mounts[("ja_inline_glyphs", "ast_node")][1] == [quirks.inline_glyph_text]
+        assert mounts[("ja_kanpo_pua", "text_span")][1] == [quirks.decode_pua_text]
+        for hook in quirks.QUIRK_HOOKS:
+            if hook.name != "vi_tcvn3":
+                assert getattr(hook, "always", False) is False, hook
 
     def test_operator_registries_match_frozen_allowlists_and_atomic_signatures(self) -> None:
         from wlh import config

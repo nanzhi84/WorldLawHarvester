@@ -13,6 +13,12 @@ import lxml.etree as _etree  # type: ignore[import-untyped]
 
 from wlh.cleaners.text_cleaner import UI_ACTION_LABELS, normalized
 from wlh.core import WlhError
+from wlh.processor.extractors.base import (
+    EngineAdapter,
+    ExtractionInput,
+    ExtractionOptions,
+    QuirkHookRunner,
+)
 from wlh.processor.extractors.html.dom_tree import document_tree
 from wlh.processor.extractors.html.fallback import (
     escape_currency_dollars,
@@ -389,3 +395,47 @@ def html_to_markdown(
     if not md:
         raise WlhError("html_empty")
     return normalized(f"# {title}\n\n{md}") if title else md
+
+
+def _utf8_text(inp: ExtractionInput) -> str:
+    try:
+        return inp.data.decode("utf-8-sig")
+    except UnicodeError:
+        raise WlhError("zip_text_encoding_invalid") from None
+
+
+class HtmlDomEngine(EngineAdapter):
+    kind = "html"
+    engine_name = "html_dom"
+    parser_tag = "markdown"
+    native_stages = frozenset({"ast_node", "text_span"})
+
+    def extract(
+        self, inp: ExtractionInput, opts: ExtractionOptions, hooks: QuirkHookRunner
+    ) -> tuple[str, dict[str, Any]]:
+        # Inline glyph images (ast_node) are resolved while the DOM is cleaned; an empty
+        # source quirk list keeps the historical "all glyph quirks on" default.
+        quirks = tuple(hooks.enabled_names()) if opts.quirks else None
+        return html_to_markdown(_utf8_text(inp), inp.base_url, quirks=quirks), {}
+
+
+class JsonOutlineEngine(EngineAdapter):
+    kind = "json"
+    engine_name = "json_outline"
+    parser_tag = "markdown"
+
+    def extract(
+        self, inp: ExtractionInput, opts: ExtractionOptions, hooks: QuirkHookRunner
+    ) -> tuple[str, dict[str, Any]]:
+        return json_to_markdown(_utf8_text(inp)), {}
+
+
+class PlainTextEngine(EngineAdapter):
+    kind = "txt"
+    engine_name = "plain_text"
+    parser_tag = "markdown"
+
+    def extract(
+        self, inp: ExtractionInput, opts: ExtractionOptions, hooks: QuirkHookRunner
+    ) -> tuple[str, dict[str, Any]]:
+        return text_to_markdown(_utf8_text(inp)), {}

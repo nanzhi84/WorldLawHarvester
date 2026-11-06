@@ -430,7 +430,6 @@ class ParserSpec(Strict):
 
 class ExtractorSpec(Strict):
     office_text_policy: str = Field(default="prefer", pattern="^(prefer|off)$")
-    libreoffice_timeout_seconds: int = Field(default=120, ge=5, le=1800)
     quirks: list[str] = Field(default_factory=list, max_length=10)
     ocr: OCRConfig = Field(default_factory=OCRConfig)
 
