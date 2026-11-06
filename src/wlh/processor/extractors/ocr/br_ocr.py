@@ -67,12 +67,10 @@ def br_ocr(
     """br-ocr-v1: /file_parse submit, /status/{uuid} poll, /result/{uuid} fetch."""
     if page_count > cfg["max_pages"]:
         raise WlhError("pdf_ocr_page_limit_exceeded")
-    base: str = (os.environ.get("WLH_BR_OCR_URL") or "http://192.168.160.67:7555/api/v1").rstrip(
-        "/"
-    )
+    base: str = (os.environ.get("WLH_BR_OCR_URL") or "").strip().rstrip("/")
     if not base.startswith(("http://", "https://")):
         raise WlhError("br_ocr_url_required")
-    _probe_tcp(base, timeout=max(0.1, min(1.5, deadline - time.monotonic())))
+    _probe_tcp(base, timeout=max(0.05, min(0.5, deadline - time.monotonic())))
     with open(path, "rb") as stream:
         content = base64.b64encode(stream.read()).decode("ascii")
     task = str(uuid.uuid4())

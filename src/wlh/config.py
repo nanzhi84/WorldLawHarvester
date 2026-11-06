@@ -394,7 +394,7 @@ class DocumentRules(Strict):
 
 
 class OCRConfig(Strict):
-    engine: str = Field(default="br-ocr-v1", pattern="^(tesseract|br-ocr-v1)$")
+    engine: str = Field(default="br-ocr-v1", pattern="^(local|vision|tesseract|br-ocr-v1)$")
     languages: str = Field(
         default="eng+chi_sim+vie", pattern=r"^[a-z_]+(\+[a-z_]+)*$", max_length=128
     )

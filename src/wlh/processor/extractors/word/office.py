@@ -13,10 +13,12 @@ import os
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import tempfile
 import zipfile
-from collections.abc import Sequence
+import zlib
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -52,10 +54,13 @@ __all__ = [
     "extract_docx",
     "extract_excel",
     "extract_libreoffice_text",
+    "extract_msdoc_pure",
     "extract_office",
+    "extract_ole2_data_images",
     "libreoffice_convert",
     "libreoffice_identity",
     "normalized_office_archive",
+    "parse_ole2_streams",
     "safe_member",
     "salvage_zip_prefix",
     "soffice",
@@ -385,6 +390,294 @@ def unpack_zip(
     return members
 
 
+def parse_ole2_streams(data: bytes) -> dict[str, bytes]:
+    """Zero-dependency in-memory OLE2 Compound Document stream reader."""
+    if len(data) < 512 or data[:8] != b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        raise ValueError("not_ole2")
+    sector_shift, mini_shift = struct.unpack_from("<HH", data, 30)
+    sector_size = 1 << sector_shift
+    mini_size = 1 << mini_shift
+    (
+        num_fat,
+        first_dir,
+        _,
+        mini_cutoff,
+        first_minifat,
+        num_minifat,
+        first_difat,
+        num_difat,
+    ) = struct.unpack_from("<IIIIIIII", data, 44)
+    difat = [x for x in struct.unpack_from("<109I", data, 76) if x < 0xFFFFFFFE]
+    sec = first_difat
+    for _ in range(num_difat):
+        if sec >= 0xFFFFFFFE:
+            break
+        off = (sec + 1) * sector_size
+        vals = struct.unpack_from(f"<{sector_size // 4}I", data, off)
+        difat.extend(x for x in vals[:-1] if x < 0xFFFFFFFE)
+        sec = vals[-1]
+    fat: list[int] = []
+    for s in difat[:num_fat]:
+        off = (s + 1) * sector_size
+        if off + sector_size <= len(data):
+            fat.extend(struct.unpack_from(f"<{sector_size // 4}I", data, off))
+
+    def read_chain(start_sec: int, size: int | None = None) -> bytes:
+        out = bytearray()
+        s = start_sec
+        seen: set[int] = set()
+        while s < 0xFFFFFFFE and s < len(fat) and s not in seen:
+            seen.add(s)
+            off = (s + 1) * sector_size
+            out.extend(data[off : off + sector_size])
+            if size is not None and len(out) >= size:
+                return bytes(out[:size])
+            s = fat[s]
+        return bytes(out if size is None else out[:size])
+
+    dir_bytes = read_chain(first_dir)
+    minifat: list[int] = []
+    if first_minifat < 0xFFFFFFFE and num_minifat > 0:
+        mf_bytes = read_chain(first_minifat)
+        minifat = list(struct.unpack(f"<{len(mf_bytes) // 4}I", mf_bytes))
+    root_start, root_size = struct.unpack_from("<IQ", dir_bytes, 116)
+    if sector_size == 512:
+        root_size &= 0xFFFFFFFF
+    mini_stream = read_chain(root_start, root_size) if root_start < 0xFFFFFFFE else b""
+
+    def read_mini_chain(start_sec: int, size: int) -> bytes:
+        out = bytearray()
+        s = start_sec
+        seen: set[int] = set()
+        while s < 0xFFFFFFFE and s < len(minifat) and s not in seen and len(out) < size:
+            seen.add(s)
+            off = s * mini_size
+            out.extend(mini_stream[off : off + mini_size])
+            s = minifat[s]
+        return bytes(out[:size])
+
+    streams: dict[str, bytes] = {}
+    for pos in range(0, len(dir_bytes), 128):
+        entry = dir_bytes[pos : pos + 128]
+        if len(entry) < 128:
+            break
+        name_len, obj_type = struct.unpack_from("<HB", entry, 64)
+        if obj_type != 2 or name_len <= 2:
+            continue
+        name = entry[: name_len - 2].decode("utf-16-le", errors="ignore")
+        start_sec, size = struct.unpack_from("<IQ", entry, 116)
+        if sector_size == 512:
+            size &= 0xFFFFFFFF
+        if size < mini_cutoff and mini_stream:
+            streams[name] = read_mini_chain(start_sec, size)
+        else:
+            streams[name] = read_chain(start_sec, size)
+    return streams
+
+
+def extract_ole2_data_images(streams: Mapping[str, bytes]) -> list[bytes]:
+    """Extract embedded PNG/JPEG/TIFF or OfficeArtBlipEMF (0xF01A EMR_STRETCHDIBITS) bitmaps from OLE2 streams."""
+    images: list[bytes] = []
+    for sname in ("Data", "WordDocument"):
+        buf = streams.get(sname, b"")
+        if not buf:
+            continue
+        pos = 0
+        while pos + 58 <= len(buf):
+            idx = buf.find(b"\x1a\xf0", pos)
+            if idx == -1 or idx < 2 or idx + 56 > len(buf):
+                break
+            _, rec_type, rec_len = struct.unpack_from("<HHI", buf, idx - 2)
+            if rec_type == 0xF01A and 60 < rec_len <= len(buf) - (idx - 2):
+                rec_data = buf[idx + 6 : idx + 6 + rec_len]
+                for z_off in (50, 66):
+                    if z_off < len(rec_data):
+                        try:
+                            emf = zlib.decompress(rec_data[z_off:])
+                            epos = 0
+                            while epos + 8 <= len(emf):
+                                rtype, rsize = struct.unpack_from("<II", emf, epos)
+                                if rsize < 8 or epos + rsize > len(emf):
+                                    break
+                                if rtype == 81 and rsize >= 80:  # EMR_STRETCHDIBITS
+                                    off_bmi, cb_bmi, off_bits, cb_bits = struct.unpack_from(
+                                        "<IIII", emf, epos + 48
+                                    )
+                                    if (
+                                        cb_bmi > 0
+                                        and cb_bits > 0
+                                        and off_bmi + cb_bmi <= rsize
+                                        and off_bits + cb_bits <= rsize
+                                    ):
+                                        bmi = emf[epos + off_bmi : epos + off_bmi + cb_bmi]
+                                        bits = emf[epos + off_bits : epos + off_bits + cb_bits]
+                                        bmp_size = 14 + len(bmi) + len(bits)
+                                        bmp = (
+                                            b"BM"
+                                            + struct.pack("<III", bmp_size, 0, 14 + len(bmi))
+                                            + bmi
+                                            + bits
+                                        )
+                                        images.append(bmp)
+                                epos += rsize
+                            break
+                        except zlib.error:
+                            continue
+            pos = idx + 2
+        p_idx = buf.find(b"\x89PNG\r\n\x1a\n")
+        if p_idx != -1:
+            end_idx = buf.find(b"IEND\xaeB`\x82", p_idx)
+            if end_idx != -1:
+                images.append(buf[p_idx : end_idx + 8])
+        t_idx = buf.find(b"II*\x00\x08\x00\x00\x00")
+        if t_idx != -1:
+            images.append(buf[t_idx:])
+        j_idx = buf.find(b"\xff\xd8\xff")
+        if j_idx != -1:
+            end_j = buf.rfind(b"\xff\xd9")
+            if end_j > j_idx:
+                images.append(buf[j_idx : end_j + 2])
+    return images
+
+
+def _format_msdoc_paragraphs_and_tables(raw_text: str) -> tuple[str, int]:
+    """Convert raw MS-DOC character stream (with \\x07 cell/row marks) into Markdown + tables."""
+    text = re.sub(r"\x13[^\x14\x15]*\x14", "", raw_text)
+    text = re.sub(r"\x13[^\x15]*\x15", "", text)
+    text = text.replace("\x15", "").replace("\x0b", "\n").replace("\x0c", "\n\n")
+    text = re.sub(r"[\x00-\x06\x08\x0e-\x12\x16-\x1f]", "", text)
+
+    blocks: list[str] = []
+    current_table: list[list[str]] = []
+    current_row: list[str] = []
+    tables_recovered = 0
+
+    def flush_table() -> None:
+        nonlocal current_table, current_row, tables_recovered
+        if current_row:
+            if any(c.strip() for c in current_row):
+                current_table.append(current_row)
+            current_row = []
+        if current_table:
+            if len(current_table) >= 2 and max(len(r) for r in current_table) >= 2:
+                blocks.append(table_markdown(current_table))
+                tables_recovered += 1
+            else:
+                for r in current_table:
+                    line = " | ".join(c for c in r if c)
+                    if line.strip():
+                        blocks.append(line.strip())
+            current_table = []
+
+    idx = 0
+    n = len(text)
+    buf: list[str] = []
+    while idx < n:
+        ch = text[idx]
+        if ch == "\x07":
+            cell_text = re.sub(r"\s+", " ", "".join(buf)).strip().replace("|", "\\|")
+            buf.clear()
+            if idx + 1 < n and text[idx + 1] == "\x07":
+                current_row.append(cell_text)
+                if any(c.strip() for c in current_row):
+                    current_table.append(current_row)
+                current_row = []
+                idx += 2
+                if idx < n and text[idx] == "\r":
+                    idx += 1
+                continue
+            elif not cell_text and current_row and (idx + 1 == n or text[idx + 1] in ("\r", "\n")):
+                if any(c.strip() for c in current_row):
+                    current_table.append(current_row)
+                current_row = []
+                idx += 1
+                if idx < n and text[idx] == "\r":
+                    idx += 1
+                continue
+            else:
+                current_row.append(cell_text)
+                idx += 1
+                continue
+        elif ch == "\r":
+            if current_row:
+                buf.append(" ")
+            else:
+                flush_table()
+                para = re.sub(r"[ \t]+", " ", "".join(buf)).strip()
+                buf.clear()
+                if para:
+                    blocks.append(para)
+            idx += 1
+        else:
+            buf.append(ch)
+            idx += 1
+
+    if buf:
+        rem = re.sub(r"[ \t]+", " ", "".join(buf)).strip()
+        if current_row:
+            current_row.append(rem)
+        elif rem:
+            blocks.append(rem)
+    flush_table()
+    return "\n\n".join(blocks).strip(), tables_recovered
+
+
+def extract_msdoc_pure(data: bytes) -> tuple[str, dict[str, Any]]:
+    """Pure-Python in-memory MS-DOC (Word 97-2003) extractor with table recovery."""
+    streams = parse_ole2_streams(data)
+    wdoc = streams.get("WordDocument")
+    if not wdoc or len(wdoc) < 0x200:
+        raise ValueError("missing_word_document_stream")
+    flags = struct.unpack_from("<H", wdoc, 0x000A)[0]
+    ccp_text = struct.unpack_from("<I", wdoc, 0x004C)[0]
+    tbl_name = "1Table" if (flags & 0x0200) else "0Table"
+    tbl = streams.get(tbl_name) or streams.get("1Table") or streams.get("0Table")
+    if not tbl:
+        raise ValueError("missing_table_stream")
+    fc_clx, lcb_clx = struct.unpack_from("<II", wdoc, 0x01A2)
+    clx = tbl[fc_clx : fc_clx + lcb_clx]
+    pos = 0
+    plc = b""
+    while pos < len(clx):
+        clxt = clx[pos]
+        if clxt == 1:
+            cb = struct.unpack_from("<H", clx, pos + 1)[0]
+            pos += 3 + cb
+        elif clxt == 2:
+            lcb = struct.unpack_from("<I", clx, pos + 1)[0]
+            plc = clx[pos + 5 : pos + 5 + lcb]
+            break
+        else:
+            raise ValueError(f"unexpected_clxt_{clxt}")
+    if not plc:
+        raise ValueError("missing_pcdt")
+    n = (len(plc) - 4) // 12
+    cps = struct.unpack_from(f"<{n + 1}I", plc, 0)
+    pieces: list[str] = []
+    for i in range(n):
+        cp_start, cp_end = cps[i], cps[i + 1]
+        if cp_start >= ccp_text:
+            break
+        cp_end = min(cp_end, ccp_text)
+        char_count = cp_end - cp_start
+        if char_count <= 0:
+            continue
+        pcd_off = (n + 1) * 4 + i * 8
+        _, fc_raw, _ = struct.unpack_from("<HIH", plc, pcd_off)
+        compressed = bool(fc_raw & 0x40000000)
+        if compressed:
+            byte_off = (fc_raw & ~0x40000000) // 2
+            raw_slice = wdoc[byte_off : byte_off + char_count]
+            pieces.append(raw_slice.decode("cp1252", errors="replace"))
+        else:
+            byte_off = fc_raw & 0x3FFFFFFF
+            raw_slice = wdoc[byte_off : byte_off + char_count * 2]
+            pieces.append(raw_slice.decode("utf-16-le", errors="replace"))
+    raw_text = "".join(pieces)
+    md, tables_count = _format_msdoc_paragraphs_and_tables(raw_text)
+    return md, {"extractor": "pure_python_ole2_msdoc", "tables_recovered": tables_count}
+
+
 def extract_office(
     path: str | Path,
     kind: str | None = None,
@@ -420,7 +713,7 @@ def extract_office(
         )
         return result[0], {**result[1], "detected_format": kind}
 
-    """Structured direct extraction first (office_text_policy=prefer), LibreOffice fallback."""
+    """Structured direct extraction first (pure-Python / python-docx / xlrd / openpyxl) without LibreOffice."""
     timeout_val = cast(float, cfg["libreoffice_timeout_seconds"])
     prefer = cfg["office_text_policy"] == "prefer"
     info: dict[str, Any] = {
@@ -435,77 +728,63 @@ def extract_office(
         return markdown, info
     if kind == "docx":
         markdown_docx: str | None = None
-        if prefer:
+        try:
+            markdown_docx, info["extractor"] = extract_docx(path), "python_docx"
+        except WlhError as exc:
+            if exc.code != "quality_too_short":
+                raise
+            info["attempts"].append(exc.code)
+            import pymupdf as _fitz  # type: ignore[import-untyped]
+
+            from wlh.config import OCRConfig
+            from wlh.processor.extractors.pdf.scan_detector import extract_pdf
+
+            fitz_mod: Any = _fitz
+            ocr_cfg = ocr if ocr is not None else OCRConfig().model_dump()
             try:
-                markdown_docx, info["extractor"] = extract_docx(path), "python_docx"
-            except WlhError as exc:
-                if exc.code != "quality_too_short":
-                    raise
-                info["attempts"].append(exc.code)
-                from wlh.config import OCRConfig
-                from wlh.processor.extractors.pdf.scan_detector import extract_pdf
-
-                ocr_cfg = ocr if ocr is not None else OCRConfig().model_dump()
-                try:
-                    try:
-                        data = libreoffice_convert(
-                            path, "pdf:writer_pdf_Export", "pdf", timeout_val, kind
-                        )
-                        extractor_used = "libreoffice_pdf"
-                    except WlhError as lo_exc:
-                        info["attempts"].append(lo_exc.code)
-                        import pymupdf as _fitz  # type: ignore[import-untyped]
-
-                        fitz_mod: Any = _fitz
-                        with (
-                            normalized_office_archive(path) as handle,
-                            zipfile.ZipFile(handle) as zf,
-                        ):
-                            media_names = sorted(
-                                name
-                                for name in zf.namelist()
-                                if name.startswith("word/media/")
-                                and name.lower().endswith(
-                                    (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif")
-                                )
-                            )
-                            if not media_names:
-                                raise WlhError("quality_too_short") from None
-                            pdf_doc = fitz_mod.open()
-                            try:
-                                for mname in media_names:
-                                    img_bytes = zf.read(mname)
-                                    page = pdf_doc.new_page(width=595, height=842)
-                                    page.insert_image(
-                                        fitz_mod.Rect(18, 18, 577, 824), stream=img_bytes
-                                    )
-                                data = bytes(pdf_doc.tobytes())
-                            finally:
-                                pdf_doc.close()
-                        extractor_used = "docx_media_pdf_ocr"
-                    with tempfile.TemporaryDirectory(prefix="wlh-office-pdf-") as folder:
-                        pdf_path = Path(folder) / "input.pdf"
-                        pdf_path.write_bytes(data)
-                        markdown_docx, pdf_info, quality, _ = extract_pdf(
-                            pdf_path, ocr_cfg, script_hint or "generic"
-                        )
-                except WlhError as pdf_exc:
-                    info["attempts"].append(pdf_exc.code)
-                    raise WlhError("quality_too_short") from None
-                if (
-                    quality["recommended_route"]
-                    not in {
-                        "accept",
-                        "accept_ocr",
-                        "accept_with_warning",
-                    }
-                    or len(compact(markdown_docx)) < 80
+                with (
+                    normalized_office_archive(path) as handle,
+                    zipfile.ZipFile(handle) as zf,
                 ):
-                    raise WlhError("quality_too_short")
-                info.update(extractor=extractor_used, pdf=pdf_info)
-        if markdown_docx is None:
-            markdown_docx = legal_markdown(extract_libreoffice_text(path, timeout_val, kind))
-            info["extractor"] = "libreoffice_text"
+                    media_names = sorted(
+                        name
+                        for name in zf.namelist()
+                        if name.startswith("word/media/")
+                        and name.lower().endswith(
+                            (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif")
+                        )
+                    )
+                    if not media_names:
+                        raise WlhError("quality_too_short") from None
+                    pdf_doc = fitz_mod.open()
+                    try:
+                        for mname in media_names:
+                            img_bytes = zf.read(mname)
+                            page = pdf_doc.new_page(width=595, height=842)
+                            page.insert_image(fitz_mod.Rect(18, 18, 577, 824), stream=img_bytes)
+                        data = bytes(pdf_doc.tobytes())
+                    finally:
+                        pdf_doc.close()
+                with tempfile.TemporaryDirectory(prefix="wlh-office-pdf-") as folder:
+                    pdf_path = Path(folder) / "input.pdf"
+                    pdf_path.write_bytes(data)
+                    markdown_docx, pdf_info, quality, _ = extract_pdf(
+                        pdf_path, ocr_cfg, script_hint or "generic"
+                    )
+            except WlhError as pdf_exc:
+                info["attempts"].append(pdf_exc.code)
+                raise WlhError("quality_too_short") from None
+            if (
+                quality["recommended_route"]
+                not in {
+                    "accept",
+                    "accept_ocr",
+                    "accept_with_warning",
+                }
+                or len(compact(markdown_docx)) < 80
+            ):
+                raise WlhError("quality_too_short")
+            info.update(extractor="docx_media_pdf_ocr", pdf=pdf_info)
         markdown_docx, changed = normalize_detected_tcvn3(markdown_docx)
         if changed:
             info["legacy_encoding"] = "tcvn3"
@@ -538,26 +817,81 @@ def extract_office(
             info["legacy_encoding"] = "tcvn3"
         return legal_markdown(markdown), info
     if kind == "doc":
+        text = ""
         try:
+            text, msdoc_info = extract_msdoc_pure(raw)
+            if len(re.sub(r"\s+", "", text)) >= 15:
+                info["extractor"] = msdoc_info["extractor"]
+                info["tables_recovered"] = msdoc_info["tables_recovered"]
+            else:
+                text = ""
+        except Exception:
+            text = ""
+
+        if not text:
+            try:
+                streams = parse_ole2_streams(raw)
+                images = extract_ole2_data_images(streams)
+            except Exception:
+                images = []
+            if images:
+                import pymupdf as _fitz  # type: ignore[import-untyped]
+
+                from wlh.config import OCRConfig
+                from wlh.processor.extractors.pdf.scan_detector import extract_pdf
+
+                fitz_mod = _fitz
+                ocr_cfg = ocr if ocr is not None else OCRConfig().model_dump()
+                pdf_doc = fitz_mod.open()
+                try:
+                    for img_bytes in images:
+                        page = pdf_doc.new_page(width=595, height=842)
+                        page.insert_image(fitz_mod.Rect(18, 18, 577, 824), stream=img_bytes)
+                    pdf_data: bytes = pdf_doc.tobytes()
+                finally:
+                    pdf_doc.close()
+                with tempfile.TemporaryDirectory(prefix="wlh-msdoc-img-") as folder:
+                    pdf_path = Path(folder) / "input.pdf"
+                    pdf_path.write_bytes(pdf_data)
+                    text, pdf_info, quality, _ = extract_pdf(
+                        pdf_path, ocr_cfg, script_hint or "generic"
+                    )
+                if quality["recommended_route"] not in {
+                    "accept",
+                    "accept_ocr",
+                    "accept_with_warning",
+                }:
+                    raise WlhError("quality_check_failed")
+                info.update(extractor="msdoc_embedded_image_ocr", pdf=pdf_info)
+            elif Path("/usr/bin/textutil").is_file():
+                try:
+                    proc = subprocess.run(
+                        [
+                            "/usr/bin/textutil",
+                            "-stdin",
+                            "-format",
+                            "doc",
+                            "-convert",
+                            "txt",
+                            "-stdout",
+                        ],
+                        input=raw,
+                        capture_output=True,
+                        timeout=min(15.0, timeout_val),
+                        check=True,
+                    )
+                    cand = compact(proc.stdout.decode("utf-8", errors="replace"))
+                    if len(re.sub(r"\s+", "", cand)) >= 15:
+                        text = cand
+                        info["extractor"] = "textutil_txt"
+                except Exception:
+                    pass
+
+        if not text:
             text, info["extractor"] = (
                 extract_libreoffice_text(path, timeout_val, kind),
                 "libreoffice_text",
             )
-        except WlhError as exc:
-            info["attempts"].append(exc.code)
-            from wlh.config import OCRConfig
-            from wlh.processor.extractors.pdf.scan_detector import extract_pdf
-
-            data = libreoffice_convert(path, "pdf:writer_pdf_Export", "pdf", timeout_val, kind)
-            with tempfile.TemporaryDirectory(prefix="wlh-office-pdf-") as folder:
-                pdf_path = Path(folder) / "input.pdf"
-                pdf_path.write_bytes(data)
-                text, pdf_info, quality, _ = extract_pdf(
-                    pdf_path, OCRConfig().model_dump(), "generic"
-                )
-            if quality["recommended_route"] not in {"accept", "accept_ocr", "accept_with_warning"}:
-                raise WlhError("quality_check_failed")
-            info.update(extractor="libreoffice_pdf", pdf=pdf_info)
         text, converted = normalize_detected_tcvn3(text)
         if converted:
             info["legacy_encoding"] = "tcvn3"

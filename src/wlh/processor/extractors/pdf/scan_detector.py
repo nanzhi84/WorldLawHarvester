@@ -7,7 +7,9 @@ when a document also contains scans. Quality failures are never successful Versi
 from __future__ import annotations
 
 import math
+import os
 import re
+import sys
 import time
 import unicodedata
 from collections.abc import Mapping, Sequence
@@ -22,7 +24,11 @@ from wlh.cleaners.text_cleaner import normalized
 from wlh.core import WlhError
 from wlh.processor.extractors.html.html_to_md import text_to_markdown
 from wlh.processor.extractors.ocr.br_ocr import br_ocr
-from wlh.processor.extractors.ocr.tesseract import tesseract_image_bytes, tesseract_pages
+from wlh.processor.extractors.ocr.tesseract import (
+    tesseract_image_bytes,
+    tesseract_pages,
+    vision_pages,
+)
 from wlh.processor.extractors.pdf.native_md import (
     clean_soft_hyphens,
     find_tables,
@@ -371,7 +377,9 @@ def extract_pdf(
         deadline = time.monotonic() + ocr["timeout_seconds"]
         recognized: dict[int, str] | None = None
         engine: dict[str, Any] = {}
-        if ocr["engine"] == "br-ocr-v1":
+        req_engine = str(ocr.get("engine") or "local")
+        br_url = (os.environ.get("WLH_BR_OCR_URL") or "").strip()
+        if req_engine == "br-ocr-v1" and (cached_result is not None or bool(br_url)):
             try:
                 result: dict[str, Any] = cached_result or br_ocr(
                     path, ocr, deadline, page_count=len(native)
@@ -406,13 +414,35 @@ def extract_pdf(
                 for p in analysis["pages"]
                 if p["suspected_scan"] and (p["ink_ratio"] >= 0.012 or p["native_text_chars"] >= 20)
             }
-            recognized, local = tesseract_pages(
-                path,
-                scans,
-                ocr,
-                time.monotonic() + ocr["timeout_seconds"],
-                nonblank_scans=nonblank_scans,
+            use_vision = (
+                sys.platform == "darwin"
+                and req_engine in {"local", "vision", "br-ocr-v1"}
+                and not engine.get("fallback_from")
+                and not str(ocr.get("languages") or "").startswith("jpn_vert")
             )
+            local: dict[str, Any] = {}
+            if use_vision:
+                try:
+                    recognized, local = vision_pages(
+                        path,
+                        scans,
+                        ocr,
+                        time.monotonic() + ocr["timeout_seconds"],
+                        nonblank_scans=nonblank_scans,
+                    )
+                except WlhError:
+                    recognized = None
+            if recognized is None or not all(recognized.values()):
+                recognized, local = tesseract_pages(
+                    path,
+                    scans,
+                    ocr,
+                    time.monotonic() + ocr["timeout_seconds"],
+                    nonblank_scans=nonblank_scans,
+                )
+            local_blocks = local.pop("blocks", None)
+            if isinstance(local_blocks, list) and local_blocks and not service_blocks:
+                service_blocks = cast(list[dict[str, Any]], local_blocks)
             engine.update(local)
         texts.update(recognized)
         info.update(method="hybrid_ocr" if len(scans) < len(native) else "ocr", ocr=engine)

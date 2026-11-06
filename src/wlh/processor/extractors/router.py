@@ -45,18 +45,6 @@ def _worker_env() -> dict[str, str]:
         if k in os.environ
     }
     src_root = Path(__file__).resolve().parents[3]
-    if "WLH_BR_OCR_URL" not in env:
-        dotenv_file = src_root.parent / ".env"
-        if dotenv_file.is_file():
-            try:
-                for line in dotenv_file.read_text(encoding="utf-8").splitlines():
-                    s = line.strip()
-                    if s and not s.startswith("#") and "=" in s:
-                        k_raw, v_raw = s.split("=", 1)
-                        if k_raw.strip() == "WLH_BR_OCR_URL":
-                            env.setdefault("WLH_BR_OCR_URL", v_raw.strip().strip("\"'"))
-            except OSError:
-                pass
     env["OMP_THREAD_LIMIT"] = "1"
     # Select this checkout without forwarding ambient PYTHONPATH or storage credentials.
     env["PYTHONPATH"] = str(src_root)

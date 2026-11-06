@@ -79,26 +79,33 @@ LEGAL_TITLE = re.compile(
 
 def legal_markdown(value: str) -> str:
     """Restore Vietnamese legal hierarchy: Phần/Chương #, Mục/Tiểu mục ##, Điều ###."""
-    paragraphs: list[str] = [
-        compact(item) for item in re.split(r"\n{2,}|\n(?=\S)", value) if compact(item)
-    ]
     result: list[str] = []
     title_budget = 2
-    for plain in paragraphs:
-        if LEGAL_TOP_HEADING.match(plain):
-            result.append("# " + plain)
-            title_budget = 0
-        elif LEGAL_SECTION_HEADING.match(plain):
-            result.append("## " + plain)
-            title_budget = 0
-        elif LEGAL_ARTICLE_HEADING.match(plain):
-            result.append("### " + plain)
-            title_budget = 0
-        elif title_budget and LEGAL_TITLE.match(plain):
-            result.append("# " + plain)
-            title_budget -= 1
-        else:
-            result.append(plain)
+    for block in re.split(r"\n{2,}", value):
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if not lines:
+            continue
+        if len(lines) >= 2 and all(line.startswith("|") and line.endswith("|") for line in lines):
+            result.append("\n".join(lines))
+            continue
+        for raw_line in lines:
+            plain = compact(raw_line)
+            if not plain:
+                continue
+            if LEGAL_TOP_HEADING.match(plain):
+                result.append("# " + plain)
+                title_budget = 0
+            elif LEGAL_SECTION_HEADING.match(plain):
+                result.append("## " + plain)
+                title_budget = 0
+            elif LEGAL_ARTICLE_HEADING.match(plain):
+                result.append("### " + plain)
+                title_budget = 0
+            elif title_budget and LEGAL_TITLE.match(plain):
+                result.append("# " + plain)
+                title_budget -= 1
+            else:
+                result.append(plain)
     return "\n\n".join(result).strip() + "\n"
 
 

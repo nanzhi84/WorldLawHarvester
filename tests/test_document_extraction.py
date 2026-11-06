@@ -698,6 +698,82 @@ class TestPdfExtractionAndOcrFallback:
         assert "Core R&D activities" in md
         assert "Systematic, investigative or experimental activities" in md
 
+    def test_scanned_pdf_with_bordered_table_reconstructs_markdown_table_and_passes_quality_gate_without_remote_service(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A scanned PDF with a ruled bordered table reconstructs a Markdown table via local OCR and passes the quality gate (`accept_ocr`) without any remote OCR service."""
+        from typing import Any
+
+        import fitz  # type: ignore[import-untyped]
+
+        from wlh.processor.extractors.pdf.scan_detector import extract_pdf
+
+        monkeypatch.delenv("WLH_BR_OCR_URL", raising=False)
+
+        fitz_mod: Any = fitz
+        src_doc = fitz_mod.open()
+        sp = src_doc.new_page(width=595, height=842)
+        sp.insert_textbox(
+            fitz_mod.Rect(50, 80, 545, 220),
+            "TREASURY DECISION 9988 CORPORATE MINIMUM TAX REGULATIONS\n"
+            "Section 1. Applicable corporations shall compute tax using the schedule below.",
+            fontsize=15,
+            fontname="helv",
+        )
+
+        x_cols = [50, 200, 410, 545]
+        y_rows = [240, 290, 340, 390]
+        shape = sp.new_shape()
+        for x in x_cols:
+            shape.draw_line(fitz_mod.Point(x, y_rows[0]), fitz_mod.Point(x, y_rows[-1]))
+        for y in y_rows:
+            shape.draw_line(fitz_mod.Point(x_cols[0], y), fitz_mod.Point(x_cols[-1], y))
+        shape.finish(color=(0, 0, 0), width=2.0)
+        shape.commit()
+
+        rows = [
+            ["Form Code", "Taxable Category", "Rate"],
+            ["Form 1120", "Domestic Corp", "15%"],
+            ["Form 1120-F", "Foreign Corp", "21%"],
+        ]
+        for r_idx, row in enumerate(rows):
+            for c_idx, cell_text in enumerate(row):
+                sp.insert_text(
+                    fitz_mod.Point(x_cols[c_idx] + 10, y_rows[r_idx] + 30),
+                    cell_text,
+                    fontsize=13,
+                    fontname="helv",
+                )
+
+        png_bytes = sp.get_pixmap(dpi=150).tobytes("png")
+        src_doc.close()
+
+        scan_doc = fitz_mod.open()
+        p = scan_doc.new_page(width=595, height=842)
+        p.insert_image(fitz_mod.Rect(0, 0, 595, 842), stream=png_bytes)
+        pdf_path = tmp_path / "scanned_bordered_table.pdf"
+        scan_doc.save(str(pdf_path))
+        scan_doc.close()
+
+        ocr_cfg = {
+            "engine": "local",
+            "languages": "eng",
+            "model": "br-ocr-v1",
+            "timeout_seconds": 30,
+            "poll_seconds": 0.2,
+            "max_pages": 10,
+            "dpi": 150,
+            "max_page_pixels": 20000000,
+            "max_result_bytes": 16777216,
+        }
+        for engine_name in ("local", "tesseract"):
+            md, info, report, _ = extract_pdf(pdf_path, {**ocr_cfg, "engine": engine_name}, "latin")
+            assert "TREASURY DECISION 9988" in md.upper()
+            assert "| --- |" in md
+            assert "FORM 1120" in md.upper() and "15%" in md
+            assert report["recommended_route"] == "accept_ocr"
+            assert info["method"] == "ocr"
+
 
 class TestOfflineExtractorAndContainerContracts:
     def test_preparsed_dom_root_converts_to_identical_markdown_as_html_string(self) -> None:

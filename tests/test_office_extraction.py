@@ -2,7 +2,117 @@
 
 from __future__ import annotations
 
+import struct
 from pathlib import Path
+
+
+def _build_ole2_msdoc_bytes(text_utf16_body: str, data_stream: bytes = b"") -> bytes:
+    """Build a valid 512-byte-sector OLE2 MS-DOC binary with WordDocument, 1Table, and optional Data streams."""
+    enofchain = 0xFFFFFFFE
+    fatsect = 0xFFFFFFFD
+    freesect = 0xFFFFFFFF
+
+    utf16_bytes = text_utf16_body.encode("utf-16le")
+    plc = struct.pack("<II", 0, len(text_utf16_body)) + struct.pack("<HIH", 0, 0x0200, 0)
+    clx_bytes = b"\x02" + struct.pack("<I", len(plc)) + plc
+
+    table_size = max(4096, ((len(clx_bytes) + 511) // 512) * 512)
+    table_padded = clx_bytes.ljust(table_size, b"\x00")
+
+    word_raw_len = max(4096, ((0x0200 + len(utf16_bytes) + 511) // 512) * 512)
+    word_buf = bytearray(word_raw_len)
+    struct.pack_into("<HH", word_buf, 0x0000, 0xA5EC, 0x00C1)
+    struct.pack_into("<H", word_buf, 0x000A, 0x0200)
+    struct.pack_into("<I", word_buf, 0x004C, len(text_utf16_body))
+    struct.pack_into("<II", word_buf, 0x01A2, 0, len(clx_bytes))
+    word_buf[0x0200 : 0x0200 + len(utf16_bytes)] = utf16_bytes
+    word_padded = bytes(word_buf)
+
+    word_sectors = len(word_padded) // 512
+    table_sectors = len(table_padded) // 512
+
+    word_start = 2
+    table_start = word_start + word_sectors
+
+    if data_stream:
+        data_size = max(4096, ((len(data_stream) + 511) // 512) * 512)
+        data_padded = data_stream.ljust(data_size, b"\x00")
+        data_sectors = len(data_padded) // 512
+        data_start = table_start + table_sectors
+    else:
+        data_padded = b""
+        data_sectors = 0
+        data_start = enofchain
+
+    fat_entries = [freesect] * 128
+    fat_entries[0] = fatsect
+    fat_entries[1] = enofchain
+
+    for i in range(word_sectors):
+        sec = word_start + i
+        fat_entries[sec] = (sec + 1) if i + 1 < word_sectors else enofchain
+
+    for i in range(table_sectors):
+        sec = table_start + i
+        fat_entries[sec] = (sec + 1) if i + 1 < table_sectors else enofchain
+
+    for i in range(data_sectors):
+        sec = data_start + i
+        fat_entries[sec] = (sec + 1) if i + 1 < data_sectors else enofchain
+
+    fat_sector = struct.pack("<128I", *fat_entries)
+
+    def _dir_entry(
+        name: str,
+        mse: int,
+        left_sib: int,
+        right_sib: int,
+        child_sid: int,
+        start_sec: int,
+        stream_size: int,
+    ) -> bytes:
+        entry = bytearray(128)
+        if name:
+            name_bytes = name.encode("utf-16le") + b"\x00\x00"
+            entry[0 : len(name_bytes)] = name_bytes
+            struct.pack_into("<H", entry, 64, len(name_bytes))
+        struct.pack_into("<BB", entry, 66, mse, 1)
+        struct.pack_into("<III", entry, 68, left_sib, right_sib, child_sid)
+        struct.pack_into("<I", entry, 116, start_sec)
+        struct.pack_into("<Q", entry, 120, stream_size)
+        return bytes(entry)
+
+    dir_sector = (
+        _dir_entry("Root Entry", 5, freesect, freesect, 1, enofchain, 0)
+        + _dir_entry(
+            "WordDocument",
+            2,
+            2,
+            3 if data_stream else freesect,
+            freesect,
+            word_start,
+            len(word_padded),
+        )
+        + _dir_entry("1Table", 2, freesect, freesect, freesect, table_start, len(table_padded))
+        + (
+            _dir_entry("Data", 2, freesect, freesect, freesect, data_start, len(data_padded))
+            if data_stream
+            else _dir_entry("", 0, freesect, freesect, freesect, freesect, 0)
+        )
+    )
+
+    header = bytearray(512)
+    header[0:8] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+    struct.pack_into("<HHHH", header, 24, 0x003E, 0x0003, 0xFFFE, 9)
+    struct.pack_into("<H", header, 32, 6)
+    struct.pack_into("<III", header, 40, 0, 1, 1)
+    struct.pack_into("<IIIII", header, 52, 0, 4096, enofchain, 0, enofchain)
+    struct.pack_into("<I", header, 72, 0)
+    struct.pack_into("<I", header, 76, 0)
+    for idx in range(1, 109):
+        struct.pack_into("<I", header, 76 + idx * 4, freesect)
+
+    return bytes(header) + fat_sector + dir_sector + word_padded + table_padded + data_padded
 
 
 class TestLegacyVietnameseAndDisguisedOfficeExtraction:
@@ -244,3 +354,162 @@ class TestLegacyVietnameseAndDisguisedOfficeExtraction:
         repaired_path.write_bytes(repaired)
         members = unpack_zip(repaired_path, tmp_path / "out", max_bytes=10 * 1024 * 1024)
         assert [m["path"] for m in members] == ["大法官解釋-釋字第793號.json"]
+
+    def test_legacy_binary_word_doc_with_table_and_prose_extracts_markdown_table_without_external_office_suite(
+        self, tmp_path: Path, monkeypatch: object
+    ) -> None:
+        """A legacy OLE2 `.doc` containing statutory prose and `\x07`-delimited table cells extracts a Markdown table in pure Python without an external Office suite."""
+        import pytest
+
+        from wlh.processor.extractors.word.office import extract_office
+
+        mp: pytest.MonkeyPatch = monkeypatch  # type: ignore[assignment]
+        mp.setenv("WLH_SOFFICE", "/nonexistent/soffice")
+
+        body_text = (
+            "MINISTRY OF FINANCE CIRCULAR 2026 ON CORPORATE TAX\r"
+            "Article 1. Standard corporate tax schedule applies as follows:\r"
+            "Category\x07Tax Rate\x07\x07"
+            "Standard Enterprise\x0720%\x07\x07"
+        )
+        doc_path = tmp_path / "circular_table.doc"
+        doc_path.write_bytes(_build_ole2_msdoc_bytes(body_text))
+
+        md, info = extract_office(doc_path, kind="doc")
+        assert "MINISTRY OF FINANCE CIRCULAR 2026" in md
+        assert "| Category | Tax Rate |" in md
+        assert "| --- | --- |" in md
+        assert "| Standard Enterprise | 20% |" in md
+        assert info["extractor"] == "pure_python_ole2_msdoc"
+        assert info.get("tables_recovered", 0) >= 1
+
+    def test_scanned_image_legacy_binary_word_doc_extracts_embedded_bitmap_via_local_ocr_without_external_office_suite(
+        self, tmp_path: Path, monkeypatch: object
+    ) -> None:
+        """A scanned-image legacy OLE2 `.doc` with only a `\x08\r` drawing anchor and an embedded bitmap in `Data` extracts text via local OCR without an external Office suite."""
+        import zlib
+        from typing import Any
+
+        import fitz  # type: ignore[import-untyped]
+        import pytest
+
+        from wlh.processor.extractors.word.office import extract_office
+
+        mp: pytest.MonkeyPatch = monkeypatch  # type: ignore[assignment]
+        mp.setenv("WLH_SOFFICE", "/nonexistent/soffice")
+
+        fitz_mod: Any = fitz
+        img_doc = fitz_mod.open()
+        img_page = img_doc.new_page(width=595, height=320)
+        img_page.insert_textbox(
+            fitz_mod.Rect(30, 40, 565, 280),
+            "STATUTORY NOTICE 2026 PUBLIC WORKS TAX EXEMPTION\n"
+            "Article 5. Eligible households receive a 50 percent reduction.",
+            fontsize=18,
+            fontname="helv",
+        )
+        pix = img_page.get_pixmap(dpi=150)
+        png_bytes = pix.tobytes("png")
+        width, height = pix.width, pix.height
+        rgb_samples = pix.samples
+        img_doc.close()
+
+        row_stride = ((width * 3 + 3) // 4) * 4
+        dib_bits = bytearray(row_stride * height)
+        for y in range(height):
+            src_row = (height - 1 - y) * width * 3
+            dst_row = y * row_stride
+            for x in range(width):
+                r = rgb_samples[src_row + x * 3]
+                g = rgb_samples[src_row + x * 3 + 1]
+                b = rgb_samples[src_row + x * 3 + 2]
+                dib_bits[dst_row + x * 3 : dst_row + x * 3 + 3] = bytes((b, g, r))
+
+        bmi_header = struct.pack(
+            "<IiiHHIIiiII",
+            40,
+            width,
+            height,
+            1,
+            24,
+            0,
+            len(dib_bits),
+            2835,
+            2835,
+            0,
+            0,
+        )
+        off_bmi = 80
+        cb_bmi = len(bmi_header)
+        off_bits = off_bmi + cb_bmi
+        cb_bits = len(dib_bits)
+        rec_size = off_bits + cb_bits
+        emr_stretchdibits = (
+            struct.pack(
+                "<IIiiiiiiiiiIIIIII",
+                81,
+                rec_size,
+                0,
+                0,
+                width,
+                height,
+                0,
+                0,
+                width,
+                height,
+                off_bmi,
+                cb_bmi,
+                off_bits,
+                cb_bits,
+                0,
+                0x00CC0020,
+                width,
+            )
+            + struct.pack("<I", height)
+            + bmi_header
+            + bytes(dib_bits)
+        )
+        emr_eof = struct.pack("<IIIII", 14, 20, 0, 16, 20)
+        emf_raw = emr_stretchdibits + emr_eof
+        emf_compressed = zlib.compress(emf_raw)
+        metafile_hdr = struct.pack(
+            "<IiiiiiiIBB",
+            len(emf_raw),
+            0,
+            0,
+            width,
+            height,
+            width * 100,
+            height * 100,
+            len(emf_compressed),
+            0,
+            254,
+        )
+        blip_emf_payload = (b"\x11" * 16) + metafile_hdr + emf_compressed
+        blip_emf_record = (
+            struct.pack("<HHI", (0x03D4 << 4) | 0, 0xF01A, len(blip_emf_payload)) + blip_emf_payload
+        )
+        blip_png_payload = (b"\x22" * 16) + b"\xff" + png_bytes
+        blip_png_record = (
+            struct.pack("<HHI", (0x06E0 << 4) | 0, 0xF01E, len(blip_png_payload)) + blip_png_payload
+        )
+
+        doc_path = tmp_path / "scanned_notice.doc"
+        doc_path.write_bytes(
+            _build_ole2_msdoc_bytes("\x08\r", data_stream=blip_emf_record + blip_png_record)
+        )
+
+        ocr_cfg = {
+            "engine": "local",
+            "languages": "eng",
+            "model": "br-ocr-v1",
+            "timeout_seconds": 30,
+            "poll_seconds": 0.2,
+            "max_pages": 10,
+            "dpi": 150,
+            "max_page_pixels": 20000000,
+            "max_result_bytes": 16777216,
+        }
+        md, info = extract_office(doc_path, kind="doc", ocr=ocr_cfg)
+        assert "STATUTORY NOTICE 2026" in md.upper()
+        assert info["extractor"] == "msdoc_embedded_image_ocr"
