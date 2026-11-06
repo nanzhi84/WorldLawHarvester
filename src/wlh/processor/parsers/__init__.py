@@ -272,30 +272,171 @@ def validate_options(name: str, options: Mapping[str, Any]) -> None:
         raise WlhError("invalid_adapter_options") from None
 
 
-class Base:
-    """Shared defaults; subclasses define CONTRACT and the parsing rules."""
+def _mapping(value: Any) -> Mapping[str, Any] | None:
+    return cast(Mapping[str, Any], value) if isinstance(value, Mapping) else None
+
+
+def _strings(value: Any) -> list[str] | None:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [str(x) for x in cast(Sequence[Any], value)]
+    return None
+
+
+DEFAULT_QUALITY_ACCEPT_ROUTES: tuple[str, ...] = ("accept", "accept_ocr", "accept_with_warning")
+
+
+class ParserConfigView:
+    """Typed read-only view over one parser config.
+
+    The single home for config reads in Stage 3a: every property accepts the five-stage nested
+    layout first and the legacy flat aliases second, so builders that keep the declared config
+    as given and parsers that hold the normalized config read identical values.
+    """
+
+    config: dict[str, Any]
+
+    def __init__(self, config: Mapping[str, Any]) -> None:
+        self.config = cast(dict[str, Any], config)
+
+    def _section(self, *path: str) -> Mapping[str, Any] | None:
+        node: Mapping[str, Any] | None = self.config
+        for key in path:
+            node = _mapping(node.get(key)) if node is not None else None
+        return node
+
+    @property
+    def parser_spec(self) -> dict[str, Any]:
+        return cast(dict[str, Any], self._section("processor", "parser") or {})
+
+    @property
+    def extractor_spec(self) -> dict[str, Any]:
+        return cast(dict[str, Any], self._section("processor", "extractor") or {})
+
+    @property
+    def parser_options(self) -> dict[str, Any]:
+        options = _mapping(self.parser_spec.get("options")) or _mapping(
+            self.config.get("adapter_options")
+        )
+        return dict(options or {})
+
+    @property
+    def doc_rules(self) -> dict[str, Any]:
+        docs = _mapping(self.parser_spec.get("documents")) or _mapping(self.config.get("documents"))
+        return cast(dict[str, Any], docs or {})
+
+    @property
+    def detail_url_patterns(self) -> list[str]:
+        for docs in (self._section("processor", "parser", "documents"), self._section("documents")):
+            patterns = _strings((docs or {}).get("detail_url_patterns"))
+            if patterns is not None:
+                return patterns
+        return []
+
+    @property
+    def cleaners_spec(self) -> dict[str, Any]:
+        return cast(dict[str, Any], self._section("cleaners") or {})
+
+    @property
+    def metadata_spec(self) -> dict[str, Any]:
+        return dict(self._section("storage", "metadata") or self._section("metadata") or {})
+
+    @property
+    def ocr_spec(self) -> Mapping[str, Any] | None:
+        return _mapping(self.extractor_spec.get("ocr")) or self._section("ocr")
+
+    @property
+    def entry_urls(self) -> list[str]:
+        scheduler = self._section("scheduler") or {}
+        urls = _strings(scheduler.get("entry_urls"))
+        return urls if urls is not None else _strings(self.config.get("entry_urls")) or []
+
+    @property
+    def url_rewrites(self) -> list[Mapping[str, Any]]:
+        rewrites = (self._section("scheduler") or {}).get("url_rewrites")
+        if isinstance(rewrites, Sequence) and not isinstance(rewrites, (str, bytes)):
+            return list(cast(Sequence[Mapping[str, Any]], rewrites))
+        return []
+
+    @property
+    def max_depth(self) -> int:
+        for section in (self._section("scheduler"), self._section("fetch")):
+            if section is not None and "max_depth" in section:
+                return int(section["max_depth"])
+        return 0
+
+    def _budget(self, key: str, default: int) -> int:
+        budget = self._section("scheduler", "budget") or self._section("budget")
+        return int(budget.get(key, default)) if budget is not None else default
+
+    @property
+    def budget_documents(self) -> int:
+        return self._budget("documents", 25)
+
+    @property
+    def budget_response_bytes(self) -> int:
+        return self._budget("response_bytes", 15_000_000)
+
+    @property
+    def quality_accept_routes(self) -> tuple[str, ...]:
+        for section in (self._section("cleaners"), self._section("parser")):
+            routes = _strings((section or {}).get("quality_accept_routes"))
+            if routes is not None:
+                return tuple(routes)
+        return DEFAULT_QUALITY_ACCEPT_ROUTES
+
+    def _cleaner_patterns(self, key: str) -> tuple[str, ...]:
+        raw = (self._section("cleaners") or {}).get(key) or self.config.get(key)
+        if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
+            return tuple(str(x) for x in cast(Sequence[Any], raw) if x)
+        return ()
+
+    @property
+    def strip_text_regexes(self) -> tuple[str, ...]:
+        return self._cleaner_patterns("strip_text_regexes")
+
+    @property
+    def title_strip_regexes(self) -> tuple[str, ...]:
+        return self._cleaner_patterns("title_strip_regexes")
+
+    @property
+    def parser_transforms(self) -> tuple[str, ...]:
+        """Declared transforms in declaration order."""
+        return tuple(_strings(self.parser_spec.get("transforms")) or ())
+
+    @property
+    def transforms(self) -> set[str]:
+        return set(self.parser_transforms)
+
+    @property
+    def extractor_quirks(self) -> tuple[str, ...]:
+        """Declared extractor quirks in declaration order."""
+        quirks = _strings(self.extractor_spec.get("quirks"))
+        if quirks is None:
+            quirks = _strings(self.config.get("quirks"))
+        return tuple(quirks or ())
+
+    @property
+    def quirks(self) -> set[str]:
+        return set(self.extractor_quirks)
+
+    @property
+    def reconcile_range(self) -> bool:
+        if "reconcile_result_range" in self.parser_transforms:
+            return True
+        parser_cfg = self._section("processor", "parser")
+        if parser_cfg is not None:
+            return bool(parser_cfg.get("reconcile_result_range"))
+        return bool(self.config.get("reconcile_result_range"))
+
+
+class Base(ParserConfigView):
+    """Stage 3a parser base: one typed config view and the plan / parse / build contract."""
 
     CONTRACT: str = "wlh.adapter.base.v0"
     PLANNING_OPTIONS: tuple[str, ...] = ()
 
     def __init__(self, config: Mapping[str, Any]) -> None:
-        self.config: dict[str, Any] = normalize_parser_config(config)
-
-    @property
-    def parser_spec(self) -> dict[str, Any]:
-        return self.config["processor"]["parser"]
-
-    @property
-    def extractor_spec(self) -> dict[str, Any]:
-        return self.config["processor"]["extractor"]
-
-    @property
-    def transforms(self) -> set[str]:
-        return set(self.parser_spec.get("transforms") or ())
-
-    @property
-    def quirks(self) -> set[str]:
-        return set(self.extractor_spec.get("quirks") or ())
+        super().__init__(normalize_parser_config(config))
 
     @staticmethod
     def validate_options(options: Mapping[str, Any]) -> None:
@@ -345,14 +486,16 @@ class Base:
 
     def build(
         self, ctx: Any, target: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]
-    ) -> Any:
+    ) -> list[RawRecord]:
         raise NotImplementedError
 
 
 __all__ = [
+    "DEFAULT_QUALITY_ACCEPT_ROUTES",
     "MODULES",
     "PARSERS",
     "Base",
+    "ParserConfigView",
     "RawRecord",
     "RawUnitSource",
     "RequestSpec",

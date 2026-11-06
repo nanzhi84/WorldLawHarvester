@@ -12,6 +12,7 @@
 
 ### Changed
 
+- **Stage 3a 解析器内部配置收敛、Schema 表驱动化与统一交付契约（Issue #10）**：在 `parsers/__init__.py` 中引入 `ParserConfigView` 强类型只读配置视图，消除 `record_base.py`、`html/parser.py`、`html/document_builder.py`、`json/parser.py` 与 `xml/discovery.py` 中散落的重复配置读取 Helper；新增 `xml/schemas.py`（9 种立法/判例 XML 方言 `XmlSchemaSpec` 声明表与 `extract_xml_records()`）与 `json/schemas.py`（5 套 JSON 数据集 `JsonSchemaSpec` 声明表与 `extract_json_records()`），将日本 e-Gov 混合封包辅助函数下沉至 `record_base.py` 以彻底消除 `json/` 与 `xml/` 跨包导入；在 `extractors/registry.py` 提供进程内文本提取网关 `inline_markdown()`，并将 `WebDocumentBuilder.build()`、`HtmlParser.build()`、`JsonParser.build()` 与 `XmlParser.build()` 统一收敛为直接返回 `list[RawRecord]`。
 - **Stage 3b 提取器统一魔数网关（Issue #9）**：`detect_real_format` 迁至 `extractors/magic.py` 并作为路由与 Worker 的唯一格式判定入口；新增 `base.py` 引擎契约与 `registry.py` 的 `ExtractorRegistry`，支持按 `(kind, preferred_engine)` 精确路由或沿降级链回退；`word/` 拆为 `office/`（`doc`/`docx`/`xls`/`xlsx`/`rtf` 单格式模块）与 `archive/zip_container.py`，四个 quirks 由 `QUIRK_HOOKS` 声明式挂载到五个生命周期阶段。彻底移除 LibreOffice / `textutil` 回退、`WLH_SOFFICE` 透传与 `libreoffice_timeout_seconds` 配置（提取超时收敛为 OCR 超时），Office 解析契约升级为 `wlh.office.v3`。
 - 各格式边界修复：`.doc` 行末空单元格不再错列、OfficeArt BLIP 按记录长度逐图提取（多页扫描不再漏页或粘连）、8-bit 压缩片段保留 TCVN3 字节；`.xlsx`/`.xls` 裁剪尾部空列；RTF `\cell`/`\row` 与 `.docx` 文本框正文还原；多页 CJK 扫描件先以首页探测 Vision 竖排碎片再回退 Tesseract，栅格表格检测容忍轻微倾斜。
 

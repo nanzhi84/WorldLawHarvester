@@ -18,12 +18,6 @@ from wlh.processor.parsers.html.document_builder import (
     TEXT_KINDS,
     WebDocumentBuilder,
 )
-from wlh.processor.parsers.html.document_builder import (
-    doc_rules as _doc_rules,
-)
-from wlh.processor.parsers.html.document_builder import (
-    reconcile_range_enabled as _reconcile_range_enabled,
-)
 from wlh.processor.parsers.html.dom_cleanup import (
     clean_attachment_title_attr,
 )
@@ -49,66 +43,6 @@ def _text(node: Any) -> str:
     return " ".join(node.text_content().split())
 
 
-def _parser_options(config: Mapping[str, Any]) -> Mapping[str, Any]:
-    proc = config.get("processor")
-    if isinstance(proc, Mapping):
-        proc_map = cast(Mapping[str, Any], proc)
-        parser_cfg = proc_map.get("parser")
-        if isinstance(parser_cfg, Mapping):
-            parser_map = cast(Mapping[str, Any], parser_cfg)
-            if isinstance(parser_map.get("options"), Mapping):
-                return cast(Mapping[str, Any], parser_map["options"])
-    opts = config.get("adapter_options")
-    return cast(Mapping[str, Any], opts) if isinstance(opts, Mapping) else {}
-
-
-def _max_depth(config: Mapping[str, Any]) -> int:
-    sched = config.get("scheduler")
-    if isinstance(sched, Mapping):
-        sched_map = cast(Mapping[str, Any], sched)
-        if "max_depth" in sched_map:
-            return int(sched_map["max_depth"])
-    fetch = config.get("fetch")
-    if isinstance(fetch, Mapping):
-        fetch_map = cast(Mapping[str, Any], fetch)
-        if "max_depth" in fetch_map:
-            return int(fetch_map["max_depth"])
-    return 0
-
-
-def _entry_urls(config: Mapping[str, Any]) -> Sequence[str]:
-    sched = config.get("scheduler")
-    if isinstance(sched, Mapping):
-        sched_map = cast(Mapping[str, Any], sched)
-        if isinstance(sched_map.get("entry_urls"), Sequence):
-            return [str(u) for u in cast(Sequence[Any], sched_map["entry_urls"])]
-    entries = config.get("entry_urls")
-    if isinstance(entries, Sequence):
-        return [str(u) for u in cast(Sequence[Any], entries)]
-    return ()
-
-
-def _budget_documents(config: Mapping[str, Any]) -> int:
-    sched = config.get("scheduler")
-    if isinstance(sched, Mapping):
-        sched_map = cast(Mapping[str, Any], sched)
-        if isinstance(sched_map.get("budget"), Mapping):
-            return int(cast(Mapping[str, Any], sched_map["budget"]).get("documents", 25))
-    budget = config.get("budget")
-    if isinstance(budget, Mapping):
-        return int(cast(Mapping[str, Any], budget).get("documents", 25))
-    return 25
-
-
-def _url_rewrites(config: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
-    sched = config.get("scheduler")
-    if isinstance(sched, Mapping):
-        sched_map = cast(Mapping[str, Any], sched)
-        if isinstance(sched_map.get("url_rewrites"), Sequence):
-            return cast(Sequence[Mapping[str, Any]], sched_map["url_rewrites"])
-    return ()
-
-
 class HtmlParser(WebDocumentBuilder, Base):
     CONTRACT: str = "wlh.parser.html.v8"
     PLANNING_OPTIONS: tuple[str, ...] = ("max_pages",)
@@ -124,16 +58,15 @@ class HtmlParser(WebDocumentBuilder, Base):
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
-        opts = _parser_options(config)
+        opts = self.parser_options
         self.max_pages: int = int(opts.get("max_pages", 1))
-        rules = _doc_rules(config)
+        rules = self.doc_rules
         self.details: list[re.Pattern[str]] = [
             re.compile(p) for p in rules.get("detail_url_patterns", ())
         ]
         self.exclude_details: list[re.Pattern[str]] = [
             re.compile(p) for p in rules.get("exclude_detail_url_patterns", ())
         ]
-        self.reconcile_range: bool = _reconcile_range_enabled(config)
         if self.reconcile_range:
             self.attachment = _PDF
             self.volume = None
@@ -158,7 +91,7 @@ class HtmlParser(WebDocumentBuilder, Base):
         self, resources: Sequence[Mapping[str, Any]], state: dict[str, Any]
     ) -> dict[str, Any]:
         result = super().plan_recheck(resources, state)
-        docs = _doc_rules(self.config)
+        docs = self.doc_rules
         for target in result["targets"]:
             locator = target["identity"]["recheck_locator"]
             context_url = locator.get("title_context_url")
@@ -186,7 +119,7 @@ class HtmlParser(WebDocumentBuilder, Base):
         link = clean_url(base, raw_href)
         if not link:
             return None
-        for rw in _url_rewrites(self.config):
+        for rw in self.url_rewrites:
             pat = rw.get("pattern") or rw.get("match")
             rep = rw.get("replacement") if rw.get("replacement") is not None else rw.get("replace")
             if pat and rep is not None and re.search(str(pat), link):
@@ -219,7 +152,7 @@ class HtmlParser(WebDocumentBuilder, Base):
         data = ctx.read(acquisition)
         kind = detect_real_format(data, "html" if acquisition["mime_type"] == "text/html" else "")
         url: str = str(acquisition["actual_url"] or acquisition["request_url"] or "")
-        docs = _doc_rules(self.config)
+        docs = self.doc_rules
         parsed_main = parse_html(data, acquisition.get("charset")) if kind == "html" else None
         has_lv_rules = bool(docs.get("label_value_rules"))
         if kind == "html" and has_lv_rules and not self.details:
@@ -236,8 +169,8 @@ class HtmlParser(WebDocumentBuilder, Base):
         inline_images: list[str] = []
         truncated: str | None = None
         wlh_trunc_code: str | None = None
-        max_depth = _max_depth(self.config)
-        entry_urls = _entry_urls(self.config)
+        max_depth = self.max_depth
+        entry_urls = self.entry_urls
         if kind == "html":
             assert parsed_main is not None
             tree, _, _ = parsed_main
@@ -284,16 +217,7 @@ class HtmlParser(WebDocumentBuilder, Base):
             else:
                 att_excl_xpaths = ()
             att_title_xpath = docs.get("attachment_title_xpath")
-            title_strip_regexes: Sequence[str] = tuple(
-                str(x)
-                for x in (
-                    cast(dict[str, Any], self.config.get("cleaners") or {}).get(
-                        "title_strip_regexes"
-                    )
-                    or ()
-                )
-                if x
-            )
+            title_strip_regexes: Sequence[str] = self.title_strip_regexes
             for anchor in anchors:
                 raw_href: str | None = (
                     anchor.get("href")
@@ -406,9 +330,8 @@ class HtmlParser(WebDocumentBuilder, Base):
                     )
                     if next_req is not None or asp_trunc:
                         truncated = truncated or asp_trunc or "max_depth_exceeded"
-            elif docs.get("require_complete_text") or (
-                isinstance(self.config.get("cleaners"), Mapping)
-                and self.config["cleaners"].get("require_complete_text")
+            elif docs.get("require_complete_text") or self.cleaners_spec.get(
+                "require_complete_text"
             ):
                 img_tree = tree
                 content_xpath = docs.get("content_xpath")
@@ -418,7 +341,7 @@ class HtmlParser(WebDocumentBuilder, Base):
                     else [img_tree.body if img_tree.body is not None else img_tree]
                 )
                 seen_imgs: set[str] = set()
-                quirks = self.quirks
+                quirks = self.extractor_quirks
                 use_glyphs = not quirks or "ja_inline_glyphs" in quirks or "ja_kanpo_pua" in quirks
                 from wlh.processor.parsers.html.dom_cleanup import clean_site_dom
 
@@ -433,9 +356,9 @@ class HtmlParser(WebDocumentBuilder, Base):
                     clean_site_dom(
                         r_node,
                         exclude_xpaths=excl_list,
-                        dom_transforms=tuple(self.transforms) or ("inline_script_cell_restore",),
+                        dom_transforms=self.parser_transforms or ("inline_script_cell_restore",),
                     )
-                    clean_html_tree(r_node, quirks=tuple(quirks))
+                    clean_html_tree(r_node, quirks=quirks)
                     for img in r_node.xpath("descendant-or-self::img"):
                         if use_glyphs and inline_glyph_text(img) is not None:
                             continue
@@ -502,7 +425,7 @@ class HtmlParser(WebDocumentBuilder, Base):
             if result["targets"]:
                 result["requests"] = []
             elif any(self.is_detail(r["url"]) for r in result["requests"]):
-                limit = _budget_documents(self.config)
+                limit = self.budget_documents
                 det_reqs = [r for r in result["requests"] if self.is_detail(r["url"])]
                 other_reqs = [r for r in result["requests"] if not self.is_detail(r["url"])]
                 if (

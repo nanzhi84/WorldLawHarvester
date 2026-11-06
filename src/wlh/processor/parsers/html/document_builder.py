@@ -13,15 +13,11 @@ import lxml.html as _html  # type: ignore[import-untyped]
 
 from wlh.cleaners.text_cleaner import apply_text_cleaners, blocked, clean_title
 from wlh.core import WlhError, canonical, digest, public_url
-from wlh.processor.extractors.html.html_to_md import (
-    clean_html_tree,
-    html_to_markdown,
-    json_to_markdown,
-    text_to_markdown,
-)
+from wlh.processor.extractors import inline_markdown
+from wlh.processor.extractors.html.html_to_md import clean_html_tree
 from wlh.processor.extractors.html.images import require_textual_images
 from wlh.processor.extractors.magic import detect_real_format
-from wlh.processor.extractors.xml.markdown import xml_to_markdown
+from wlh.processor.parsers import ParserConfigView, RawRecord, RawUnitSource
 from wlh.processor.parsers.html.dom_cleanup import clean_site_dom
 from wlh.processor.parsers.html.fields import (
     decode,
@@ -76,123 +72,6 @@ GENERIC_ATTACHMENT_LABELS: set[str] = {
 }
 
 
-def doc_rules(config: Mapping[str, Any]) -> Mapping[str, Any]:
-    proc = config.get("processor")
-    if isinstance(proc, Mapping):
-        proc_map = cast(Mapping[str, Any], proc)
-        parser_cfg = proc_map.get("parser")
-        if isinstance(parser_cfg, Mapping):
-            parser_map = cast(Mapping[str, Any], parser_cfg)
-            if isinstance(parser_map.get("documents"), Mapping):
-                return cast(Mapping[str, Any], parser_map["documents"])
-    docs = config.get("documents")
-    return cast(Mapping[str, Any], docs) if isinstance(docs, Mapping) else {}
-
-
-_doc_rules = doc_rules
-
-
-def _parser_transforms(config: Mapping[str, Any]) -> Sequence[str]:
-    proc = config.get("processor")
-    if isinstance(proc, Mapping):
-        proc_map = cast(Mapping[str, Any], proc)
-        parser_cfg = proc_map.get("parser")
-        if isinstance(parser_cfg, Mapping):
-            parser_map = cast(Mapping[str, Any], parser_cfg)
-            if isinstance(parser_map.get("transforms"), Sequence):
-                return [str(x) for x in cast(Sequence[Any], parser_map["transforms"])]
-    return ()
-
-
-def reconcile_range_enabled(config: Mapping[str, Any]) -> bool:
-    if "reconcile_result_range" in _parser_transforms(config):
-        return True
-    proc = config.get("processor")
-    if isinstance(proc, Mapping):
-        proc_map = cast(Mapping[str, Any], proc)
-        parser_cfg = proc_map.get("parser")
-        if isinstance(parser_cfg, Mapping):
-            return bool(cast(Mapping[str, Any], parser_cfg).get("reconcile_result_range"))
-    return bool(config.get("reconcile_result_range"))
-
-
-_reconcile_range_enabled = reconcile_range_enabled
-
-
-def _metadata_cfg(config: Mapping[str, Any]) -> dict[str, Any]:
-    storage = config.get("storage")
-    if isinstance(storage, Mapping):
-        storage_map = cast(Mapping[str, Any], storage)
-        if isinstance(storage_map.get("metadata"), Mapping):
-            return dict(cast(Mapping[str, Any], storage_map["metadata"]))
-    meta = config.get("metadata")
-    return dict(cast(Mapping[str, Any], meta)) if isinstance(meta, Mapping) else {}
-
-
-def _ocr_cfg(config: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    proc = config.get("processor")
-    if isinstance(proc, Mapping):
-        proc_map = cast(Mapping[str, Any], proc)
-        ext = proc_map.get("extractor")
-        if isinstance(ext, Mapping):
-            ext_map = cast(Mapping[str, Any], ext)
-            if isinstance(ext_map.get("ocr"), Mapping):
-                return cast(Mapping[str, Any], ext_map["ocr"])
-    ocr = config.get("ocr")
-    return cast(Mapping[str, Any], ocr) if isinstance(ocr, Mapping) else None
-
-
-def _extractor_quirks(config: Mapping[str, Any]) -> Sequence[str]:
-    proc = config.get("processor")
-    if isinstance(proc, Mapping):
-        proc_map = cast(Mapping[str, Any], proc)
-        ext = proc_map.get("extractor")
-        if isinstance(ext, Mapping):
-            ext_map = cast(Mapping[str, Any], ext)
-            if isinstance(ext_map.get("quirks"), Sequence):
-                return [str(x) for x in cast(Sequence[Any], ext_map["quirks"])]
-    quirks = config.get("quirks")
-    if isinstance(quirks, Sequence) and not isinstance(quirks, (str, bytes)):
-        return [str(x) for x in cast(Sequence[Any], quirks)]
-    return ()
-
-
-def _strip_text_regexes(config: Mapping[str, Any]) -> Sequence[str]:
-    cleaners = config.get("cleaners")
-    clean_map: Mapping[str, Any] = (
-        cast(Mapping[str, Any], cleaners) if isinstance(cleaners, Mapping) else {}
-    )
-    raw = clean_map.get("strip_text_regexes") or config.get("strip_text_regexes")
-    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
-        return [str(x) for x in cast(Sequence[Any], raw) if x]
-    return ()
-
-
-def _title_strip_regexes(config: Mapping[str, Any]) -> Sequence[str]:
-    cleaners = config.get("cleaners")
-    clean_map: Mapping[str, Any] = (
-        cast(Mapping[str, Any], cleaners) if isinstance(cleaners, Mapping) else {}
-    )
-    raw = clean_map.get("title_strip_regexes") or config.get("title_strip_regexes")
-    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
-        return [str(x) for x in cast(Sequence[Any], raw) if x]
-    return ()
-
-
-def _quality_routes(config: Mapping[str, Any]) -> Sequence[str]:
-    cleaners = config.get("cleaners")
-    if isinstance(cleaners, Mapping):
-        clean_map = cast(Mapping[str, Any], cleaners)
-        if isinstance(clean_map.get("quality_accept_routes"), Sequence):
-            return [str(x) for x in cast(Sequence[Any], clean_map["quality_accept_routes"])]
-    parser_cfg = config.get("parser")
-    if isinstance(parser_cfg, Mapping):
-        parser_map = cast(Mapping[str, Any], parser_cfg)
-        if isinstance(parser_map.get("quality_accept_routes"), Sequence):
-            return [str(x) for x in cast(Sequence[Any], parser_map["quality_accept_routes"])]
-    return ("accept", "accept_ocr", "accept_with_warning")
-
-
 def _dl_fields(tree: Any) -> dict[str, str]:
     fields: dict[str, str] = {}
     for item in tree.xpath("//main//dl[dt and dd]"):
@@ -205,18 +84,15 @@ def _dl_fields(tree: Any) -> dict[str, str]:
     return fields
 
 
-class WebDocumentBuilder:
+class WebDocumentBuilder(ParserConfigView):
     config: dict[str, Any]
     attachment: re.Pattern[str]
     volume: re.Pattern[str] | None
 
     def __init__(self, config: dict[str, Any]) -> None:
-        try:
-            super().__init__(config)  # type: ignore[call-arg]
-        except TypeError:
-            super().__init__()
+        super().__init__(config)
         self.config = config
-        rules = _doc_rules(config)
+        rules = self.doc_rules
         self.attachment = re.compile(
             rules.get("attachment_url_pattern") or r"(?i)\.(?:pdf|docx?|rtf|xlsx?|zip)(?:$|[?#])"
         )
@@ -232,7 +108,8 @@ class WebDocumentBuilder:
         *,
         parsed_html: tuple[Any, str, str] | None = None,
     ) -> tuple[str, dict[str, Any] | None, list[str]]:
-        strip_pats = _strip_text_regexes(self.config)
+        strip_pats = self.strip_text_regexes
+        quirks = self.extractor_quirks
         if kind == "html":
             tree, _, _ = (
                 parsed_html
@@ -244,26 +121,16 @@ class WebDocumentBuilder:
                 None,
                 ["markdown", "quality"],
             )
-        if kind == "txt":
+        if kind in {"txt", "json"}:
             text, _ = decode(data, acquisition["charset"])
-            md = text_to_markdown(text)
             return (
-                apply_text_cleaners(md, strip_pats) if strip_pats else md,
-                None,
-                ["markdown", "quality"],
-            )
-        if kind == "json":
-            text, _ = decode(data, acquisition["charset"])
-            md = json_to_markdown(text)
-            return (
-                apply_text_cleaners(md, strip_pats) if strip_pats else md,
+                inline_markdown(text, kind, quirks=quirks, strip_text_regexes=strip_pats),
                 None,
                 ["markdown", "quality"],
             )
         if kind == "xml":
-            md = xml_to_markdown(data)
             return (
-                apply_text_cleaners(md, strip_pats) if strip_pats else md,
+                inline_markdown(data, "xml", quirks=quirks, strip_text_regexes=strip_pats),
                 None,
                 ["markdown", "quality"],
             )
@@ -288,7 +155,7 @@ class WebDocumentBuilder:
         wlh_trunc = tree.xpath("//*[@data-wlh-truncated]/@data-wlh-truncated")
         if wlh_trunc:
             raise WlhError(str(wlh_trunc[0]))
-        docs = _doc_rules(self.config)
+        docs = self.doc_rules
         rule: Any = docs.get("content_xpath")
         nodes = tree.xpath(rule) if rule else [tree.body if tree.body is not None else tree]
         nodes = [n for n in nodes if isinstance(n, etree._Element)]
@@ -299,7 +166,7 @@ class WebDocumentBuilder:
                 raise WlhError("target_content_blocked")
             raise WlhError("content_region_missing")
         base = str(acquisition.get("actual_url") or acquisition.get("request_url") or "")
-        ocr_cfg = _ocr_cfg(self.config)
+        ocr_cfg = self.ocr_spec
         ocr_langs = (
             str(ocr_cfg.get("languages") or "jpn+jpn_vert")
             if isinstance(ocr_cfg, Mapping)
@@ -312,12 +179,9 @@ class WebDocumentBuilder:
             excl_list = [str(x) for x in cast(Sequence[Any], excl_xpath) if x]
         else:
             excl_list = []
-        dom_transforms = _parser_transforms(self.config)
-        quirks = _extractor_quirks(self.config)
-        cleaners_cfg = self.config.get("cleaners")
-        cleaners_map: Mapping[str, Any] = (
-            cast(Mapping[str, Any], cleaners_cfg) if isinstance(cleaners_cfg, Mapping) else {}
-        )
+        dom_transforms = self.parser_transforms
+        quirks = self.extractor_quirks
+        cleaners_map = self.cleaners_spec
         req_complete = bool(
             docs.get("require_complete_text") or cleaners_map.get("require_complete_text")
         )
@@ -346,16 +210,16 @@ class WebDocumentBuilder:
         body = root.makeelement("body")
         root.append(body)
         body.extend(nodes)
-        md = html_to_markdown(
+        return inline_markdown(
             root,
-            base,
+            "html",
+            base_url=base,
             content_xpath="/html/body" if rule else None,
             quirks=quirks,
+            strip_text_regexes=self.strip_text_regexes,
             already_cleaned=True,
             title=title,
         )
-        strip_pats = _strip_text_regexes(self.config)
-        return apply_text_cleaners(md, strip_pats)
 
     def detail_values(
         self,
@@ -368,8 +232,8 @@ class WebDocumentBuilder:
         parsed_html: tuple[Any, str, str] | None = None,
     ) -> tuple[dict[str, Any], str | None, str | None]:
         """Declared field rules on the archived detail input."""
-        title_pats = _title_strip_regexes(self.config)
-        if _reconcile_range_enabled(self.config):
+        title_pats = self.title_strip_regexes
+        if self.reconcile_range:
             if kind != "html":
                 raise WlhError("court_detail_not_html")
             tree, _, encoding = (
@@ -404,7 +268,7 @@ class WebDocumentBuilder:
                 title,
                 encoding,
             )
-        docs = _doc_rules(self.config)
+        docs = self.doc_rules
         fields_cfg = docs.get("fields")
         fields_map: Mapping[str, Any] = (
             cast(Mapping[str, Any], fields_cfg) if isinstance(fields_cfg, Mapping) else {}
@@ -413,10 +277,7 @@ class WebDocumentBuilder:
         lv_seq: Sequence[Mapping[str, Any]] = (
             cast(Sequence[Mapping[str, Any]], lv_rules) if isinstance(lv_rules, Sequence) else ()
         )
-        cleaners_cfg = self.config.get("cleaners")
-        cleaners_map: Mapping[str, Any] = (
-            cast(Mapping[str, Any], cleaners_cfg) if isinstance(cleaners_cfg, Mapping) else {}
-        )
+        cleaners_map = self.cleaners_spec
         infer_eff = (
             bool(cleaners_map.get("infer_effective_date", True))
             if "infer_effective_date" in cleaners_map
@@ -450,14 +311,14 @@ class WebDocumentBuilder:
 
     def build(
         self, ctx: Any, target: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]
-    ) -> list[dict[str, Any]]:
-        if _reconcile_range_enabled(self.config):
+    ) -> list[RawRecord]:
+        if self.reconcile_range:
             if len(inputs) < 2:
                 raise WlhError("court_required_judgment_missing")
             for item in inputs[1:]:
                 if detect_real_format(ctx.read(item["acquisition"])) != "pdf":
                     raise WlhError("court_required_document_not_pdf")
-        docs = _doc_rules(self.config)
+        docs = self.doc_rules
         detail = inputs[0]
         attachments = [
             item for item in inputs[1:] if item.get("role") not in ("title_context", "inline_image")
@@ -466,7 +327,7 @@ class WebDocumentBuilder:
         acquisition = detail["acquisition"]
         data = ctx.read(acquisition)
         kind = detect_real_format(data, "html" if acquisition["mime_type"] == "text/html" else "")
-        meta = _metadata_cfg(self.config)
+        meta = self.metadata_spec
         url: str = str(acquisition["actual_url"] or acquisition["request_url"] or "")
         parsed_main = parse_html(data, acquisition.get("charset")) if kind == "html" else None
         values, title, encoding = self.detail_values(
@@ -537,10 +398,10 @@ class WebDocumentBuilder:
                 GENERIC_ATTACHMENT_LABELS,
             )
             candidate_inputs.append(context)
-        deliverables: list[dict[str, Any]] = []
+        units: list[RawUnitSource] = []
         parsers = {"markdown"}
         quality_fail: list[str] = []
-        accept_routes = _quality_routes(self.config)
+        accept_routes = self.quality_accept_routes
 
         def add(
             data: bytes,
@@ -577,14 +438,14 @@ class WebDocumentBuilder:
                         },
                     }
                 )
-            deliverables.append(
-                {
-                    "role": role,
-                    "title": title,
-                    "volume_order": order,
-                    "markdown": markdown,
-                    "input": input_index,
-                    "original": {
+            units.append(
+                RawUnitSource(
+                    role=cast(Any, role),
+                    title=title,
+                    volume_order=order,
+                    markdown=markdown,
+                    input=input_index,
+                    original={
                         "ref": item_acquisition["archive_ref"],
                         "kind": kind,
                         "byte_size": item_acquisition["byte_size"],
@@ -593,10 +454,10 @@ class WebDocumentBuilder:
                     }
                     if kind not in TEXT_KINDS
                     else None,
-                    "quality": report,
-                    "extraction": (result or {}).get("info") or {"kind": kind},
-                    "parsers": used,
-                }
+                    quality=report,
+                    extraction=(result or {}).get("info") or {"kind": kind},
+                    parsers=used,
+                )
             )
 
         files: list[dict[str, Any]] = []
@@ -661,21 +522,19 @@ class WebDocumentBuilder:
                 for f in volumes:
                     f["order"] = None
         others = [f for f in files if f not in volumes]
-        body_mode = (
-            "never" if _reconcile_range_enabled(self.config) else docs.get("detail_body", "auto")
-        )
+        body_mode = "never" if self.reconcile_range else docs.get("detail_body", "auto")
         use_body = not volumes and (body_mode == "always" or (body_mode == "auto" and not files))
         if kind not in TEXT_KINDS | BINARY_KINDS:
             raise WlhError("unsupported_document_type")
         if use_body:
             add(data, kind, acquisition, 0, "primary", None)
-            if kind in BINARY_KINDS and deliverables:
+            if kind in BINARY_KINDS and units:
                 values, title, encoding = self.detail_values(
                     data,
                     kind,
                     acquisition,
                     url,
-                    deliverables[0]["markdown"],
+                    units[0].markdown,
                     parsed_html=parsed_main,
                 )
         else:
@@ -711,19 +570,16 @@ class WebDocumentBuilder:
             )
         if quality_fail:
             raise WlhError("quality_check_failed:" + sorted(set(quality_fail))[0])
-        if not deliverables:
+        if not units:
             raise WlhError("document_deliverables_required")
-        if not use_body and deliverables and not _reconcile_range_enabled(self.config):
+        if not use_body and units and not self.reconcile_range:
             att_vals, _, _ = self.detail_values(
-                data, kind, acquisition, url, deliverables[0]["markdown"], parsed_html=parsed_main
+                data, kind, acquisition, url, units[0].markdown, parsed_html=parsed_main
             )
             for k, v in att_vals.items():
                 if not values.get(k) and v:
                     values[k] = v
-            cleaners_cfg = self.config.get("cleaners")
-            cleaners_map: Mapping[str, Any] = (
-                cast(Mapping[str, Any], cleaners_cfg) if isinstance(cleaners_cfg, Mapping) else {}
-            )
+            cleaners_map = self.cleaners_spec
             enrich_t = (
                 bool(cleaners_map.get("enrich_bare_title", True))
                 if "enrich_bare_title" in cleaners_map
@@ -734,9 +590,9 @@ class WebDocumentBuilder:
                     title,
                     values.get("document_number"),
                     tree=None,
-                    body_text=deliverables[0]["markdown"],
+                    body_text=units[0].markdown,
                 )
-            title_pats = _title_strip_regexes(self.config)
+            title_pats = self.title_strip_regexes
             if title and title_pats:
                 title = clean_title(title, title_pats)
             candidate_inputs[0]["slice_hash"] = digest(
@@ -749,7 +605,7 @@ class WebDocumentBuilder:
                     ),
                 }
             )
-        elif not use_body and deliverables and _reconcile_range_enabled(self.config):
+        elif not use_body and units and self.reconcile_range:
             candidate_inputs[0]["slice_hash"] = digest(
                 {
                     "title": title,
@@ -762,9 +618,9 @@ class WebDocumentBuilder:
             )
         if kind in TEXT_KINDS and use_body:
             candidate_inputs[0]["slice_hash"] = digest(
-                {"body": deliverables[0]["markdown"], "fields": values, "title": title}
+                {"body": units[0].markdown, "fields": values, "title": title}
             )
-        title_pats = _title_strip_regexes(self.config)
+        title_pats = self.title_strip_regexes
         final_title = verified_title or title
         if final_title and title_pats:
             final_title = clean_title(final_title, title_pats)
@@ -775,23 +631,31 @@ class WebDocumentBuilder:
         dates: dict[str, Any] = {
             k: values[k] for k in ("published_at", "effective_at", "expired_at") if values.get(k)
         }
-        records = [
-            {
-                **target["identity"],
-                "metadata": meta,
-                "dates": dates,
-                "deliverables": deliverables,
-                "inputs": candidate_inputs,
-                "parsers": sorted(parsers),
-            }
+        if self.reconcile_range:
+            for unit in units:
+                if len(re.sub(r"\s+", "", unit.markdown)) < 15:
+                    raise WlhError("quality_check_failed:vision_reparse_pages")
+        identity = target["identity"]
+        return [
+            RawRecord(
+                namespace=identity["namespace"],
+                external_key=identity["external_key"],
+                title=cast(str, meta["title"]),
+                doc_type=cast(str, meta.get("document_type")),
+                document_number=meta.get("document_number"),
+                issuer=meta.get("issuer"),
+                status=meta.get("status"),
+                source_name=meta.get("source_name"),
+                published_at=dates.get("published_at"),
+                effective_at=dates.get("effective_at"),
+                expired_at=dates.get("expired_at"),
+                detail_url=identity.get("public_url"),
+                recheck_locator=dict(identity.get("recheck_locator") or {}),
+                inputs=candidate_inputs,
+                units=units,
+                parsers=sorted(parsers),
+            )
         ]
-        if _reconcile_range_enabled(self.config):
-            for rec in records:
-                for deliv in cast(list[dict[str, Any]], rec.get("deliverables") or []):
-                    md = str(deliv.get("markdown") or "")
-                    if len(re.sub(r"\s+", "", md)) < 15:
-                        raise WlhError("quality_check_failed:vision_reparse_pages")
-        return records
 
     @staticmethod
     def input_for(file: Mapping[str, Any], role: str, order: int | None) -> dict[str, Any]:

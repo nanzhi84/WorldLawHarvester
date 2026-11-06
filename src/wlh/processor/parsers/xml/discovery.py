@@ -13,41 +13,11 @@ import lxml.etree as _etree  # type: ignore[import-untyped]
 from lxml import html as _lxml_html  # type: ignore[import-untyped]
 
 from wlh.core import WlhError, guard, public_url
+from wlh.processor.parsers import ParserConfigView
 from wlh.processor.parsers.xml.values import select
 
 etree: Any = _etree
 lxml_html: Any = _lxml_html
-
-
-def _detail_url_patterns(config: Mapping[str, Any]) -> Sequence[str]:
-    proc = config.get("processor")
-    if isinstance(proc, Mapping):
-        proc_map = cast(Mapping[str, Any], proc)
-        parser_cfg = proc_map.get("parser")
-        if isinstance(parser_cfg, Mapping):
-            parser_map = cast(Mapping[str, Any], parser_cfg)
-            if isinstance(parser_map.get("documents"), Mapping):
-                pats = cast(Mapping[str, Any], parser_map["documents"]).get("detail_url_patterns")
-                if isinstance(pats, Sequence):
-                    return [str(p) for p in cast(Sequence[Any], pats)]
-    docs = config.get("documents")
-    if isinstance(docs, Mapping):
-        docs_map = cast(Mapping[str, Any], docs)
-        if isinstance(docs_map.get("detail_url_patterns"), Sequence):
-            return [str(p) for p in cast(Sequence[Any], docs_map["detail_url_patterns"])]
-    return ()
-
-
-def _budget_documents(config: Mapping[str, Any]) -> int:
-    sched = config.get("scheduler")
-    if isinstance(sched, Mapping):
-        sched_map = cast(Mapping[str, Any], sched)
-        if isinstance(sched_map.get("budget"), Mapping):
-            return int(cast(Mapping[str, Any], sched_map["budget"]).get("documents", 25))
-    budget = config.get("budget")
-    if isinstance(budget, Mapping):
-        return int(cast(Mapping[str, Any], budget).get("documents", 25))
-    return 25
 
 
 def _normalize_candidate_urls(
@@ -93,6 +63,7 @@ def discover(
     config: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], str | None]:
     truncated: str | None = None
+    view = ParserConfigView(config)
 
     def filter_requests(
         base: str,
@@ -100,11 +71,11 @@ def discover(
         pagination_urls: Sequence[str] = (),
     ) -> list[dict[str, Any]]:
         nonlocal truncated
-        patterns = [re.compile(p) for p in _detail_url_patterns(config)]
+        patterns = [re.compile(p) for p in view.detail_url_patterns]
         urls = _normalize_candidate_urls(base, raw_urls, config, patterns)
         next_pages = _normalize_candidate_urls(base, pagination_urls, config)
         seen = set(urls)
-        limit: int = _budget_documents(config)
+        limit: int = view.budget_documents
         if len(urls) > limit or (len(urls) == limit and bool(next_pages)):
             truncated = "document_budget_exceeded"
         selected = list(urls[:limit])

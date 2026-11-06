@@ -114,9 +114,25 @@ class TestArchitectureContract:
             for entry in xml_parsers_dir.iterdir()
             if entry.name != "__pycache__" and not entry.name.startswith(".")
         }
-        assert xml_parser_entries == {"__init__.py", "parser.py", "discovery.py", "values.py"}, (
-            f"processor/parsers/xml/ must only contain navigation and metadata slicing modules, "
-            f"not Markdown converters: {xml_parser_entries}"
+        assert xml_parser_entries == {
+            "__init__.py",
+            "parser.py",
+            "schemas.py",
+            "discovery.py",
+            "values.py",
+        }, (
+            f"processor/parsers/xml/ must only contain navigation, schema table, and metadata slicing "
+            f"modules, not Markdown converters: {xml_parser_entries}"
+        )
+
+        json_parsers_dir = parsers_dir / "json"
+        json_parser_entries = {
+            entry.name
+            for entry in json_parsers_dir.iterdir()
+            if entry.name != "__pycache__" and not entry.name.startswith(".")
+        }
+        assert json_parser_entries == {"__init__.py", "parser.py", "schemas.py"}, (
+            f"processor/parsers/json/ must only contain parser.py and schemas.py: {json_parser_entries}"
         )
 
         extractors_dir = SRC_WLH / "processor" / "extractors"
@@ -224,6 +240,88 @@ class TestArchitectureContract:
                 if token in lowered:
                     offenders.append(f"{py_file.relative_to(REPO_ROOT)}: {token}")
         assert not offenders, f"External Office suite references must be removed: {offenders}"
+
+    def test_json_and_xml_parser_subpackages_never_cross_import(self) -> None:
+        """`parsers/json/` and `parsers/xml/` must have zero lateral imports between each other."""
+        parsers_dir = SRC_WLH / "processor" / "parsers"
+        pairs = (
+            (parsers_dir / "json", "wlh.processor.parsers.xml"),
+            (parsers_dir / "xml", "wlh.processor.parsers.json"),
+        )
+        for subpkg_dir, forbidden in pairs:
+            for py_file in sorted(subpkg_dir.rglob("*.py")):
+                rel = py_file.relative_to(SRC_WLH.parent).with_suffix("")
+                package_parts = list(rel.parts[:-1])
+                tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+                for node in ast.walk(tree):
+                    imported: list[str] = []
+                    if isinstance(node, ast.Import):
+                        imported = [alias.name for alias in node.names]
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.level:
+                            base_parts = package_parts[: len(package_parts) - (node.level - 1)]
+                            base = ".".join(base_parts)
+                            module = f"{base}.{node.module}" if node.module else base
+                        else:
+                            module = node.module or ""
+                        imported = [module] + [f"{module}.{alias.name}" for alias in node.names]
+                    for name in imported:
+                        assert name != forbidden and not name.startswith(forbidden + "."), (
+                            f"{py_file}:{getattr(node, 'lineno', 0)} must not import {forbidden}"
+                        )
+
+    def test_parsers_converge_on_base_config_properties_and_raw_record_build(self) -> None:
+        """Duplicate private config helpers are removed and all parser engines build `list[RawRecord]`."""
+        import inspect
+        from typing import get_type_hints
+
+        from wlh.processor.parsers import RawRecord
+        from wlh.processor.parsers.html.document_builder import WebDocumentBuilder
+        from wlh.processor.parsers.html.parser import HtmlParser
+        from wlh.processor.parsers.json.parser import JsonParser
+        from wlh.processor.parsers.xml.parser import XmlParser
+
+        parsers_dir = SRC_WLH / "processor" / "parsers"
+        forbidden_helpers = {
+            "_budget_documents",
+            "_budget_response_bytes",
+            "_metadata_cfg",
+            "_quality_routes",
+            "_parser_options",
+            "_max_depth",
+            "_entry_urls",
+            "_url_rewrites",
+            "_strip_text_regexes",
+            "_title_strip_regexes",
+            "_ocr_cfg",
+            "_extractor_quirks",
+            "_parser_transforms",
+        }
+        checked_files = (
+            parsers_dir / "record_base.py",
+            parsers_dir / "html" / "parser.py",
+            parsers_dir / "html" / "document_builder.py",
+            parsers_dir / "json" / "parser.py",
+            parsers_dir / "xml" / "discovery.py",
+        )
+        for py_file in checked_files:
+            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+            top_defs = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+            overlap = top_defs & forbidden_helpers
+            assert not overlap, (
+                f"{py_file.relative_to(REPO_ROOT)} still defines duplicate config helpers {overlap}; "
+                f"use Base / ParserConfigView properties instead"
+            )
+
+        for cls in (WebDocumentBuilder, HtmlParser, JsonParser, XmlParser):
+            hints = get_type_hints(cls.build)
+            assert hints.get("return") == list[RawRecord], (
+                f"{cls.__name__}.build must be annotated to return list[RawRecord], got {hints.get('return')}"
+            )
+            sig = inspect.signature(cls.build)
+            assert "RawRecord" in str(sig.return_annotation), (
+                f"{cls.__name__}.build signature must return list[RawRecord]"
+            )
 
     def test_quirk_hooks_mount_declared_stages_while_quirks_registry_stays_frozen(self) -> None:
         """`QUIRK_HOOKS` mounts the 4 frozen quirks on their lifecycle stages; `QUIRKS` keys are unchanged."""

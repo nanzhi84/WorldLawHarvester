@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Sequence
 from typing import Any
 
 from wlh.cleaners.extraction_quality import text_check
+from wlh.cleaners.text_cleaner import apply_text_cleaners
 from wlh.core import WlhError
 from wlh.processor.extractors.base import (
     EngineAdapter,
@@ -119,6 +121,45 @@ class ExtractorRegistry:
         return ExtractionOutput(markdown, info, quality, parsers, members)
 
 
+def inline_markdown(
+    source: Any,
+    kind: str,
+    *,
+    base_url: str = "",
+    quirks: Sequence[str] | None = None,
+    strip_text_regexes: Sequence[str] | None = None,
+    **html_options: Any,
+) -> str:
+    """In-process Markdown for archived text/markup kinds (``html``/``xml``/``json``/``txt``).
+
+    Stage 3a calls this instead of individual converters: the kind's active quirk hooks run
+    here, and ``strip_text_regexes`` (when given, even empty) applies the text cleaners.
+    ``html_options`` (``content_xpath``, ``title``, ``already_cleaned``) reach the HTML engine.
+    """
+    from wlh.processor.extractors.html.html_to_md import (
+        html_to_markdown,
+        json_to_markdown,
+        text_to_markdown,
+    )
+    from wlh.processor.extractors.xml.markdown import xml_to_markdown
+
+    if kind == "html":
+        markdown = html_to_markdown(source, base_url, quirks=quirks, **html_options)
+    elif kind == "xml":
+        markdown = xml_to_markdown(source.encode("utf-8") if isinstance(source, str) else source)
+    elif kind == "json":
+        markdown = json_to_markdown(source)
+    elif kind == "txt":
+        markdown = text_to_markdown(source)
+    else:
+        raise WlhError("unsupported_document_type")
+    for hook in QuirkHookRunner(QUIRK_HOOKS, quirks or (), kind).active("post_markdown"):
+        markdown, _ = hook.handler(markdown, font_evidence=False)
+    if strip_text_regexes is not None:
+        markdown = apply_text_cleaners(markdown, strip_text_regexes)
+    return markdown
+
+
 _default: ExtractorRegistry | None = None
 _DEFAULT_LOCK = threading.Lock()
 
@@ -174,4 +215,5 @@ __all__ = [
     "ExtractorRegistry",
     "build_default_registry",
     "default_registry",
+    "inline_markdown",
 ]

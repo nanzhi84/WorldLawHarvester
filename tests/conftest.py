@@ -291,6 +291,7 @@ _PYRAMID_MARKERS_BY_FILE: dict[str, str] = {
     "test_html_extraction.py": "extractor",
     "test_office_extraction.py": "extractor",
     "test_extractor_gateway.py": "extractor",
+    "test_legal_record_schemas.py": "extractor",
     "test_delivery_quality.py": "extractor",
     "test_document_titles.py": "replay",
     "test_legal_document_layout.py": "replay",

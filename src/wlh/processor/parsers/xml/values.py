@@ -14,7 +14,16 @@ def select(root: Any, *names: str, attribute: str | None = None) -> str | None:
     for name in names:
         nodes = root.xpath(".//*[local-name()=$name]", name=name)
         for node in nodes:
-            value: str | None = node.get(attribute) if attribute else text(node)
+            if attribute:
+                value: str | None = node.get(attribute)
+                if not value:
+                    suffix = f"}}{attribute}"
+                    value = next(
+                        (v for k, v in node.attrib.items() if k.endswith(suffix) and v),
+                        None,
+                    )
+            else:
+                value = text(node)
             if value:
-                return value
+                return value.strip() or None
     return None

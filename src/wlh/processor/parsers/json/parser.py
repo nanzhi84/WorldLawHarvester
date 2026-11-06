@@ -15,26 +15,23 @@ import lxml.etree as _etree  # type: ignore[import-untyped]
 
 from wlh.core import WlhError, canonical, digest, guard, public_url
 from wlh.processor.extractors.html.dom_tree import parse_html
-from wlh.processor.extractors.html.html_to_md import text_to_markdown
 from wlh.processor.extractors.magic import detect_real_format
-from wlh.processor.extractors.xml import dokument_xml_to_markdown, xml_to_markdown
+from wlh.processor.extractors.registry import inline_markdown
+from wlh.processor.extractors.xml import dokument_xml_to_markdown
 from wlh.processor.parsers.html.document_builder import WebDocumentBuilder
-from wlh.processor.parsers.html.document_builder import doc_rules as _doc_rules
 from wlh.processor.parsers.html.fields import clean_url, decode, file_name
+from wlh.processor.parsers.json.schemas import dot_lookup, extract_json_records
 from wlh.processor.parsers.record_base import (
     RecordAdapter,
-    _budget_documents,
-    _budget_response_bytes,
-    _metadata_cfg,
-    _quality_routes,
     day,
     first,
     html_records,
     items,
+    japan_records,
+    japan_requests,
     payload,
-    scalar,
 )
-from wlh.processor.parsers.xml.parser import japan_records, japan_requests
+from wlh.processor.records import RawRecord, RawUnitSource
 
 etree: Any = _etree
 
@@ -104,43 +101,6 @@ def rii_xml(data: bytes, max_bytes: int) -> bytes:
             return xml
     except (zipfile.BadZipFile, OSError, ValueError, RuntimeError):
         raise WlhError("zip_invalid") from None
-
-
-def _parser_options(config: Mapping[str, Any]) -> dict[str, Any]:
-    proc = config.get("processor")
-    if isinstance(proc, Mapping):
-        proc_map = cast(Mapping[str, Any], proc)
-        parser_cfg = proc_map.get("parser")
-        if isinstance(parser_cfg, Mapping):
-            parser_map = cast(Mapping[str, Any], parser_cfg)
-            if isinstance(parser_map.get("options"), Mapping):
-                return dict(cast(Mapping[str, Any], parser_map["options"]))
-    opts = config.get("adapter_options")
-    return dict(cast(Mapping[str, Any], opts)) if isinstance(opts, Mapping) else {}
-
-
-def _entry_urls(config: Mapping[str, Any]) -> list[str]:
-    sched = config.get("scheduler")
-    if isinstance(sched, Mapping):
-        sched_map = cast(Mapping[str, Any], sched)
-        if isinstance(sched_map.get("entry_urls"), Sequence):
-            return [str(u) for u in cast(Sequence[Any], sched_map["entry_urls"])]
-    entries = config.get("entry_urls")
-    if isinstance(entries, Sequence):
-        return [str(u) for u in cast(Sequence[Any], entries)]
-    return []
-
-
-def _dot_lookup(obj: Any, dotted_path: str) -> Any:
-    cur: Any = obj
-    for part in dotted_path.split("."):
-        if not part:
-            continue
-        if isinstance(cur, Mapping) and part in cur:
-            cur = cast(Mapping[str, Any], cur)[part]
-        else:
-            return None
-    return cur
 
 
 class JsonParser(RecordAdapter):
@@ -213,15 +173,15 @@ class JsonParser(RecordAdapter):
         self._records_cache: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
         self._records_truncated: dict[tuple[Any, Any], str | None] = {}
         self._json_cache: dict[Any, Any] = {}
-        self.options: dict[str, Any] = _parser_options(config)
-        entries = _entry_urls(config)
+        self.options: dict[str, Any] = self.parser_options
+        entries = self.entry_urls
         self.base: str = entries[0].rstrip("/") if entries else ""
         self.types: dict[str | None, Any] = {
             **TYPES,
             **cast(dict[str, Any], self.options.get("document_types") or {}),
         }
         self._doc_builder = WebDocumentBuilder(config)
-        rules = _doc_rules(config)
+        rules = self.doc_rules
         self._details: list[re.Pattern[str]] = [
             re.compile(p) for p in rules.get("detail_url_patterns", ())
         ]
@@ -621,7 +581,7 @@ class JsonParser(RecordAdapter):
 
     def build(
         self, ctx: Any, target: Mapping[str, Any], inputs: Sequence[Mapping[str, Any]]
-    ) -> list[Any]:
+    ) -> list[RawRecord]:
         by_role = {item["role"]: item for item in inputs}
         if "detail" in by_role:
             return self._doc_builder.build(ctx, target, inputs)
@@ -675,8 +635,8 @@ class JsonParser(RecordAdapter):
             }
         ]
         parsers = {"markdown"}
-        deliverables: list[dict[str, Any]] = []
-        accept_routes = _quality_routes(self.config)
+        units: list[RawUnitSource] = []
+        accept_routes = self.quality_accept_routes
         body_field: str | None = self.options.get("listing_body_field")
         if body_field:
             body: Any = document.get(body_field)
@@ -685,15 +645,15 @@ class JsonParser(RecordAdapter):
             quality = ctx.text_quality(body)
             if quality["recommended_route"] not in accept_routes:
                 raise WlhError("quality_check_failed:" + quality["recommended_route"])
-            deliverables.append(
-                {
-                    "role": "primary",
-                    "markdown": text_to_markdown(body),
-                    "input": 0,
-                    "original": None,
-                    "quality": quality,
-                    "extraction": {"kind": "json_slice", "field": body_field},
-                }
+            units.append(
+                RawUnitSource(
+                    role="primary",
+                    markdown=inline_markdown(body, "txt"),
+                    input=0,
+                    original=None,
+                    quality=quality,
+                    extraction={"kind": "json_slice", "field": body_field},
+                )
             )
         else:
             xml, pdf = by_role.get("full_text"), by_role.get("original")
@@ -716,7 +676,7 @@ class JsonParser(RecordAdapter):
             )
             if xml is not None:
                 xml_acq = xml["acquisition"]
-                markdown = xml_to_markdown(ctx.read(xml_acq))
+                markdown = inline_markdown(ctx.read(xml_acq), "xml")
                 candidate_inputs.append(
                     {
                         "acquisition_id": xml_acq["id"],
@@ -738,12 +698,12 @@ class JsonParser(RecordAdapter):
                 parsers.update(result["parsers"])
             if quality["recommended_route"] not in accept_routes:
                 raise WlhError("quality_check_failed:" + quality["recommended_route"])
-            deliverables.append(
-                {
-                    "role": "primary",
-                    "markdown": markdown,
-                    "input": 1,
-                    "original": {
+            units.append(
+                RawUnitSource(
+                    role="primary",
+                    markdown=markdown,
+                    input=1,
+                    original={
                         "ref": pdf_acq["archive_ref"],
                         "kind": "pdf",
                         "byte_size": pdf_acq["byte_size"],
@@ -752,44 +712,48 @@ class JsonParser(RecordAdapter):
                             "/", 1
                         )[-1],
                     },
-                    "quality": quality,
-                    "extraction": extraction,
-                }
+                    quality=quality,
+                    extraction=extraction,
+                )
             )
         agencies = [
             cast(dict[str, Any], a).get("name")
             for a in cast(Sequence[Any], document.get("agencies") or [])
             if isinstance(a, dict)
         ]
-        meta_cfg = _metadata_cfg(self.config)
-        dtype: Any = self.types.get(document.get("type"), meta_cfg.get("document_type"))
-        metadata = dict(meta_cfg, document_type=dtype)
-        metadata.update(
-            title=document.get("title"),
-            document_number=number,
-            issuer="; ".join(a for a in agencies if a) or None,
+        meta_cfg = self.metadata_spec
+        dtype = str(
+            self.types.get(document.get("type"), meta_cfg.get("document_type")) or "法律法规"
         )
-        dates: dict[str, Any] = {
-            k: document.get(src)
-            for k, src in (("published_at", "publication_date"), ("effective_at", "effective_on"))
-            if document.get(src)
-        }
+        raw_title = document.get("title")
+        if not isinstance(raw_title, str) or not raw_title.strip():
+            raise WlhError("document_title_missing")
+        identity = target["identity"]
         return [
-            {
-                **target["identity"],
-                "metadata": metadata,
-                "dates": dates,
-                "deliverables": deliverables,
-                "inputs": candidate_inputs,
-                "parsers": sorted(parsers | {"quality"}),
-                "extensions": {
+            RawRecord(
+                namespace=identity["namespace"],
+                external_key=identity["external_key"],
+                title=raw_title,
+                doc_type=dtype,
+                document_number=number,
+                issuer="; ".join(a for a in agencies if a) or None,
+                published_at=document.get("publication_date") or None,
+                effective_at=document.get("effective_on") or None,
+                status=meta_cfg.get("status"),
+                source_name=meta_cfg.get("source_name"),
+                detail_url=identity.get("public_url"),
+                recheck_locator=identity.get("recheck_locator") or {},
+                inputs=candidate_inputs,
+                units=units,
+                parsers=sorted(parsers | {"quality"}),
+                extensions={
                     "federal_register": {
                         k: document.get(k)
                         for k in ("citation", "type", "action")
                         if document.get(k)
                     }
                 },
-            }
+            )
         ]
 
     def records(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -817,118 +781,20 @@ class JsonParser(RecordAdapter):
         raw_bytes = data
         zipped = data.startswith(b"PK\x03\x04")
         if zipped:
-            data = rii_xml(data, _budget_response_bytes(self.config))
-        limit = _budget_documents(self.config)
+            data = rii_xml(data, self.budget_response_bytes)
+        limit = self.budget_documents
         if data.lstrip().startswith((b"{", b"[")):
             value: Any = payload(data)
-            items_path = self.options.get("items_path")
-            if isinstance(items_path, str) and items_path.strip() and isinstance(value, Mapping):
-                resolved = _dot_lookup(value, items_path.strip())
-                if isinstance(resolved, list):
-                    entries = [
-                        cast(dict[str, Any], x)
-                        for x in cast(list[Any], resolved)
-                        if isinstance(x, dict)
-                    ]
-                    if not entries:
-                        return []
-                    sample = entries[0]
-                    if (
-                        "identifier" in sample
-                        or "from_organization" in sample
-                        or "openstates_url" in sample
-                        or "versions" in sample
-                    ):
-                        return self._openstates_records(entries)
-                    if (
-                        "decision_id" in sample
-                        or "citation_string_de" in sample
-                        or (
-                            "docket_number" in sample
-                            and ("full_text" in sample or "decision_date" in sample)
-                        )
-                    ):
-                        return self._opencaselaw_records(entries, limit)
-                    if any(
-                        k in sample
-                        for k in (
-                            "case_name",
-                            "case_names",
-                            "caseName",
-                            "cluster_id",
-                            "download_url",
-                            "download_urls",
-                        )
-                    ):
-                        return self._juriscraper_json_records(value, acquisition, limit)
-                    if (
-                        sample.get("model") == "cases.case"
-                        or "ecli" in sample
-                        or "file_number" in sample
-                        or isinstance(sample.get("fields"), dict)
-                    ):
-                        return self._oldp_json_records(entries, limit)
-                    return self._worldwidelaw_records(entries)
-            if isinstance(value, dict) and isinstance(
-                cast(dict[str, Any], value).get("case_names"), list
-            ):
-                return self._juriscraper_json_records(value, acquisition, limit)
-            if isinstance(value, dict):
-                vdict = cast(dict[str, Any], value)
-                if "bills" in vdict:
-                    return self._openstates_records(items(value, ("bills", "results")))
-                if "decisions" in vdict:
-                    return self._opencaselaw_records(items(value, ("decisions", "results")), limit)
-                if "cases" in vdict or "opinions" in vdict:
-                    entries = items(value, ("cases", "opinions", "results"))
-                    if entries and any(
-                        k in entries[0]
-                        for k in ("case_name", "caseName", "docket_number", "download_url")
-                    ):
-                        return self._juriscraper_json_records(value, acquisition, limit)
-                    return self._oldp_json_records(entries, limit)
-            entries = items(
-                value, ("bills", "decisions", "cases", "opinions", "records", "results", "data")
+            records, truncated = extract_json_records(
+                value,
+                acquisition,
+                options=self.options,
+                config=self.config,
+                limit=limit,
             )
-            if not entries:
-                return []
-            sample = entries[0]
-            if (
-                "identifier" in sample
-                or "from_organization" in sample
-                or "openstates_url" in sample
-                or "versions" in sample
-            ):
-                return self._openstates_records(entries)
-            if (
-                "decision_id" in sample
-                or "citation_string_de" in sample
-                or (
-                    "docket_number" in sample
-                    and ("full_text" in sample or "decision_date" in sample)
-                )
-            ):
-                return self._opencaselaw_records(entries, limit)
-            if any(
-                k in sample
-                for k in (
-                    "case_name",
-                    "case_names",
-                    "caseName",
-                    "cluster_id",
-                    "download_url",
-                    "download_urls",
-                )
-            ):
-                return self._juriscraper_json_records(value, acquisition, limit)
-            if (
-                sample.get("model") == "cases.case"
-                or "ecli" in sample
-                or "file_number" in sample
-                or isinstance(sample.get("fields"), dict)
-            ):
-                return self._oldp_json_records(entries, limit)
-            return self._worldwidelaw_records(entries)
+            if truncated:
+                self.truncated = truncated
+            return records
         if zipped or data.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(
             (b"<?xml", b"<dokument", b"<items")
         ):
@@ -1021,274 +887,17 @@ class JsonParser(RecordAdapter):
             raise WlhError("juriscraper_opinions_missing")
         return records_out
 
-    def _openstates_records(self, entries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-        records: list[dict[str, Any]] = []
-        for item in entries:
-            if not item.get("title") or not item.get("identifier"):
-                raise WlhError("openstates_bill_invalid")
-            downloads: list[dict[str, Any]] = []
-            for group in ("versions", "documents"):
-                documents: list[dict[str, Any]] = item.get(group) or []
-                for document in documents:
-                    links: list[dict[str, Any]] = document.get("links") or []
-                    preferred = next(
-                        (v for v in links if v.get("media_type") == "application/pdf"),
-                        links[0] if links else None,
-                    )
-                    if preferred:
-                        note = str(document.get("note") or "").strip()
-                        bill_title = str(item["title"]).strip()
-                        dl_title = (
-                            f"{bill_title} ({note})"
-                            if note and note.lower() != bill_title.lower()
-                            else bill_title
-                        )
-                        downloads.append(
-                            {
-                                "url": preferred["url"],
-                                "title": dl_title,
-                                "role": "primary" if not downloads else "independent_attachment",
-                            }
-                        )
-            sources: list[dict[str, Any]] = item.get("sources") or []
-            detail = (
-                item.get("url")
-                or (sources[0].get("url") if sources else None)
-                or item.get("openstates_url")
-            )
-            abstracts: list[dict[str, Any]] = item.get("abstracts") or []
-            body: str = (
-                item.get("text")
-                or item.get("abstract")
-                or "\n\n".join(str(a.get("abstract", "")) for a in abstracts)
-            )
-            records.append(
-                {
-                    "namespace": "openstates/bill",
-                    "external_key": str(item.get("id") or item["identifier"]),
-                    "title": item["title"],
-                    "doc_type": "法律法规",
-                    "doc_number": item["identifier"],
-                    "issuer": scalar(item.get("from_organization")),
-                    "published_at": item.get("first_action_date") or item.get("latest_action_date"),
-                    "status": item.get("status") or item.get("latest_action_description"),
-                    "detail_url": detail,
-                    "text": text_to_markdown(body, title=str(item["title"])) if body else "",
-                    "downloads": downloads,
-                }
-            )
-        return records
-
-    def _opencaselaw_records(
-        self, entries: Sequence[Mapping[str, Any]], limit: int
-    ) -> list[dict[str, Any]]:
-        if len(entries) > limit:
-            self.truncated = "document_budget_exceeded"
-        return [
-            {
-                "namespace": "opencaselaw/decision",
-                "external_key": str(r.get("decision_id") or r.get("id") or r["docket_number"]),
-                "title": str(
-                    r.get("title") or r.get("citation_string_de") or r.get("docket_number") or ""
-                )
-                .strip()
-                .rstrip(",")
-                or None,
-                "doc_type": "案例",
-                "doc_number": r.get("docket_number") or r.get("case_number"),
-                "issuer": r.get("court_name") or r.get("court"),
-                "published_at": r.get("decision_date") or r.get("date"),
-                "text": r.get("full_text") or r.get("text"),
-                "detail_url": r.get("canonical_url") or r.get("source_url") or r.get("url"),
-                "downloads": [{"url": r["pdf_url"]}] if r.get("pdf_url") else [],
-            }
-            for r in entries[:limit]
-            if r.get("full_text") or r.get("text") or r.get("pdf_url")
-        ]
-
-    def _juriscraper_json_records(
-        self, value: Any, acquisition: Mapping[str, Any], limit: int
-    ) -> list[dict[str, Any]]:
-        court: Any = (
-            cast(dict[str, Any], value).get("court_name") if isinstance(value, dict) else None
-        )
-        entries = items(value, ("cases", "opinions", "results"))
-        if isinstance(value, dict) and isinstance(
-            cast(dict[str, Any], value).get("case_names"), list
-        ):
-            val_dict = cast(dict[str, Any], value)
-            case_names = cast(list[Any], val_dict["case_names"])
-            entries = [
-                {
-                    key: cast(list[Any], values)[i]
-                    for key, values in val_dict.items()
-                    if isinstance(values, list) and i < len(cast(list[Any], values))
-                }
-                for i in range(len(case_names))
-            ]
-        records: list[dict[str, Any]] = []
-        if len(entries) > limit:
-            self.truncated = "document_budget_exceeded"
-        for item in entries[:limit]:
-            name = (
-                item.get("case_name")
-                or item.get("case_names")
-                or item.get("caseName")
-                or item.get("name")
-            )
-            number = (
-                item.get("docket_number") or item.get("docket_numbers") or item.get("docketNumber")
-            )
-            raw_opinions = item.get("opinions")
-            opinions: list[Any] = (
-                cast(list[Any], raw_opinions) if isinstance(raw_opinions, list) else []
-            )
-            first_op: dict[str, Any] = (
-                cast(dict[str, Any], opinions[0])
-                if opinions and isinstance(opinions[0], dict)
-                else {}
-            )
-            storage_base = str(self.options.get("storage_base_url") or "").rstrip("/")
-            if not storage_base:
-                allowed = cast(
-                    Sequence[Any],
-                    cast(dict[str, Any], self.config.get("scheduler") or {}).get("allowed_hosts")
-                    or self.config.get("allowed_hosts")
-                    or (),
-                )
-                storage_host = next(
-                    (str(h) for h in allowed if str(h).startswith("storage.")),
-                    "",
-                )
-                storage_base = (
-                    f"https://{storage_host}"
-                    if storage_host
-                    else urljoin(str(acquisition.get("actual_url") or ""), "/").rstrip("/")
-                )
-            local_pdf = (
-                f"{storage_base}/{str(first_op['local_path']).lstrip('/')}"
-                if first_op.get("local_path") and storage_base
-                else None
-            )
-            url = (
-                item.get("download_url")
-                or item.get("download_urls")
-                or local_pdf
-                or first_op.get("download_url")
-            )
-            if not name or not url:
-                raise WlhError("juriscraper_opinion_invalid")
-            records.append(
-                {
-                    "namespace": "juriscraper/opinion",
-                    "external_key": str(item.get("cluster_id") or number or url),
-                    "title": name,
-                    "doc_number": scalar(number),
-                    "issuer": item.get("court") or court,
-                    "published_at": item.get("date_filed")
-                    or item.get("case_dates")
-                    or item.get("dateFiled"),
-                    "status": item.get("precedential_status")
-                    or item.get("precedential_statuses")
-                    or item.get("status"),
-                    "detail_url": item.get("detail_url")
-                    or item.get("absolute_url")
-                    or acquisition["actual_url"],
-                    "doc_type": "案例",
-                    "downloads": [{"url": url}],
-                }
-            )
-        return records
-
-    def _oldp_json_records(
-        self, entries: Sequence[Mapping[str, Any]], limit: int
-    ) -> list[dict[str, Any]]:
-        result: list[dict[str, Any]] = []
-        for raw in entries:
-            if raw.get("model") and raw["model"] != "cases.case":
-                continue
-            r = cast(Mapping[str, Any], raw.get("fields", raw))
-            result.append(
-                {
-                    "namespace": "oldp/case",
-                    "external_key": str(r.get("ecli") or r.get("id") or r["file_number"]),
-                    "title": r.get("title") or r["file_number"],
-                    "doc_number": r.get("file_number"),
-                    "issuer": r.get("court_name") or r.get("court"),
-                    "published_at": r.get("date"),
-                    "doc_type": "案例",
-                    "detail_url": r.get("source_url") or r.get("url"),
-                    "html": r.get("content") or r.get("text"),
-                    "downloads": [{"url": r["pdf_url"]}] if r.get("pdf_url") else [],
-                }
-            )
-        if len(result) > limit:
-            self.truncated = "document_budget_exceeded"
-        return result[:limit]
-
-    def _worldwidelaw_records(self, entries: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-        detail_tmpl = self.options.get("detail_url_template")
-        att_rules = self.options.get("attachment_rules")
-        records_out: list[dict[str, Any]] = []
-        for r in entries:
-            downloads: list[dict[str, Any]] = []
-            if isinstance(att_rules, list):
-                for rule_raw in cast(list[Any], att_rules):
-                    if not isinstance(rule_raw, Mapping):
-                        continue
-                    rule = cast(Mapping[str, Any], rule_raw)
-                    u = _dot_lookup(r, str(rule.get("url_path") or ""))
-                    if u:
-                        t_path = rule.get("title_path")
-                        t_val = _dot_lookup(r, t_path) if isinstance(t_path, str) else None
-                        dl: dict[str, Any] = {"url": str(u)}
-                        if t_val:
-                            dl["title"] = str(t_val)
-                        downloads.append(dl)
-            if not downloads and (u := r.get("pdf_url") or r.get("docx_url")):
-                downloads = [{"url": u}]
-            detail_url = r.get("url")
-            if not detail_url and isinstance(detail_tmpl, str) and detail_tmpl:
-                try:
-                    detail_url = detail_tmpl.format_map({k: r.get(k, "") for k in r})
-                except KeyError:
-                    detail_url = None
-            has_content = bool(r.get("text") or r.get("content") or downloads)
-            if not has_content and isinstance(detail_tmpl, str) and detail_tmpl:
-                continue
-            records_out.append(
-                {
-                    "namespace": str(self.options.get("namespace") or "worldwidelaw/document"),
-                    "external_key": str(
-                        r.get("_id")
-                        or r.get("id")
-                        or r.get("document_number")
-                        or detail_url
-                        or r["url"]
-                    ),
-                    "title": r["title"],
-                    "doc_number": r.get("document_number") or r.get("number"),
-                    "issuer": (r.get("issuing_authority") or r.get("authority") or r.get("issuer")),
-                    "published_at": r.get("date") or r.get("publication_date"),
-                    "effective_at": r.get("effective_date"),
-                    "detail_url": detail_url,
-                    "text": r.get("text") or r.get("content"),
-                    "downloads": downloads,
-                }
-            )
-        return records_out
-
     def next_requests(self, data: bytes, acquisition: Mapping[str, Any]) -> list[dict[str, Any]]:
         official = japan_requests(data, acquisition, self.config)
         if official is not None:
             return official
-        limit = _budget_documents(self.config)
+        limit = self.budget_documents
         if data.lstrip().startswith((b"{", b"[")):
             value = payload(data)
             requests: list[dict[str, Any]] = []
             items_path = self.options.get("items_path")
             if isinstance(items_path, str) and items_path.strip() and isinstance(value, Mapping):
-                resolved = _dot_lookup(value, items_path.strip())
+                resolved = dot_lookup(value, items_path.strip())
                 entries: list[dict[str, Any]] = (
                     [
                         cast(dict[str, Any], x)
@@ -1333,7 +942,7 @@ class JsonParser(RecordAdapter):
                 pag_type = str(pag_map.get("type") or "")
                 actual_url = str(acquisition.get("actual_url") or "")
                 if pag_type == "next_url_path":
-                    next_u = _dot_lookup(
+                    next_u = dot_lookup(
                         value, str(pag_map.get("path") or pag_map.get("next_url_path") or "next")
                     )
                     if isinstance(next_u, str) and next_u.strip():
@@ -1347,7 +956,7 @@ class JsonParser(RecordAdapter):
                     cur_page = int(m_page.group(1)) if m_page else 1
                     max_p_path = pag_map.get("max_pages_path")
                     max_p_val = (
-                        _dot_lookup(value, max_p_path)
+                        dot_lookup(value, max_p_path)
                         if isinstance(max_p_path, str)
                         else self._max_pages
                     )

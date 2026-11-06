@@ -75,7 +75,13 @@ def extract_with_processor(
             def text_quality(markdown: str) -> dict[str, Any]:
                 from wlh.cleaners.extraction_quality import text_check
 
-                lang = str(norm_cfg.get("metadata", {}).get("language") or "")
+                storage_meta = cast(
+                    dict[str, Any],
+                    cast(dict[str, Any], norm_cfg.get("storage") or {}).get("metadata")
+                    or norm_cfg.get("metadata")
+                    or {},
+                )
+                lang = str(storage_meta.get("language") or "")
                 return text_check(markdown, "vi" if lang.startswith("vi") else "generic")
 
             @staticmethod
@@ -113,6 +119,8 @@ def extract_with_processor(
             discovered_urls = [str(r["url"]) for r in requests_list if "url" in r]
             return {"target_urls": discovered_urls}
         else:
+            from wlh.processor.records import RawRecord
+
             records: list[dict[str, Any]] = []
             targets: list[dict[str, Any]] = (
                 cast(list[dict[str, Any]], parsed_dict.get("targets"))
@@ -133,9 +141,12 @@ def extract_with_processor(
                         list[object], built if isinstance(built, list) else [built]
                     )
                     for d_raw in docs:
-                        if not isinstance(d_raw, dict):
+                        if isinstance(d_raw, RawRecord):
+                            d: dict[str, Any] = d_raw.candidate()
+                        elif isinstance(d_raw, dict):
+                            d = cast(dict[str, Any], d_raw)
+                        else:
                             continue
-                        d: dict[str, Any] = cast(dict[str, Any], d_raw)
                         meta_dict: dict[str, Any] = cast(dict[str, Any], d.get("metadata") or {})
                         dates_dict: dict[str, Any] = cast(dict[str, Any], d.get("dates") or {})
                         delivs: list[object] = cast(list[object], d.get("deliverables") or [])
@@ -191,9 +202,16 @@ def extract_with_processor(
                             if meta_dict.get("issuer") is not None
                             else None
                         )
-                        cfg_meta = cast(dict[str, Any], norm_cfg.get("metadata", {}))
+                        cfg_meta = cast(
+                            dict[str, Any],
+                            cast(dict[str, Any], norm_cfg.get("storage") or {}).get("metadata")
+                            or norm_cfg.get("metadata")
+                            or {},
+                        )
                         doc_t: str = str(
-                            meta_dict.get("doc_type") or cfg_meta.get("document_type", "其他")
+                            meta_dict.get("doc_type")
+                            or meta_dict.get("document_type")
+                            or cfg_meta.get("document_type", "其他")
                         )
                         inp_candidates: list[object] = [
                             *cast(list[object], d.get("inputs") or []),

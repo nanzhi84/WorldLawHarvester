@@ -39,7 +39,11 @@ if TYPE_CHECKING:
     )
     from wlh.processor.extractors.pdf import PDF_CONTRACT, analyze, extract_pdf, page_markdown
     from wlh.processor.extractors.quirks import QUIRK_HOOKS, QUIRKS, salvage_zip_prefix
-    from wlh.processor.extractors.registry import ExtractorRegistry, default_registry
+    from wlh.processor.extractors.registry import (
+        ExtractorRegistry,
+        default_registry,
+        inline_markdown,
+    )
     from wlh.processor.extractors.router import run_extraction
     from wlh.processor.extractors.slots import PDFSlots
     from wlh.processor.extractors.xml import (
@@ -66,6 +70,7 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "QuirkHookRunner": ("wlh.processor.extractors.base", "QuirkHookRunner"),
     "ExtractorRegistry": ("wlh.processor.extractors.registry", "ExtractorRegistry"),
     "default_registry": ("wlh.processor.extractors.registry", "default_registry"),
+    "inline_markdown": ("wlh.processor.extractors.registry", "inline_markdown"),
     "detect_real_format": ("wlh.processor.extractors.magic", "detect_real_format"),
     "unpack_zip": ("wlh.processor.extractors.archive", "unpack_zip"),
     "MARKDOWN_CONTRACT": ("wlh.processor.extractors.html", "MARKDOWN_CONTRACT"),
@@ -162,6 +167,7 @@ __all__ = [
     "gpo_xml_to_markdown",
     "html_to_markdown",
     "inline_content",
+    "inline_markdown",
     "json_to_markdown",
     "page_markdown",
     "require_textual_images",

@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, cast
 from wlh.core import WlhError, digest
 from wlh.processor.extractors.magic import detect_real_format
 from wlh.processor.extractors.router import run_extraction
-from wlh.processor.parsers import RawRecord
 from wlh.scheduler.context import adapter_error
 from wlh.scheduler.run_state import STOPPING
 from wlh.storage.cas import Objects
@@ -124,13 +123,10 @@ async def deliver(runtime: Runtime, target: Mapping[str, Any]) -> dict[str, Any]
         inputs.append({**meta, "task": row, "acquisition": acquisition})
     try:
         runtime.derived_ocr = {}
-        candidates = runtime.adapter.build(runtime.ctx, target["payload"], inputs)
-        if len(candidates) != 1:
+        records = runtime.adapter.build(runtime.ctx, target["payload"], inputs)
+        if len(records) != 1:
             raise WlhError("target_must_build_one_document")
-        candidates = [
-            (c if isinstance(c, RawRecord) else RawRecord.from_candidate(c)).candidate()
-            for c in candidates
-        ]
+        candidates = [r.candidate() for r in records]
         for original_ref, entry in runtime.derived_ocr.items():
             original: dict[str, Any] | None = next(
                 (a for a in acquisitions.values() if a["archive_ref"] == original_ref), None
