@@ -12,7 +12,7 @@
 
 ### Changed
 
-- 私有 benchmark 扩展为 428 条完整原生 HTML/XML/JSON 任务，覆盖 88 个来源；全量 input、真值、原模型回执与 90 来源候选分母保留，PDF/Office/ZIP 等二进制正文不纳入。输出预算与完整原件计数分离，最终入集仍经过全文和结构复核。
+- 私有 benchmark 经逐条冲突裁决与去重后包含 393 条完整原生 HTML/XML/JSON 独立任务，覆盖 88 个来源；全量 input、真值、原模型回执与 90 来源候选分母保留，PDF/Office/ZIP 等二进制正文不纳入。输出预算与完整原件计数分离，最终入集仍经过全文和结构复核。
 - benchmark 正式发布改为 `rebuild → 完整输入准入 → 重标与复核 → freeze`；取消隐式选择 A 和按编号硬编码真值，评测子集沿用冻结切分。提取执行、单条打分与聚合拆分，续跑验证原始生成文本与外层真值一致。
 - 将有界 CAS I/O 接入正式 collect/recheck/reparse 与队列 worker：默认每运行 4 个存储 worker，可通过 `WLH_CAS_WORKERS=1..8` 调整。原件归档与文档存储共享容量，保留完整读回校验、取消排空和数据库提交围栏，并在 `report.cas_io` 输出无敏感值的生命周期统计。
 - 将 benchmark 分词、GPU 标注与 Colab 编排迁入 `src/wlh/benchmark/`，统一使用 Python 模块入口；删除重复旧版 B 标注/自动仲裁入口，并从本机全局 Harness 默认目录白名单移除 `scripts/`。
