@@ -714,6 +714,34 @@ class TestXmlLegalRecordDialects:
         ]
         assert "Section 101 of the Act is amended." in records[0]["text"]
 
+    def test_uslm_bill_without_doc_title_prefers_long_title_over_dc_title(self) -> None:
+        sample = b"""<?xml version="1.0" encoding="UTF-8"?>
+<bill xmlns="http://schemas.gpo.gov/xml/uslm" identifier="/us/bill/118/hr/1">
+  <meta>
+    <dcTitle>118 HR 1 IH</dcTitle>
+    <docNumber>1</docNumber>
+  </meta>
+  <preface>
+    <longTitle>Clean Air Act</longTitle>
+  </preface>
+  <main>
+    <section><num>1.</num><content>Body text.</content></section>
+  </main>
+</bill>
+"""
+        url = "https://govinfo.example.gov/bulkdata/BILLS/118/1/hr/BILLS-118hr1ih.xml"
+        records, _ = _xml_records(sample, url)
+        assert [_projection(r) for r in records] == [
+            _expected(
+                external_key="/us/bill/118/hr/1",
+                title="Clean Air Act",
+                doc_number="1",
+                doc_type="法律法规",
+                detail_url=url,
+            )
+        ]
+        assert "# Clean Air Act" in records[0]["text"]
+
     def test_german_norm_collection_keys_on_root_document_number(self) -> None:
         url = "https://gesetze.example.de/bgb/xml.zip"
         records, _ = _xml_records(DE_NORM_XML, url)
@@ -1220,6 +1248,147 @@ class TestJsonLegalRecordSchemas:
         ]
         assert records[0]["text"].startswith("Section 1.")
 
+    def test_opencaselaw_decisions_container_routes_records_without_decision_id_or_docket_number(
+        self,
+    ) -> None:
+        url = "https://example.gov/api/decisions"
+        payload = {
+            "decisions": [
+                {
+                    "id": "dec-1",
+                    "title": "Judgment One",
+                    "case_number": "A-1",
+                    "court": "Supreme Court",
+                    "date": "2026-01-01",
+                    "text": "Full judgment body.",
+                    "source_url": "https://example.gov/case/1",
+                }
+            ]
+        }
+        records, _ = _json_records(payload, url)
+        assert [_projection(r) for r in records] == [
+            _expected(
+                namespace="opencaselaw/decision",
+                external_key="dec-1",
+                title="Judgment One",
+                doc_number="A-1",
+                issuer="Supreme Court",
+                published_at="2026-01-01",
+                doc_type="案例",
+                detail_url="https://example.gov/case/1",
+                downloads=[],
+            )
+        ]
+        assert records[0]["text"] == "Full judgment body."
+
+    def test_juriscraper_cases_container_routes_records_with_name_and_nested_opinions(
+        self,
+    ) -> None:
+        url = "https://courts.example.gov/api/cases"
+        payload = {
+            "cases": [
+                {
+                    "name": "State v. Miller",
+                    "docket_number": "A-1",
+                    "opinions": [{"download_url": "https://courts.example.gov/a.pdf"}],
+                }
+            ]
+        }
+        records, _ = _json_records(payload, url)
+        assert [_projection(r) for r in records] == [
+            _expected(
+                namespace="juriscraper/opinion",
+                external_key="A-1",
+                title="State v. Miller",
+                doc_number="A-1",
+                doc_type="案例",
+                detail_url=url,
+                downloads=[{"url": "https://courts.example.gov/a.pdf"}],
+            )
+        ]
+
+    def test_generic_records_with_non_oldp_model_or_scalar_fields_stay_worldwidelaw_documents(
+        self,
+    ) -> None:
+        url = "https://laws.example.org/export/records.json"
+        payload = {
+            "records": [
+                {
+                    "id": "law-1",
+                    "model": "legislation",
+                    "title": "Clean Air Act",
+                    "text": "Article 1. Rules apply.",
+                    "url": "https://laws.example.org/law/1",
+                },
+                {
+                    "id": "law-2",
+                    "fields": ["title", "text"],
+                    "title": "Water Act",
+                    "text": "Article 1. Water rules apply.",
+                    "url": "https://laws.example.org/law/2",
+                },
+            ]
+        }
+        records, _ = _json_records(payload, url)
+        assert [_projection(r) for r in records] == [
+            _expected(
+                namespace="worldwidelaw/document",
+                external_key="law-1",
+                title="Clean Air Act",
+                detail_url="https://laws.example.org/law/1",
+                downloads=[],
+            ),
+            _expected(
+                namespace="worldwidelaw/document",
+                external_key="law-2",
+                title="Water Act",
+                detail_url="https://laws.example.org/law/2",
+                downloads=[],
+            ),
+        ]
+
+    def test_worldwidelaw_detail_url_template_precedes_number_and_attachment_for_external_key(
+        self,
+    ) -> None:
+        url = "https://laws.example.org/api/v1/laws"
+        payload = {
+            "items": [
+                {
+                    "slug": "clean-air",
+                    "title": "Clean Air Act",
+                    "number": "No. 1/2020",
+                    "text": "Article 1. Clean air rules.",
+                },
+                {
+                    "slug": "water-act",
+                    "title": "Water Act",
+                    "pdf_url": "https://laws.example.org/files/water.pdf",
+                },
+            ]
+        }
+        records, _ = _json_records(
+            payload,
+            url,
+            options={"detail_url_template": "https://laws.example.org/laws/{slug}"},
+        )
+        assert [_projection(r) for r in records] == [
+            _expected(
+                namespace="worldwidelaw/document",
+                external_key="https://laws.example.org/laws/clean-air",
+                title="Clean Air Act",
+                doc_number="No. 1/2020",
+                detail_url="https://laws.example.org/laws/clean-air",
+                downloads=[],
+            ),
+            _expected(
+                namespace="worldwidelaw/document",
+                external_key="https://laws.example.org/laws/water-act",
+                title="Water Act",
+                detail_url="https://laws.example.org/laws/water-act",
+                downloads=[{"url": "https://laws.example.org/files/water.pdf"}],
+            ),
+        ]
+
 
 # --------------------------------------------------------------------------------------------
 # Characterization: e-Gov v2 JSON envelopes (shared by XmlParser and JsonParser)
@@ -1416,6 +1585,61 @@ class TestXmlSchemaSpecTable:
 
         assert callable(extract_xml_records)
 
+    def test_custom_declarative_xml_schema_spec_evaluates_without_code_branches(
+        self,
+    ) -> None:
+        from wlh.processor.parsers.xml.schemas import (
+            XML_SCHEMA_SPECS,
+            XmlSchemaSpec,
+            extract_xml_records,
+            match_xml_schema,
+        )
+
+        custom_spec = XmlSchemaSpec(
+            name="custom_decree_xml",
+            root_tags=("DecreePackage",),
+            record_xpath='.//*[local-name()="Decree"]',
+            fields={
+                "title": ("Heading",),
+                "doc_number": ("DecreeNo",),
+                "external_key": ("@id", "$doc_number"),
+                "published_at": ("IssuedDate",),
+                "issuer": ("Ministry",),
+            },
+        )
+        custom_specs = (custom_spec, *XML_SCHEMA_SPECS)
+
+        raw = (
+            b"<DecreePackage>"
+            b'<Decree id="DEC-2026-01">'
+            b"<Heading>Custom Maritime Decree</Heading>"
+            b"<DecreeNo>No. 1/2026</DecreeNo>"
+            b"<IssuedDate>2026-03-01</IssuedDate>"
+            b"<Ministry>Ministry of Transport</Ministry>"
+            b"<Body><P>Article 1. Safety rules.</P></Body>"
+            b"</Decree>"
+            b"</DecreePackage>"
+        )
+        root = _root(raw)
+        matched = match_xml_schema(root, specs=custom_specs)
+        assert matched == custom_spec
+
+        records, truncated = extract_xml_records(
+            root,
+            _acquisition("https://example.gov/decrees.xml"),
+            raw_bytes=raw,
+            specs=custom_specs,
+        )
+        assert truncated is None
+        assert len(records) == 1
+        rec = records[0]
+        assert rec["external_key"] == "DEC-2026-01"
+        assert rec["title"] == "Custom Maritime Decree"
+        assert rec["doc_number"] == "No. 1/2026"
+        assert rec["published_at"] == "2026-03-01"
+        assert rec["issuer"] == "Ministry of Transport"
+        assert "Safety rules." in rec["text"]
+
 
 class TestJsonSchemaSpecTable:
     def test_schema_table_declares_exactly_the_five_dataset_schemas(self) -> None:
@@ -1464,6 +1688,71 @@ class TestJsonSchemaSpecTable:
             "_worldwidelaw_records",
         )
         assert [name for name in legacy if hasattr(JsonParser, name)] == []
+
+    def test_custom_declarative_json_schema_spec_evaluates_without_code_branches(
+        self,
+    ) -> None:
+        from wlh.processor.parsers.json.schemas import (
+            JSON_SCHEMA_SPECS,
+            JsonSchemaSpec,
+            extract_json_records,
+            match_json_schema,
+        )
+
+        custom_spec = JsonSchemaSpec(
+            name="custom_gazette_json",
+            namespace="custom/gazette",
+            default_doc_type="政策文件",
+            fingerprint_keys=("gazette_uid",),
+            container_keys=("directives",),
+            fields={
+                "external_key": ("gazette_uid",),
+                "title": ("subject",),
+                "doc_number": ("directive_no",),
+                "issuer": ("agency.name",),
+                "published_at": ("pub_date",),
+                "detail_url": ("permalink",),
+                "text": ("body_text",),
+            },
+        )
+        custom_specs = (custom_spec, *JSON_SCHEMA_SPECS)
+
+        matched = match_json_schema(
+            {"gazette_uid": "GZ-99", "subject": "Energy Directive"},
+            specs=custom_specs,
+        )
+        assert matched == custom_spec
+
+        payload = {
+            "directives": [
+                {
+                    "gazette_uid": "GZ-99",
+                    "subject": "Energy Directive",
+                    "directive_no": "D-99",
+                    "agency": {"name": "Energy Board"},
+                    "pub_date": "2026-04-10",
+                    "permalink": "https://example.gov/gz/99",
+                    "body_text": "Section 1. Grid reliability.",
+                }
+            ]
+        }
+        records, truncated = extract_json_records(
+            payload,
+            _acquisition("https://example.gov/api/directives"),
+            specs=custom_specs,
+        )
+        assert truncated is None
+        assert len(records) == 1
+        rec = records[0]
+        assert rec["namespace"] == "custom/gazette"
+        assert rec["external_key"] == "GZ-99"
+        assert rec["title"] == "Energy Directive"
+        assert rec["doc_number"] == "D-99"
+        assert rec["issuer"] == "Energy Board"
+        assert rec["published_at"] == "2026-04-10"
+        assert rec["doc_type"] == "政策文件"
+        assert rec["detail_url"] == "https://example.gov/gz/99"
+        assert "Grid reliability." in rec["text"]
 
 
 class TestJapanEnvelopeHelpers:

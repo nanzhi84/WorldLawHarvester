@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 from urllib.parse import urljoin
@@ -38,6 +38,10 @@ def _empty_fields() -> dict[str, tuple[str, ...]]:
     return {}
 
 
+def _empty_str_map() -> dict[str, str]:
+    return {}
+
+
 @dataclass(frozen=True, slots=True)
 class XmlSchemaSpec:
     """Declarative specification for one legal or judicial XML dialect."""
@@ -45,11 +49,28 @@ class XmlSchemaSpec:
     name: str
     root_tags: tuple[str, ...] = ()
     namespace_substrings: tuple[str, ...] = ()
+    required_xpath: str | None = None
+    fallback_xpath: str | None = None
     record_xpath: str | None = None
+    fallback_root_as_record: bool = True
+    accept_extra_blobs: bool = False
+    enforce_budget_limit: bool = False
+    skip_incomplete_records: bool = False
     default_namespace: str = "legislative-xml"
+    include_namespace: bool = False
+    include_detail_url: bool = True
     default_doc_type: str | None = "法律法规"
+    doc_type_xpaths: Mapping[str, str] = field(default_factory=_empty_str_map)
     default_issuer: str | None = None
+    field_order: tuple[str, ...] = (
+        "doc_number",
+        "title",
+        "external_key",
+        "published_at",
+        "issuer",
+    )
     fields: Mapping[str, tuple[str, ...]] = field(default_factory=_empty_fields)
+    node_enricher: Callable[[Any], Mapping[str, str | None]] | None = None
     markdown_dialect: Literal["legal_xml", "dokument", "gazette"] = "legal_xml"
 
 
@@ -58,7 +79,10 @@ XML_SCHEMA_SPECS: tuple[XmlSchemaSpec, ...] = (
         name="de_dokument",
         root_tags=("dokument",),
         default_namespace="oldp/case",
+        include_namespace=True,
+        include_detail_url=False,
         default_doc_type="案例",
+        field_order=("doc_number", "external_key", "title", "published_at", "issuer"),
         fields={
             "external_key": (".//ecli/text()", ".//doknr/text()", "$doc_number"),
             "doc_number": (".//aktenzeichen/text()", ".//az/text()"),
@@ -73,6 +97,9 @@ XML_SCHEMA_SPECS: tuple[XmlSchemaSpec, ...] = (
         root_tags=("akomaNtoso", "judgment"),
         namespace_substrings=("/akn/3.0",),
         default_doc_type="法律法规",
+        doc_type_xpaths={
+            'self::*[local-name()="judgment"] | .//*[local-name()="judgment"]': "案例"
+        },
         fields={
             "doc_number": (
                 "neutralCitation",
@@ -82,9 +109,17 @@ XML_SCHEMA_SPECS: tuple[XmlSchemaSpec, ...] = (
                 "docketNumber",
             ),
             "title": ("docTitle", "shortTitle", "longTitle", "FRBRname@value"),
-            "external_key": ("FRBRuri@value", "$doc_number"),
+            "external_key": (
+                "FRBRuri@value!/id",
+                "neutralCitation",
+                "cite",
+                "docNumber",
+                "FRBRnumber@value",
+                "$actual_url",
+                "$doc_number",
+            ),
             "published_at": ("FRBRdate@date",),
-            "issuer": ("FRBRauthor@href", "courtType", "court"),
+            "issuer": ("FRBRauthor@href->showAs", "courtType", "court"),
         },
         markdown_dialect="legal_xml",
     ),
@@ -94,11 +129,17 @@ XML_SCHEMA_SPECS: tuple[XmlSchemaSpec, ...] = (
         namespace_substrings=("uslm",),
         default_doc_type="法律法规",
         fields={
-            "title": ("docTitle", "dcTitle", "title", "officialTitle", "longTitle"),
+            "title": (
+                "docTitle!=an act|joint resolution",
+                "docTitle=an act|joint resolution->dcTitle|title|officialTitle|longTitle",
+                "longTitle",
+                "dcTitle",
+                "title",
+            ),
             "doc_number": ("citableAs", "docNumber", "number", "identifier"),
             "external_key": ("@identifier", "identifier", "$doc_number"),
             "published_at": ("approvedDate", "created", "date@date", "date"),
-            "issuer": ("publisher", "creator"),
+            "issuer": ("publisher", "creator", "@tag=pLaw:United States Congress"),
         },
         markdown_dialect="legal_xml",
     ),
@@ -132,11 +173,12 @@ XML_SCHEMA_SPECS: tuple[XmlSchemaSpec, ...] = (
         ),
         default_doc_type="法律法规",
         default_issuer="Office of the Federal Register (NARA)",
+        field_order=("title", "doc_number", "external_key", "published_at", "issuer"),
         fields={
             "title": ("HEAD", "TITLE"),
             "doc_number": ("@hierarchy_metadata:citation", "@N", "$title"),
             "external_key": ("@hierarchy_metadata:path", "$doc_number"),
-            "published_at": ("AMDDATE", "DATE"),
+            "published_at": ("AMDDATE", "DATE", "$url_date"),
             "issuer": ("AGENCY",),
         },
         markdown_dialect="legal_xml",
@@ -146,6 +188,7 @@ XML_SCHEMA_SPECS: tuple[XmlSchemaSpec, ...] = (
         root_tags=("Statute", "Regulation"),
         default_doc_type="法律法规",
         default_issuer="Department of Justice Canada",
+        field_order=("title", "doc_number", "external_key", "published_at", "issuer"),
         fields={
             "title": ("ShortTitle", "LongTitle", "TitleText"),
             "doc_number": ("ConsolidatedNumber", "InstrumentNumber"),
@@ -157,7 +200,12 @@ XML_SCHEMA_SPECS: tuple[XmlSchemaSpec, ...] = (
     XmlSchemaSpec(
         name="jp_egov_xml",
         root_tags=("Law", "DataRoot"),
-        record_xpath='.//*[local-name()="Law"]',
+        required_xpath=(
+            'self::*[local-name()="LawTitle" and normalize-space()]'
+            ' | .//*[local-name()="LawTitle" and normalize-space()]'
+            ' | .//*[local-name()="LawBody"]'
+        ),
+        record_xpath='self::*[local-name()="Law"] | .//*[local-name()="Law"]',
         default_doc_type=None,
         fields={
             "title": ("LawTitle",),
@@ -170,24 +218,47 @@ XML_SCHEMA_SPECS: tuple[XmlSchemaSpec, ...] = (
     XmlSchemaSpec(
         name="tw_moj_xml",
         root_tags=("MojLawSplit", "Laws", "法規", "法規資料"),
+        fallback_xpath=(
+            'self::*[local-name()="法規名稱" or local-name()="LawName"][normalize-space()]'
+            ' | .//*[local-name()="法規名稱" or local-name()="LawName"][normalize-space()]'
+        ),
         record_xpath='.//*[local-name()="法規" or local-name()="Law"]',
+        fallback_root_as_record=True,
+        enforce_budget_limit=True,
         default_doc_type=None,
+        field_order=("title", "doc_number", "external_key", "published_at", "issuer"),
         fields={
             "title": ("法規名稱", "LawName"),
-            "doc_number": ("法規字號", "LawNo"),
+            "doc_number": ("法規字號", "LawNo", "法規網址?pcode", "LawURL?pcode"),
             "external_key": ("法規網址", "LawURL", "$title"),
             "published_at": ("最新異動日期", "LawModifiedDate", "LawPublishedDate"),
         },
+        node_enricher=resolve_moj_law_dates_and_meta,
         markdown_dialect="legal_xml",
     ),
     XmlSchemaSpec(
         name="tw_gazette_xml",
         root_tags=("Gazette",),
+        fallback_xpath='.//*[local-name()="Record" and *[local-name()="MetaId"]]',
         record_xpath='.//*[local-name()="Record"]',
+        fallback_root_as_record=False,
+        accept_extra_blobs=True,
+        enforce_budget_limit=True,
+        skip_incomplete_records=True,
         default_doc_type=None,
+        doc_type_xpaths={
+            './/*[local-name()="Doc_Style_LName" and normalize-space()="法規"]': "法律法规"
+        },
+        field_order=("title", "doc_number", "external_key", "published_at", "issuer"),
         fields={
-            "title": ("Title", "ThemeSubject", "GazetteId"),
+            "title": (
+                "Title",
+                "ThemeSubject",
+                "GazetteId",
+                "MetaId#template:行政院公報第{value}號",
+            ),
             "doc_number": ("GazetteId", "MetaId"),
+            "external_key": ("MetaId#gazette_url", "GazetteHTML", "$title"),
             "published_at": ("Date_Published", "Date_Created"),
             "issuer": ("PubGovName", "PubGov"),
         },
@@ -195,44 +266,73 @@ XML_SCHEMA_SPECS: tuple[XmlSchemaSpec, ...] = (
     ),
 )
 
-_SCHEMA_BY_NAME: dict[str, XmlSchemaSpec] = {spec.name: spec for spec in XML_SCHEMA_SPECS}
 
-
-def match_xml_schema(root: Any) -> XmlSchemaSpec | None:
+def match_xml_schema(
+    root: Any,
+    *,
+    specs: Sequence[XmlSchemaSpec] = XML_SCHEMA_SPECS,
+) -> XmlSchemaSpec | None:
     """Return the matching ``XmlSchemaSpec`` for an XML element root, or ``None``."""
-    tag = etree.QName(root).localname
-    namespace = etree.QName(root).namespace or ""
-    ns_lower = namespace.lower()
-
-    if tag == "dokument":
-        return _SCHEMA_BY_NAME["de_dokument"]
-    if tag in {"akomaNtoso", "judgment"} or "/akn/3.0" in namespace:
-        return _SCHEMA_BY_NAME["akoma_ntoso"]
-    if "uslm" in ns_lower or tag in {"lawDoc", "bill", "statute", "uscDoc", "pLaw"}:
-        return _SCHEMA_BY_NAME["uslm"]
-    if tag in {"dokumente", "norm"}:
-        return _SCHEMA_BY_NAME["de_norm"]
-    if re.fullmatch(r"DIV[1-9]", tag) or tag in {"ECFR", "DLPSTEXTCLASS"}:
-        return _SCHEMA_BY_NAME["us_ecfr"]
-    if tag in {"Statute", "Regulation"}:
-        return _SCHEMA_BY_NAME["ca_statute"]
-    if tag in {"Law", "DataRoot"} and (
-        select(root, "LawTitle") or root.xpath('.//*[local-name()="LawBody"]')
-    ):
-        return _SCHEMA_BY_NAME["jp_egov_xml"]
-    if tag in {"MojLawSplit", "Laws", "法規", "法規資料"} or select(root, "法規名稱", "LawName"):
-        return _SCHEMA_BY_NAME["tw_moj_xml"]
-    if tag == "Gazette" or bool(
-        root.xpath('.//*[local-name()="Record" and *[local-name()="MetaId"]]')
-    ):
-        return _SCHEMA_BY_NAME["tw_gazette_xml"]
+    qname = etree.QName(root)
+    tag = qname.localname
+    ns_lower = (qname.namespace or "").lower()
+    for spec in specs:
+        matched = tag in spec.root_tags or any(
+            sub.lower() in ns_lower for sub in spec.namespace_substrings
+        )
+        if matched and spec.required_xpath:
+            matched = bool(root.xpath(spec.required_xpath))
+        if not matched and spec.fallback_xpath:
+            matched = bool(root.xpath(spec.fallback_xpath))
+        if matched:
+            return spec
     return None
 
 
-def _eval_rule(node: Any, rule: str, resolved: Mapping[str, str | None]) -> str | None:
+def _deref_author_show_as(node: Any, ref: str | None) -> str | None:
+    if not ref:
+        return None
+    if not ref.startswith("#"):
+        return ref
+    target_id = ref[1:]
+    matches = node.xpath('.//*[@eId=$id or @id=$id or @*[local-name()="eId"]=$id]', id=target_id)
+    if not matches:
+        return None
+    target = matches[0]
+    return (
+        target.get("showAs")
+        or next((v for k, v in target.attrib.items() if k.endswith("}showAs") and v), None)
+        or "".join(target.itertext()).strip()
+        or None
+    )
+
+
+def _eval_era_promulgate_date(node: Any) -> str | None:
+    year_str: str | None = node.get("Year")
+    era = str(node.get("Era") or "")
+    month = node.get("PromulgateMonth")
+    day = node.get("PromulgateDay")
+    if not (year_str and month and day):
+        return None
+    year = int(year_str) + ERA_OFFSETS.get(era, 0)
+    return f"{year:04d}-{int(month):02d}-{int(day):02d}"
+
+
+def _eval_rule(
+    node: Any,
+    rule: str,
+    resolved: Mapping[str, str | None],
+    context: Mapping[str, str | None],
+) -> str | None:
     """Evaluate a single declarative field rule against ``node``."""
+    if rule == "@Era+@Year+@PromulgateMonth+@PromulgateDay":
+        return _eval_era_promulgate_date(node)
     if rule.startswith("$"):
-        return resolved.get(rule[1:])
+        key = rule[1:]
+        return resolved.get(key) or context.get(key)
+    if rule.startswith("@tag="):
+        tag_cond, literal = rule[5:].split(":", 1)
+        return literal if etree.QName(node).localname == tag_cond else None
     if rule.startswith("@hierarchy_metadata:"):
         subkey = rule.split(":", 1)[1]
         meta = json.loads(html.unescape(node.get("hierarchy_metadata") or "{}"))
@@ -249,25 +349,115 @@ def _eval_rule(node: Any, rule: str, resolved: Mapping[str, str | None]) -> str 
         return str(val).strip() if val else None
     if rule.startswith(("./", ".//", "/")):
         return _first_xpath(node, rule)
+    if "->showAs" in rule and "@" in rule:
+        elem_attr = rule.removesuffix("->showAs")
+        elem_name, attr_name = elem_attr.split("@", 1)
+        return _deref_author_show_as(node, select(node, elem_name, attribute=attr_name))
+    if "@" in rule and "!" in rule:
+        elem_attr, bad_suffix = rule.split("!", 1)
+        elem_name, attr_name = elem_attr.split("@", 1)
+        val = select(node, elem_name, attribute=attr_name)
+        return val if val and not val.rstrip("/").endswith(bad_suffix) else None
     if "@" in rule:
         elem_name, attr_name = rule.split("@", 1)
         return select(node, elem_name, attribute=attr_name)
+    if "!=" in rule:
+        elem_name, excluded_raw = rule.split("!=", 1)
+        excluded = {part.strip().lower() for part in excluded_raw.split("|") if part.strip()}
+        val = select(node, elem_name)
+        return val if val and val.strip().lower() not in excluded else None
+    if "=" in rule and "->" in rule:
+        cond_part, fallback_raw = rule.split("->", 1)
+        elem_name, matched_raw = cond_part.split("=", 1)
+        matched = {part.strip().lower() for part in matched_raw.split("|") if part.strip()}
+        val = select(node, elem_name)
+        if not val or val.strip().lower() not in matched:
+            return None
+        fallback_names = [part.strip() for part in fallback_raw.split("|") if part.strip()]
+        return select(node, *fallback_names)
+    if "?" in rule:
+        elem_name, param_name = rule.split("?", 1)
+        val = select(node, elem_name)
+        if not val:
+            return None
+        m_param = re.search(rf"[?&]{re.escape(param_name)}=([A-Za-z0-9]+)", val, re.I)
+        return m_param.group(1) if m_param else None
+    if "#gazette_url" in rule:
+        elem_name = rule.removesuffix("#gazette_url")
+        meta_id = select(node, elem_name)
+        if not meta_id:
+            return None
+        tpl = context.get("detail_url_template")
+        if tpl:
+            return tpl.format(meta_id=meta_id)
+        base_url = context.get("base_acq_url")
+        if base_url:
+            return urljoin(base_url, f"/egFront/detail.do?metaid={meta_id}&log=detailLog")
+        return None
+    if "#template:" in rule:
+        elem_name, tpl_str = rule.split("#template:", 1)
+        val = select(node, elem_name)
+        return tpl_str.format(value=val) if val else None
     return select(node, rule)
 
 
 def _eval_fields(
-    node: Any, spec: XmlSchemaSpec, field_order: Sequence[str]
+    node: Any,
+    spec: XmlSchemaSpec,
+    field_order: Sequence[str],
+    context: Mapping[str, str | None],
 ) -> dict[str, str | None]:
     resolved: dict[str, str | None] = {}
-    for field_name in field_order:
+    ordered_names = list(dict.fromkeys([*field_order, *spec.fields.keys()]))
+    for field_name in ordered_names:
         rules = spec.fields.get(field_name, ())
         val: str | None = None
         for rule in rules:
-            val = _eval_rule(node, rule, resolved)
+            val = _eval_rule(node, rule, resolved, context)
             if val:
                 break
         resolved[field_name] = val
     return resolved
+
+
+def _resolve_doc_type(node: Any, spec: XmlSchemaSpec) -> str | None:
+    for xpath_expr, mapped_type in spec.doc_type_xpaths.items():
+        if node.xpath(xpath_expr):
+            return mapped_type
+    return spec.default_doc_type
+
+
+def _normalize_xml_date(published: str | None, *, strict: bool) -> str | None:
+    if not published:
+        return None
+    m_roc = re.search(
+        r"(?:中華)?民國\s*(\d{1,3})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
+        published,
+    )
+    if m_roc:
+        published = (
+            f"{int(m_roc.group(1)) + 1911:04d}-{int(m_roc.group(2)):02d}-{int(m_roc.group(3)):02d}"
+        )
+    elif re.fullmatch(r"\d{8}", published):
+        published = f"{published[:4]}-{published[4:6]}-{published[6:]}"
+    elif re.match(r"^\d{4}-\d{2}-\d{2}", published):
+        published = published[:10]
+    return _record_day(published) if strict else published
+
+
+def _render_xml_markdown(node: Any, spec: XmlSchemaSpec, *, key: str, title: str) -> str:
+    if spec.markdown_dialect == "dokument":
+        return dokument_xml_to_markdown(node)
+    if spec.markdown_dialect == "gazette":
+        html_content = select(node, "HTMLContent")
+        if html_content:
+            return gazette_html_to_markdown(
+                html_content,
+                key,
+                fallback_parts=(select(node, "ThemeSubject"), select(node, "Explain")),
+                title=title,
+            )
+    return markdown(node, title=title)
 
 
 def extract_xml_records(
@@ -279,214 +469,16 @@ def extract_xml_records(
     extra_xml_blobs: Sequence[bytes] = (),
     doc_budget: int = 25,
     detail_url_template: str = "",
+    specs: Sequence[XmlSchemaSpec] = XML_SCHEMA_SPECS,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Evaluate ``root`` against ``XML_SCHEMA_SPECS`` and return ``(records, truncated)``."""
-    spec = match_xml_schema(root)
+    spec = match_xml_schema(root, specs=specs)
     if spec is None:
         raise WlhError("unsupported_legal_xml_vocabulary")
 
-    tag = etree.QName(root).localname
-    truncated: str | None = None
-    total_nodes = 1
-    moj_meta_by_node: dict[int, dict[str, str | None]] = {}
-
-    if spec.name == "de_dokument":
-        vals = _eval_fields(
-            root, spec, ("doc_number", "external_key", "title", "published_at", "issuer")
-        )
-        published = vals["published_at"]
-        if published and re.fullmatch(r"\d{8}", published):
-            published = f"{published[:4]}-{published[4:6]}-{published[6:]}"
-        return (
-            [
-                {
-                    "namespace": spec.default_namespace,
-                    "external_key": vals["external_key"] or vals["doc_number"],
-                    "title": vals["title"],
-                    "doc_number": vals["doc_number"],
-                    "issuer": vals["issuer"],
-                    "published_at": _record_day(published),
-                    "doc_type": spec.default_doc_type,
-                    "text": dokument_xml_to_markdown(root),
-                    "original": (
-                        {
-                            "ref": acquisition["archive_ref"],
-                            "kind": "zip",
-                            "byte_size": len(raw_bytes),
-                        }
-                        if zipped
-                        else None
-                    ),
-                }
-            ],
-            None,
-        )
-
-    entries: list[
-        tuple[Any, str | None, str | None, str | None, str | None, str | None, str | None]
-    ] = []
-
-    if spec.name == "akoma_ntoso":
-        is_judgment = tag == "judgment" or bool(root.xpath(".//*[local-name()='judgment']"))
-        cite_num = select(root, "neutralCitation", "cite", "docNumber") or select(
-            root, "FRBRnumber", attribute="value"
-        )
-        vals = _eval_fields(
-            root, spec, ("doc_number", "title", "external_key", "published_at", "issuer")
-        )
-        number = vals["doc_number"]
-        title = vals["title"]
-        key = select(root, "FRBRuri", attribute="value")
-        if not key or key.rstrip("/").endswith("/id"):
-            key = cite_num or acquisition.get("actual_url")
-        published = vals["published_at"]
-        issuer = select(root, "FRBRauthor", attribute="href")
-        if issuer and issuer.startswith("#"):
-            target_id = issuer[1:]
-            matches = root.xpath(
-                './/*[@eId=$id or @id=$id or @*[local-name()="eId"]=$id]', id=target_id
-            )
-            if matches:
-                node_m = matches[0]
-                issuer = (
-                    node_m.get("showAs")
-                    or next(
-                        (v for k, v in node_m.attrib.items() if k.endswith("}showAs") and v),
-                        None,
-                    )
-                    or "".join(node_m.itertext()).strip()
-                    or None
-                )
-            else:
-                issuer = None
-        issuer = issuer or select(root, "courtType", "court")
-        doc_type: str | None = "案例" if is_judgment else spec.default_doc_type
-        entries = [(root, title, number, key, published, issuer, doc_type)]
-
-    elif spec.name == "uslm":
-        doc_title = select(root, "docTitle")
-        title = (
-            select(root, "dcTitle", "title", "officialTitle", "longTitle")
-            if doc_title and doc_title.strip().lower() in {"an act", "joint resolution"}
-            else (doc_title or select(root, "longTitle", "dcTitle", "title"))
-        )
-        vals = _eval_fields(root, spec, ("doc_number", "external_key", "published_at", "issuer"))
-        number = vals["doc_number"]
-        published = (vals["published_at"] or "")[:10] or None
-        issuer = vals["issuer"] or ("United States Congress" if tag == "pLaw" else None)
-        entries = [
-            (root, title, number, vals["external_key"], published, issuer, spec.default_doc_type)
-        ]
-
-    elif spec.name == "de_norm":
-        vals = _eval_fields(
-            root, spec, ("title", "doc_number", "external_key", "published_at", "issuer")
-        )
-        entries = [
-            (
-                root,
-                vals["title"],
-                vals["doc_number"],
-                vals["external_key"],
-                vals["published_at"],
-                vals["issuer"],
-                spec.default_doc_type,
-            )
-        ]
-
-    elif spec.name == "us_ecfr":
-        vals = _eval_fields(
-            root, spec, ("title", "doc_number", "external_key", "published_at", "issuer")
-        )
-        m_date = re.search(r"/(\d{4}-\d{2}-\d{2})/", str(acquisition.get("actual_url") or ""))
-        published = vals["published_at"] or (m_date.group(1) if m_date else None)
-        issuer = vals["issuer"] or spec.default_issuer
-        entries = [
-            (
-                root,
-                vals["title"],
-                vals["doc_number"],
-                vals["external_key"],
-                published,
-                issuer,
-                spec.default_doc_type,
-            )
-        ]
-
-    elif spec.name == "ca_statute":
-        vals = _eval_fields(root, spec, ("title", "doc_number", "external_key", "published_at"))
-        entries = [
-            (
-                root,
-                vals["title"],
-                vals["doc_number"],
-                vals["external_key"],
-                vals["published_at"],
-                spec.default_issuer,
-                spec.default_doc_type,
-            )
-        ]
-
-    elif spec.name == "jp_egov_xml":
-        laws = (
-            [root] if tag == "Law" else root.xpath(spec.record_xpath or './/*[local-name()="Law"]')
-        )
-        for law in laws:
-            vals = _eval_fields(law, spec, ("title", "doc_number", "external_key"))
-            year: str | None = law.get("Year")
-            era = str(law.get("Era") or "")
-            if year and era in ERA_OFFSETS:
-                year = str(int(year) + ERA_OFFSETS[era])
-            published = (
-                f"{int(year):04d}-{int(law.get('PromulgateMonth')):02d}-{int(law.get('PromulgateDay')):02d}"
-                if year and law.get("PromulgateMonth") and law.get("PromulgateDay")
-                else None
-            )
-            entries.append(
-                (
-                    law,
-                    vals["title"],
-                    vals["doc_number"],
-                    vals["external_key"],
-                    published,
-                    spec.default_issuer,
-                    spec.default_doc_type,
-                )
-            )
-
-    elif spec.name == "tw_moj_xml":
-        nodes = root.xpath(
-            spec.record_xpath or './/*[local-name()="法規" or local-name()="Law"]'
-        ) or [root]
-        total_nodes = len(nodes)
-        if total_nodes > doc_budget:
-            truncated = "document_budget_exceeded"
-            nodes = nodes[:doc_budget]
-        for n in nodes:
-            vals = _eval_fields(n, spec, ("title", "doc_number", "external_key", "published_at"))
-            law_url = select(n, "法規網址", "LawURL")
-            law_no = vals["doc_number"]
-            if not law_no and law_url:
-                m_pcode = re.search(r"[?&]pcode=([A-Za-z0-9]+)", law_url, re.I)
-                if m_pcode:
-                    law_no = m_pcode.group(1)
-            moj_meta = resolve_moj_law_dates_and_meta(n)
-            moj_meta_by_node[id(n)] = moj_meta
-            entries.append(
-                (
-                    n,
-                    vals["title"],
-                    law_no,
-                    vals["external_key"],
-                    moj_meta["published_at"] or vals["published_at"],
-                    moj_meta["issuer"],
-                    spec.default_doc_type,
-                )
-            )
-
-    elif spec.name == "tw_gazette_xml":
+    roots: list[Any] = [root]
+    if spec.accept_extra_blobs and extra_xml_blobs:
         xml_parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
-        roots: list[Any] = [root]
         for extra_blob in extra_xml_blobs:
             if b"<!ENTITY" in extra_blob.upper():
                 raise WlhError("legal_xml_doctype_rejected")
@@ -494,95 +486,80 @@ def extract_xml_records(
                 roots.append(etree.fromstring(extra_blob, xml_parser))
             except etree.XMLSyntaxError:
                 raise WlhError("legal_xml_invalid") from None
-        nodes = [
-            rec
-            for r_node in roots
-            for rec in r_node.xpath(spec.record_xpath or './/*[local-name()="Record"]')
-        ]
-        total_nodes = len(nodes)
-        if total_nodes > doc_budget:
-            truncated = "document_budget_exceeded"
-            nodes = nodes[:doc_budget]
-        base_acq_url = str(acquisition.get("actual_url") or acquisition.get("request_url") or "")
-        for n in nodes:
-            vals = _eval_fields(n, spec, ("title", "doc_number", "published_at", "issuer"))
-            meta_id = select(n, "MetaId")
-            if meta_id and detail_url_template:
-                rec_url: str | None = detail_url_template.format(meta_id=meta_id)
-            elif meta_id and base_acq_url:
-                rec_url = urljoin(
-                    base_acq_url, f"/egFront/detail.do?metaid={meta_id}&log=detailLog"
-                )
-            else:
-                rec_url = select(n, "GazetteHTML")
-            doc_style = select(n, "Doc_Style_LName")
-            rec_title = vals["title"] or (f"行政院公報第{meta_id}號" if meta_id else None)
-            if not rec_title or not (rec_url or rec_title):
-                continue
-            entries.append(
-                (
-                    n,
-                    rec_title,
-                    vals["doc_number"],
-                    rec_url or rec_title,
-                    vals["published_at"],
-                    vals["issuer"],
-                    "法律法规" if doc_style == "法規" else None,
-                )
-            )
+
+    if spec.record_xpath:
+        nodes = [rec for r_node in roots for rec in r_node.xpath(spec.record_xpath)]
+        if not nodes and spec.fallback_root_as_record:
+            nodes = [root]
+    else:
+        nodes = [root]
+
+    truncated: str | None = None
+    total_nodes = len(nodes)
+    if spec.enforce_budget_limit and total_nodes > doc_budget:
+        truncated = "document_budget_exceeded"
+        nodes = nodes[:doc_budget]
+
+    actual_url = acquisition.get("actual_url")
+    base_acq_url = str(actual_url or acquisition.get("request_url") or "")
+    m_url_date = re.search(r"/(\d{4}-\d{2}-\d{2})/", str(actual_url or ""))
+    context: dict[str, str | None] = {
+        "actual_url": str(actual_url) if actual_url else None,
+        "base_acq_url": base_acq_url or None,
+        "detail_url_template": detail_url_template or None,
+        "url_date": m_url_date.group(1) if m_url_date else None,
+    }
 
     result: list[dict[str, Any]] = []
-    for node, title, number, key, published, issuer, doc_type in entries:
+    for node in nodes:
+        vals = _eval_fields(node, spec, spec.field_order, context)
+        extra = dict(spec.node_enricher(node)) if spec.node_enricher is not None else {}
+
+        title = vals.get("title")
+        number = vals.get("doc_number")
+        key = vals.get("external_key") or number
+        published = extra.get("published_at") or vals.get("published_at")
+        issuer = extra.get("issuer") or vals.get("issuer") or spec.default_issuer
+        doc_type = _resolve_doc_type(node, spec)
+
         if not title or not key:
+            if spec.skip_incomplete_records:
+                continue
             raise WlhError("legal_xml_identity_missing")
-        if published:
-            m_roc = re.search(
-                r"(?:中華)?民國\s*(\d{1,3})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
-                published,
-            )
-            if m_roc:
-                published = (
-                    f"{int(m_roc.group(1)) + 1911:04d}-"
-                    f"{int(m_roc.group(2)):02d}-"
-                    f"{int(m_roc.group(3)):02d}"
-                )
-            elif re.fullmatch(r"\d{8}", published):
-                published = f"{published[:4]}-{published[4:6]}-{published[6:]}"
-        html_content = select(node, "HTMLContent") if spec.markdown_dialect == "gazette" else None
-        if html_content:
-            text_body = gazette_html_to_markdown(
-                html_content,
-                key,
-                fallback_parts=(select(node, "ThemeSubject"), select(node, "Explain")),
-                title=title,
-            )
-        else:
-            text_body = markdown(node, title=title)
-        moj_extra = moj_meta_by_node.get(id(node)) or {}
-        result.append(
+
+        published = _normalize_xml_date(published, strict=not spec.include_detail_url)
+        text_body = _render_xml_markdown(node, spec, key=key, title=title)
+        original = (
             {
-                "external_key": key,
-                "title": title,
-                "doc_number": number,
-                "published_at": published,
-                "effective_at": moj_extra.get("effective_at"),
-                "expired_at": moj_extra.get("expired_at"),
-                "status": moj_extra.get("status"),
-                "issuer": issuer,
-                "doc_type": doc_type,
-                "text": text_body,
-                "detail_url": acquisition["actual_url"],
-                "original": (
-                    {
-                        "ref": acquisition["archive_ref"],
-                        "kind": "zip",
-                        "byte_size": len(raw_bytes),
-                    }
-                    if zipped and total_nodes == 1
-                    else None
-                ),
+                "ref": acquisition["archive_ref"],
+                "kind": "zip",
+                "byte_size": len(raw_bytes),
             }
+            if zipped and total_nodes == 1
+            else None
         )
+        record: dict[str, Any] = {
+            **({"namespace": spec.default_namespace} if spec.include_namespace else {}),
+            "external_key": key,
+            "title": title,
+            "doc_number": number,
+            "published_at": published,
+            **(
+                {
+                    "effective_at": extra.get("effective_at"),
+                    "expired_at": extra.get("expired_at"),
+                    "status": extra.get("status"),
+                }
+                if spec.include_detail_url
+                else {}
+            ),
+            "issuer": issuer,
+            "doc_type": doc_type,
+            "text": text_body,
+            **({"detail_url": actual_url} if spec.include_detail_url else {}),
+            "original": original,
+        }
+        result.append(record)
     return result, truncated
 
 
